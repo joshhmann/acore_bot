@@ -1,0 +1,20 @@
+{
+  "history": {
+    "1412281888005160980": [
+      {
+        "role": "user",
+        "content": "hello"
+      },
+      {
+        "role": "assistant",
+        "content": "Greetings! How can I help you with your leveling on Asslorde today? Do you have a specific quest you're stuck on, or are you just looking for general advice?"
+      }
+    ]
+  },
+  "personas": {},
+  "settings": {
+    "auto_reply": {
+      "1290178407669170186": true
+    }
+  }
+}

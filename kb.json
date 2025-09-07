@@ -1,0 +1,98 @@
+[
+  {
+    "id": "realmlist",
+    "title": "Set your realmlist (WoW 3.3.5a)",
+    "tags": ["connect", "login", "wotlk", "3.3.5a"],
+    "text": "To connect to this server, set your realmlist:\nWindows: edit Data/enUS/realmlist.wtf and set: set realmlist logon.yourserver.com\nmacOS/Linux (Wine): similarly edit realmlist.wtf\nThen start the WoW 3.3.5a client and log in with your account."
+  },
+  {
+    "id": "addons",
+    "title": "Addons folder (WoW 3.3.5a)",
+    "tags": ["interface", "mods", "wotlk"],
+    "text": "Install addons by extracting them to: Interface/AddOns.\nExample path (Windows): C:/World of Warcraft 3.3.5a/Interface/AddOns\nRestart the game and enable addons at the character select screen."
+  },
+  {
+    "id": "cache_reset",
+    "title": "Clear Cache to fix launcher or login issues",
+    "tags": ["cache", "issues", "fix", "login"],
+    "text": "If you have trouble logging in or seeing servers, close the game and delete the Cache folder in your WoW directory. Then relaunch."
+  },
+  {
+    "id": "macros",
+    "title": "Useful macros (focus, target, cast)",
+    "tags": ["macro", "combat", "pvp"],
+    "text": "Example focus macro:\n/focus\n/cast [@focus,exists] Polymorph\n\nMouseover cast:\n/cast [@mouseover,harm,nodead][] Shadow Bolt\n\nReplace spells to fit your class."
+  },
+  {
+    "id": "leveling_tips",
+    "title": "Efficient leveling tips (WoW 3.3.5a)",
+    "tags": ["leveling", "xp", "questing", "dungeons"],
+    "text": "1. Use quest helper addons like QuestHelper or Carbonite for optimal routes\n2. Kill mobs while traveling between quest objectives for extra XP\n3. Rest at inns or cities to accumulate rested XP (doubles XP gains)\n4. Alternate between questing and dungeon runs for bonus experience\n5. Follow zone progression by level: don't stay in low-level zones too long"
+  },
+  {
+    "id": "professions_guide",
+    "title": "Best professions for WoW 3.3.5a",
+    "tags": ["professions", "crafting", "gold", "pve", "pvp"],
+    "text": "PvE Best: Engineering + Jewelcrafting (utility + stat gems)\nPvP Best: Engineering + Jewelcrafting (versatility)\nTanks: Blacksmithing + Jewelcrafting\nGold Making: Mining + Herbalism or Skinning (high demand materials)\nTailoring: Provides Lightweave Embroidery cloak enchant (caster DPS)"
+  },
+  {
+    "id": "dungeons_raids_list",
+    "title": "WotLK dungeons and raids by level",
+    "tags": ["dungeons", "raids", "pve", "level"],
+    "text": "Dungeons by level:\n• Utgarde Keep (69-72)\n• The Nexus (71-73)\n• Ahn'kahet (73-75)\n• Violet Hold (75-77)\n• Halls of Lightning (80)\n• Utgarde Pinnacle (80)\n\nRaids (Level 80):\n• Naxxramas (10/25)\n• Icecrown Citadel (10/25)\n• Ulduar (10/25)\n• Trial of the Crusader (10/25)"
+  },
+  {
+    "id": "talent_builds",
+    "title": "Talent build resources",
+    "tags": ["talents", "builds", "specs", "calculator"],
+    "text": "Use talent calculators for optimal builds:\n• Icy-veins.com/wotlk-classic/talent-calculator\n• WotLKDB.com talent calculator\n• Class-specific guides at mesorchoo.com\n\nGeneral tips:\n• Cookie-cutter builds for raids vs specialized leveling builds\n• Major glyphs are crucial for performance\n• Save talent reset costs by planning ahead"
+  },
+  {
+    "id": "gold_farming",
+    "title": "Gold farming methods (WoW 3.3.5a)",
+    "tags": ["gold", "farming", "economy", "dungeons"],
+    "text": "Efficient gold farms:\n• Solo classic dungeons (Maraudon for Mithril)\n• Farm high-value crafting materials\n• Auction House trading of in-demand items\n• Daily quests at max level\n• Rare mob farming for valuable drops\n• Profession crafting and selling"
+  },
+  {
+    "id": "essential_addons",
+    "title": "Essential addons for WoW 3.3.5a",
+    "tags": ["addons", "interface", "essential", "raids"],
+    "text": "Must-have addons:\n• Deadly Boss Mods (DBM) - raid encounter alerts\n• Details!/Recount - damage meters\n• GearScore Lite - gear evaluation\n• AtlasLoot Enhanced - loot tables\n• Bagnon - inventory management\n• WeakAuras - custom UI alerts\n• OmniCC - cooldown timers\n• HealBot - healing interface (healers)"
+  },
+  {
+    "id": "keybinds_setup",
+    "title": "Keybinding best practices",
+    "tags": ["keybinds", "controls", "performance", "pvp"],
+    "text": "Keybinding hierarchy:\n1. Bind WASD for movement (unbind A/D turning, set to strafe)\n2. S-tier: 1-4, Q, E, R, F (rotational abilities)\n3. A-tier: 5, T, G, Z, X, C, V (situational abilities)\n4. Use Shift/Ctrl modifiers for similar abilities\n5. Keep interrupt/defensive abilities easily accessible\n6. Bind all combat abilities - no clicking in combat"
+  },
+  {
+    "id": "gear_score_guide",
+    "title": "Gear Score requirements and tips",
+    "tags": ["gearscore", "gear", "raids", "heroics"],
+    "text": "Gear Score benchmarks:\n• 3000+ for heroic dungeons\n• 3600+ for most pugs\n• 4200+ for current tier raids\n• 5000+ for hard mode content\n\nQuick GS boost:\n• Prioritize epic items over blues\n• Focus on weapons, chest, helm, legs (highest multipliers)\n• PvP gear for fast epic upgrades\n• Auction house BoE epics\n• Daily heroic for emblems"
+  },
+  {
+    "id": "mount_farming",
+    "title": "Mount collection guide (WoW 3.3.5a)",
+    "tags": ["mounts", "collection", "reputation", "achievements"],
+    "text": "Easy mounts to obtain:\n• Bronze Drake - Culling of Stratholme (timed run)\n• Armored Brown Bear - Dalaran vendor\n• Red Drake - Wyrmrest Accord exalted\n• Faction mounts - tabard reputation farming\n• AQ40 bug mounts (count toward achievements)\n• Netherwing Drakes - egg farming in Outland\n• Sons of Hodir - mammoths (long quest chain required)"
+  },
+  {
+    "id": "reputation_farming",
+    "title": "Reputation farming strategies",
+    "tags": ["reputation", "factions", "tabards", "dungeons"],
+    "text": "Main WotLK factions (tabard farming):\n• Wyrmrest Accord - Red Drake mount\n• Kirin Tor - faction gear discounts\n• Argent Crusade - profession patterns\n• Knights of the Ebon Blade - faction rewards\n\nFarming method:\n1. Get friendly with faction (do quests)\n2. Buy faction tabard\n3. Run level 80 normal dungeons or any heroics\n4. Reputation gains from all mob kills while wearing tabard"
+  },
+  {
+    "id": "fresh_80_gearing",
+    "title": "Fresh level 80 gearing path",
+    "tags": ["gearing", "level80", "heroics", "emblems"],
+    "text": "Gearing priority for fresh 80:\n1. Replace all green/blue quest gear\n2. Run normal 80 dungeons for starter epics\n3. Daily heroic quest (5 Emblems of Conquest)\n4. Normal daily quest (2 Emblems of Valor)\n5. Buy 213 ilvl gear with emblems\n6. Start Naxx 10/25 for tier gear\n7. Save up for 226+ weapons (highest GS impact)\n\nMinimum 3000 GS needed for heroics."
+  },
+  {
+    "id": "class_resources",
+    "title": "Class guides and resources",
+    "tags": ["classes", "guides", "rotations", "specs"],
+    "text": "Comprehensive class guides available at:\n• Icy-veins.com - talent builds and rotations\n• Mesorchoo.com - spec-specific guides\n• Warcrafttavern.com - detailed class guides\n\nEach guide covers:\n• Optimal talent builds for different content\n• Stat priorities and gear recommendations\n• Rotation and spell priorities\n• Glyph selections\n• Best-in-slot gear lists"
+  }
+]
