@@ -431,8 +431,6 @@ class Bot(discord.Client):
         self._docs: list[dict] = []
         # History file path
         self._history_file: str = CHAT_HISTORY_FILE
-        # Metrics buffer (lightweight)
-        self._metrics: list[dict] = []
         # RAG enable override per guild
         self._rag_override: dict[int, bool] = {}
         # Auto-reply override per guild
@@ -469,12 +467,6 @@ class Bot(discord.Client):
             self._rag.load_all()
         except Exception:
             self._rag = RagStore(KB_FILE, DOCS_DIR)
-        # Load metrics file (optional)
-        if METRICS_ENABLED:
-            try:
-                self._metrics = json_load(METRICS_FILE, []) or []
-            except Exception:
-                self._metrics = []
 
     def _load_info_file(self) -> None:
         path = SERVER_INFO_FILE
@@ -570,13 +562,6 @@ class Bot(discord.Client):
             # do not raise during runtime
             pass
 
-    def _save_metrics(self) -> None:
-        if not METRICS_ENABLED:
-            return
-        try:
-            json_save_atomic(METRICS_FILE, self._metrics)
-        except Exception:
-            pass
 
 
     async def _status_poller(self):
@@ -629,22 +614,7 @@ class Bot(discord.Client):
             except Exception:
                 pass
 
-            # Record metrics sample
-            try:
-                if METRICS_ENABLED:
-                    ts = int(time.time())
-                    sample = {"ts": ts, "online": int(bool(online))}
-                    if isinstance(connected, int):
-                        sample["connected"] = connected
-                    for k in ("update_mean", "update_p95", "update_p99", "update_max"):
-                        if k in parsed:
-                            sample[k] = parsed[k]
-                    self._metrics.append(sample)
-                    cutoff = ts - METRICS_RETENTION_MIN * 60
-                    self._metrics = [s for s in self._metrics if s.get("ts", 0) >= cutoff]
-                    self._save_metrics()
-            except Exception:
-                pass
+            # (metrics collection disabled)
 
             await asyncio.sleep(max(5, STATUS_POLL_SECONDS))
 
@@ -1038,43 +1008,7 @@ async def wowbots(interaction: discord.Interaction):
     text = await get_bots_status()
     await interaction.followup.send(text, ephemeral=True)
 
-@bot.tree.command(name="wowmetrics", description="Show recent server metrics (lightweight, no Grafana)")
-async def wowmetrics(interaction: discord.Interaction):
-    if not require_allowed(interaction):
-        return
-    if not METRICS_ENABLED:
-        return await interaction.response.send_message("Metrics are disabled. Set METRICS_ENABLED=true.", ephemeral=True)
-    try:
-        data = (getattr(bot, "_metrics", None) or [])[-120:]
-        if not data:
-            return await interaction.response.send_message("No metrics collected yet.", ephemeral=True)
-        last = data[-1]
-        now = int(time.time())
-        hour_cut = now - 3600
-        hour = [s for s in data if s.get("ts", 0) >= hour_cut]
-        peak = max((s.get("connected", 0) for s in hour), default=0)
-        mean = last.get("update_mean")
-        p95 = last.get("update_p95")
-        p99 = last.get("update_p99")
-        mx = last.get("update_max")
-        lines = [
-            f"Connected (last): {last.get('connected', 'n/a')}",
-            f"Connected (1h peak): {peak}",
-        ]
-        diffs = []
-        if mean is not None:
-            diffs.append(f"mean {mean}ms")
-        if p95 is not None:
-            diffs.append(f"p95 {p95}ms")
-        if p99 is not None:
-            diffs.append(f"p99 {p99}ms")
-        if mx is not None:
-            diffs.append(f"max {mx}ms")
-        if diffs:
-            lines.append("Update diffs: " + ", ".join(diffs))
-        await interaction.response.send_message("\n".join(lines), ephemeral=True)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ Metrics error: {e}", ephemeral=True)
+# (wowmetrics command removed per configuration)
 
 @bot.tree.command(name="wowreloadinfo", description="Reload server info from file")
 async def wowreloadinfo(interaction: discord.Interaction):

@@ -8,13 +8,14 @@ Simple Discord bot for AzerothCore that uses SOAP to:
 - Show online player count: `/wowonline`
 - Bot presence shows Online/Offline with player count
 - Sends a message when the server goes offline/online
-- Optional Ollama chat command: `/wowask` (local LLM via Ollama)
+ - Unified chat command: `/wowask` (uses configured LLM provider)
 - Optional auto-replies: Respond to chatter in a channel using Ollama
  - Built-in helpful replies: server status, how to connect, register, reset password
  - Vision (optional): Ask about images via `/wowaskimg` or by posting an image (auto-reply)
  - Knowledge base: Search 3.3.5a cheatsheet via `/wowkb` and `/wowkb_show`
   - RAG (optional): Answers use local KB + server info as context
   - Curated docs: Drop `.md`/`.txt` in `docs/`, search via `/wowdocs`
+  - Images (provider-dependent): `/wowimage` (txt2img), `/wowupscale` (upscale)
 
 Requirements
 
@@ -57,6 +58,8 @@ Setup
    RAG_KB_TOPK=3
    RAG_MAX_CHARS=3000
    RAG_DOCS_TOPK=2
+   RAG_MIN_SCORE=10
+   RAG_MAX_CHARS=3000
    # Optional: enable Ollama chat
    OLLAMA_ENABLED=true
    OLLAMA_HOST=http://127.0.0.1:11434
@@ -125,6 +128,8 @@ Slash Commands
  - /wowkb_reload: Reload KB from JSON or YAML.
  - /wowdocs_reload: Reload curated docs from the docs directory.
  - /wowautoreply_on|off|show: Toggle/show auto-replies per server.
+ - /wowimage: Generate an image (if provider supports).
+ - /wowupscale: Upscale an image (if provider supports).
 
 Notes
 
@@ -158,6 +163,25 @@ Curated documents
 - Search: `/wowdocs query:"..."` shows top passages with ids; `/wowdocs_show id:<id>` shows the full passage.
 - Reload docs without restart: `/wowdocs_reload` (Manage Server required).
 - RAG: Top `RAG_DOCS_TOPK` passages are automatically included as additional context when generating answers.
+
+ LLM provider selection
+
+- Choose one provider using env:
+
+  LLM_PROVIDER=ollama  # or arliai
+
+- For Ollama, set `OLLAMA_*` values (host/model, etc.).
+- For Arliai, set:
+
+  ARLIAI_ENABLED=true
+  ARLIAI_API_KEY=your_api_key
+  ARLIAI_BASE_URL=https://api.arliai.com
+  ARLIAI_TEXT_MODEL=TEXT_GENERATION_MODEL
+  ARLIAI_IMAGE_MODEL=IMAGE_GENERATION_MODEL
+
+- Unified commands:
+  - `/wowask` uses the configured provider for text.
+  - `/wowimage` and `/wowupscale` work when the provider supports them (Arliai). If unsupported, the bot replies with a helpful note.
 
 Import Zygor Lua guides (optional)
 

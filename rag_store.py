@@ -146,7 +146,7 @@ class RagStore:
                     })
         self.docs = out
 
-    def search_kb(self, query: str, limit: int = 3) -> List[Dict[str, Any]]:
+    def search_kb(self, query: str, limit: int = 3, return_scores: bool = False):
         q = (query or "").lower().strip()
         if not q:
             return []
@@ -176,9 +176,12 @@ class RagStore:
             if score > 0:
                 scored.append((score, e))
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [e for _, e in scored[:max(1, limit)]]
+        top = scored[:max(1, limit)]
+        if return_scores:
+            return top
+        return [e for _, e in top]
 
-    def search_docs(self, query: str, limit: int = 2) -> List[Dict[str, Any]]:
+    def search_docs(self, query: str, limit: int = 2, return_scores: bool = False):
         q = (query or "").lower().strip()
         if not q:
             return []
@@ -202,4 +205,7 @@ class RagStore:
             if score > 0:
                 scored.append((score, e))
         scored.sort(key=lambda x: x[0], reverse=True)
-        return [e for _, e in scored[:max(1, limit)]]
+        top = scored[:max(1, limit)]
+        if return_scores:
+            return top
+        return [e for _, e in top]
