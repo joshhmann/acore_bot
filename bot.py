@@ -1,5 +1,5 @@
 # bot_modal.py
-import os, re, time, asyncio, base64
+import os, re, time, asyncio, base64, io
 from typing import Optional
 from urllib.parse import urlparse
 import discord
@@ -12,6 +12,8 @@ from utils import json_load, json_save_atomic, chunk_text, send_ephemeral, send_
 from soap import SoapClient
 from ollama import OllamaClient
 from rag_store import RagStore
+from arliai import ArliaiClient
+from ac_db import DBConfig as ACDBConfig, get_online_count as db_get_online_count, get_totals as db_get_totals
 
 load_dotenv()
 
@@ -31,7 +33,7 @@ DOCS_DIR = os.getenv("DOCS_DIR", "docs")
 # Optional: Ollama integration
 OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "false").lower() in {"1","true","yes","on"}
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")
 OLLAMA_AUTO_REPLY = os.getenv("OLLAMA_AUTO_REPLY", "false").lower() in {"1","true","yes","on"}
 OLLAMA_SYSTEM_PROMPT = os.getenv("OLLAMA_SYSTEM_PROMPT", "You are WowSlumsBot, a concise, friendly assistant focused on AzerothCore, World of Warcraft private server operations, and helpful Discord chat. Answer briefly (<= 4 sentences) unless asked for details.")
 OLLAMA_HISTORY_TURNS = int(os.getenv("OLLAMA_HISTORY_TURNS", "50"))
@@ -47,6 +49,27 @@ RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() in {"1","true","yes","on"
 RAG_KB_TOPK = int(os.getenv("RAG_KB_TOPK", "3"))
 RAG_MAX_CHARS = int(os.getenv("RAG_MAX_CHARS", "3000"))
 RAG_DOCS_TOPK = int(os.getenv("RAG_DOCS_TOPK", "2"))
+RAG_MIN_SCORE = int(os.getenv("RAG_MIN_SCORE", "10"))
+RAG_IN_AUTOREPLY = os.getenv("RAG_IN_AUTOREPLY", "false").lower() in {"1","true","yes","on"}
+KB_SUGGEST_IN_CHAT = os.getenv("KB_SUGGEST_IN_CHAT", "false").lower() in {"1","true","yes","on"}
+
+# Arliai (optional)
+ARLIAI_ENABLED = os.getenv("ARLIAI_ENABLED", "false").lower() in {"1","true","yes","on"}
+ARLIAI_API_KEY = os.getenv("ARLIAI_API_KEY", "")
+ARLIAI_TEXT_API_KEY = os.getenv("ARLIAI_TEXT_API_KEY", "")
+ARLIAI_IMAGE_API_KEY = os.getenv("ARLIAI_IMAGE_API_KEY", "")
+ARLIAI_BASE_URL = os.getenv("ARLIAI_BASE_URL", "https://api.arliai.com")
+ARLIAI_TEXT_MODEL = os.getenv("ARLIAI_TEXT_MODEL", "TEXT_GENERATION_MODEL")
+ARLIAI_IMAGE_MODEL = os.getenv("ARLIAI_IMAGE_MODEL", "IMAGE_GENERATION_MODEL")
+
+# Provider-agnostic LLM settings (DRY)
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()  # ollama|arliai
+LLM_TEXT_MODEL = os.getenv("LLM_TEXT_MODEL", "") or (ARLIAI_TEXT_MODEL if LLM_PROVIDER == "arliai" else OLLAMA_MODEL)
+LLM_IMAGE_MODEL = os.getenv("LLM_IMAGE_MODEL", "") or (ARLIAI_IMAGE_MODEL if LLM_PROVIDER == "arliai" else "")
+LLM_HOST = os.getenv("LLM_HOST", "") or (ARLIAI_BASE_URL if LLM_PROVIDER == "arliai" else OLLAMA_HOST)
+LLM_API_KEY = os.getenv("LLM_API_KEY", "") or (ARLIAI_API_KEY if LLM_PROVIDER == "arliai" else "")
+LLM_CONTEXT_TOKENS = int(os.getenv("LLM_CONTEXT_TOKENS", "0"))  # optional hint
+LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", str(OLLAMA_NUM_PREDICT)))
 OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "256"))
 try:
     OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.7"))
@@ -58,6 +81,28 @@ REALMLIST_HOST = os.getenv("REALMLIST_HOST", "set realmlist logon.yourserver.com
 WEBSITE_URL = os.getenv("WEBSITE_URL", "https://yourserver.com")
 DOWNLOAD_URL = os.getenv("DOWNLOAD_URL", "")
 SUPPORT_URL = os.getenv("SUPPORT_URL", "")
+XP_RATE = os.getenv("XP_RATE", "")
+QUEST_XP_RATE = os.getenv("QUEST_XP_RATE", "")
+DROP_RATE = os.getenv("DROP_RATE", "")
+GOLD_RATE = os.getenv("GOLD_RATE", "")
+HONOR_RATE = os.getenv("HONOR_RATE", "")
+REPUTATION_RATE = os.getenv("REPUTATION_RATE", "")
+PROFESSION_RATE = os.getenv("PROFESSION_RATE", "")
+BOTS_SOAP_COMMAND = os.getenv("BOTS_SOAP_COMMAND", "")
+BOTS_PARSE_REGEX = os.getenv("BOTS_PARSE_REGEX", "")
+DB_ENABLED = os.getenv("DB_ENABLED", "false").lower() in {"1","true","yes","on"}
+DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_PORT = int(os.getenv("DB_PORT", "3306"))
+DB_USER = os.getenv("DB_USER", "")
+DB_PASS = os.getenv("DB_PASS", "")
+DB_AUTH_DB = os.getenv("DB_AUTH_DB", "auth")
+DB_CHAR_DB = os.getenv("DB_CHAR_DB", "characters")
+DB_WORLD_DB = os.getenv("DB_WORLD_DB", "world")
+
+def _db_cfg() -> Optional[ACDBConfig]:
+    if not DB_ENABLED or not DB_USER:
+        return None
+    return ACDBConfig(DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_AUTH_DB, DB_CHAR_DB, DB_WORLD_DB)
 
 RATE_SECONDS = 5
 _last_call: dict[int, float] = {}
@@ -157,6 +202,53 @@ def ollama_chat(prompt: str, timeout: float = 15.0, system: Optional[str] = None
 def format_ollama_error(e: Exception) -> str:
     return ollama_client.format_error(e)
 
+arliai_client: Optional[ArliaiClient] = None
+if ARLIAI_ENABLED and (ARLIAI_API_KEY or ARLIAI_TEXT_API_KEY or ARLIAI_IMAGE_API_KEY):
+    try:
+        arliai_client = ArliaiClient(ARLIAI_API_KEY, base_url=ARLIAI_BASE_URL, text_api_key=(ARLIAI_TEXT_API_KEY or ARLIAI_API_KEY), image_api_key=(ARLIAI_IMAGE_API_KEY or ARLIAI_API_KEY))
+    except Exception:
+        arliai_client = None
+
+def llm_available() -> bool:
+    if LLM_PROVIDER == "ollama":
+        return OLLAMA_ENABLED and ollama_available()
+    if LLM_PROVIDER == "arliai":
+        return ARLIAI_ENABLED and bool(arliai_client)
+    return False
+
+def llm_chat(prompt: str, *, system: Optional[str], history: Optional[list[dict]], images: Optional[list[bytes]] = None) -> str:
+    if LLM_PROVIDER == "ollama":
+        return ollama_chat(prompt, 20.0, system, history, images)
+    if LLM_PROVIDER == "arliai":
+        if not arliai_client:
+            raise RuntimeError("Arliai client not available")
+        msgs = []
+        if system:
+            msgs.append({"role": "system", "content": system})
+        if history:
+            for m in history:
+                role = m.get("role")
+                content = m.get("content", "")
+                if role in {"user", "assistant", "system"} and content:
+                    msgs.append({"role": role, "content": content})
+        msgs.append({"role": "user", "content": prompt})
+        data = arliai_client.chat(LLM_TEXT_MODEL or ARLIAI_TEXT_MODEL, msgs, temperature=OLLAMA_TEMPERATURE, max_tokens=OLLAMA_NUM_PREDICT)
+        if isinstance(data, dict):
+            choices = data.get("choices") or []
+            if choices:
+                msg = choices[0].get("message") or {}
+                text = msg.get("content")
+                if text:
+                    return str(text)
+        return str(data)
+    raise RuntimeError(f"Unknown LLM provider: {LLM_PROVIDER}")
+
+def format_llm_error(e: Exception) -> str:
+    if LLM_PROVIDER == "arliai":
+        from arliai import ArliaiClient as _C
+        return _C.format_error(e)
+    return format_ollama_error(e)
+
 class RegisterModal(Modal, title="Create Game Account"):
     username: TextInput = TextInput(label="Username", placeholder="3–16 chars: A–Z a–z 0–9 _ -", min_length=3, max_length=16)
     password: TextInput = TextInput(label="Password", style=discord.TextStyle.paragraph, placeholder="6–32 chars", min_length=6, max_length=32)
@@ -253,6 +345,50 @@ def get_connect_instructions() -> str:
         lines.append(f"- Support: {support}")
     return "\n".join(lines)
 
+def get_rates_lines() -> list[str]:
+    # Prefer server_info.json 'rates' dict if present
+    rates = info_get("rates", {}) or {}
+    lines: list[str] = []
+    def add(k_env: str, label: str):
+        val = rates.get(label.lower()) if isinstance(rates, dict) else None
+        if not val:
+            val = globals().get(k_env, "")
+        if val:
+            lines.append(f"- {label}: {val}")
+    add("XP_RATE", "XP")
+    add("QUEST_XP_RATE", "Quest XP")
+    add("DROP_RATE", "Drop")
+    add("GOLD_RATE", "Gold")
+    add("HONOR_RATE", "Honor")
+    add("REPUTATION_RATE", "Reputation")
+    add("PROFESSION_RATE", "Profession")
+    return lines
+
+_bots_cache: dict[str, tuple[float, str]] = {}
+
+async def get_bots_status() -> str:
+    key = "bots"
+    now = time.time()
+    # 30s cache
+    if key in _bots_cache and (now - _bots_cache[key][0] < 30):
+        return _bots_cache[key][1]
+    if not BOTS_SOAP_COMMAND:
+        return "(no bots command configured)"
+    try:
+        out = await run_soap(BOTS_SOAP_COMMAND)
+        if BOTS_PARSE_REGEX:
+            m = re.search(BOTS_PARSE_REGEX, out, re.I)
+            if m:
+                out_fmt = f"Bots online: {m.group(1)}"
+            else:
+                out_fmt = out.strip()[:200]
+        else:
+            out_fmt = out.strip()[:200]
+        _bots_cache[key] = (now, out_fmt)
+        return out_fmt
+    except Exception as e:
+        return f"(bots query failed: {e})"
+
 def get_help_overview() -> str:
     lines = [
         "Commands:",
@@ -260,6 +396,8 @@ def get_help_overview() -> str:
         "- /wowregister — Create a game account (private modal)",
         "- /wowchangepass — Change a game password (private modal)",
         "- /wowonline — Show online player count",
+        "- /wowrates — Show server rates",
+        "- /wowbots — Show bot status (if configured)",
     ]
     return "\n".join(lines)
 
@@ -287,12 +425,16 @@ class Bot(discord.Client):
         self._system_prompt_override: dict[int, str] = {}
         # Info file data
         self._info: dict = {}
-        # Knowledge base entries
+        # Knowledge base entries (moved to RagStore)
         self._kb: list[dict] = []
-        # Curated documents (chunked)
+        # Curated documents (chunked) (moved to RagStore)
         self._docs: list[dict] = []
         # History file path
         self._history_file: str = CHAT_HISTORY_FILE
+        # Metrics buffer (lightweight)
+        self._metrics: list[dict] = []
+        # RAG enable override per guild
+        self._rag_override: dict[int, bool] = {}
         # Auto-reply override per guild
         self._auto_reply_override: dict[int, bool] = {}
 
@@ -327,6 +469,12 @@ class Bot(discord.Client):
             self._rag.load_all()
         except Exception:
             self._rag = RagStore(KB_FILE, DOCS_DIR)
+        # Load metrics file (optional)
+        if METRICS_ENABLED:
+            try:
+                self._metrics = json_load(METRICS_FILE, []) or []
+            except Exception:
+                self._metrics = []
 
     def _load_info_file(self) -> None:
         path = SERVER_INFO_FILE
@@ -388,6 +536,16 @@ class Bot(discord.Client):
                                 continue
                             if isinstance(v, bool):
                                 self._auto_reply_override[gid] = v
+                    ragen = settings.get("rag_enabled") or {}
+                    if isinstance(ragen, dict):
+                        self._rag_override = {}
+                        for k, v in ragen.items():
+                            try:
+                                gid = int(k)
+                            except Exception:
+                                continue
+                            if isinstance(v, bool):
+                                self._rag_override[gid] = v
         except FileNotFoundError:
             # ignore if not present
             return
@@ -403,12 +561,21 @@ class Bot(discord.Client):
                 "history": {str(k): v for k, v in (self._chat_hist or {}).items()},
                 "personas": {str(k): v for k, v in (self._system_prompt_override or {}).items()},
                 "settings": {
-                    "auto_reply": {str(k): v for k, v in (self._auto_reply_override or {}).items()}
+                    "auto_reply": {str(k): v for k, v in (self._auto_reply_override or {}).items()},
+                    "rag_enabled": {str(k): v for k, v in (self._rag_override or {}).items()},
                 }
             }
             json_save_atomic(path, data)
         except Exception:
             # do not raise during runtime
+            pass
+
+    def _save_metrics(self) -> None:
+        if not METRICS_ENABLED:
+            return
+        try:
+            json_save_atomic(METRICS_FILE, self._metrics)
+        except Exception:
             pass
 
 
@@ -417,11 +584,13 @@ class Bot(discord.Client):
         while not self.is_closed():
             online = False
             connected = None
+            parsed = {}
             try:
                 out = await run_soap(".server info")
                 info = parse_server_info(out)
                 online = True
                 connected = info.get("connected")
+                parsed = info
             except Exception:
                 online = False
 
@@ -460,6 +629,23 @@ class Bot(discord.Client):
             except Exception:
                 pass
 
+            # Record metrics sample
+            try:
+                if METRICS_ENABLED:
+                    ts = int(time.time())
+                    sample = {"ts": ts, "online": int(bool(online))}
+                    if isinstance(connected, int):
+                        sample["connected"] = connected
+                    for k in ("update_mean", "update_p95", "update_p99", "update_max"):
+                        if k in parsed:
+                            sample[k] = parsed[k]
+                    self._metrics.append(sample)
+                    cutoff = ts - METRICS_RETENTION_MIN * 60
+                    self._metrics = [s for s in self._metrics if s.get("ts", 0) >= cutoff]
+                    self._save_metrics()
+            except Exception:
+                pass
+
             await asyncio.sleep(max(5, STATUS_POLL_SECONDS))
 
     async def _get_notify_channel(self) -> Optional[discord.abc.Messageable]:
@@ -494,27 +680,36 @@ class Bot(discord.Client):
             return bool(self._auto_reply_override[guild_id])
         return bool(OLLAMA_AUTO_REPLY)
 
+    def _rag_enabled(self, guild_id: Optional[int]) -> bool:
+        if guild_id and guild_id in self._rag_override:
+            return bool(self._rag_override[guild_id])
+        return bool(RAG_IN_AUTOREPLY)
+
     def _build_rag_system(self, query: str, guild_id: Optional[int]) -> str:
         base = self._get_system_prompt(guild_id)
         if not RAG_ENABLED:
             return base
         pieces: list[str] = []
-        # KB hits
+        # KB hits (with score threshold)
         try:
             if getattr(self, "_rag", None) and self._rag.kb and query:
-                hits = self._rag.search_kb(query, limit=max(1, RAG_KB_TOPK))
-                for h in hits:
+                scored = self._rag.search_kb(query, limit=max(1, RAG_KB_TOPK), return_scores=True)
+                for score, h in scored:
+                    if score < RAG_MIN_SCORE:
+                        continue
                     title = h.get("title", "")
                     text = (h.get("text", "") or "").strip()
                     if text:
                         pieces.append(f"KB: {title}\n{text}")
         except Exception:
             pass
-        # Curated docs hits
+        # Curated docs hits (with score threshold)
         try:
             if getattr(self, "_rag", None) and self._rag.docs and query and RAG_DOCS_TOPK > 0:
-                hits = self._rag.search_docs(query, limit=RAG_DOCS_TOPK)
-                for h in hits:
+                scored = self._rag.search_docs(query, limit=RAG_DOCS_TOPK, return_scores=True)
+                for score, h in scored:
+                    if score < RAG_MIN_SCORE:
+                        continue
                     title = h.get("title", "")
                     text = (h.get("text", "") or "").strip()
                     if text:
@@ -527,6 +722,7 @@ class Bot(discord.Client):
             website = info_get("website", WEBSITE_URL)
             download = info_get("download", DOWNLOAD_URL)
             support = info_get("support", SUPPORT_URL)
+            rates = get_rates_lines()
             details = []
             if realmlist:
                 details.append(f"Realmlist: {realmlist}")
@@ -536,6 +732,8 @@ class Bot(discord.Client):
                 details.append(f"Download: {download}")
             if support:
                 details.append(f"Support: {support}")
+            if rates:
+                details.append("Rates:\n" + "\n".join(rates))
             if details:
                 pieces.append("Server info:\n" + "\n".join(details))
         except Exception:
@@ -545,7 +743,11 @@ class Bot(discord.Client):
         ctx = "\n\n".join(pieces)
         if len(ctx) > RAG_MAX_CHARS:
             ctx = ctx[:RAG_MAX_CHARS]
-        return base + "\n\n" + "You also have access to the following relevant knowledge. Prefer it over guessing:\n" + ctx
+        guidance = (
+            "Use the following knowledge ONLY if it is clearly relevant to the user's question. "
+            "Do not list unrelated facts or dump the context. Answer concisely; if unsure, say so."
+        )
+        return base + "\n\n" + guidance + "\n" + ctx
 
     def _get_history(self, channel_id: int) -> list[dict]:
         return self._chat_hist.setdefault(channel_id, [])
@@ -566,7 +768,7 @@ class Bot(discord.Client):
 
     async def on_message(self, message: discord.Message):
         # Only if chatty mode is enabled (env or guild override)
-        if not OLLAMA_ENABLED or not self._auto_reply_enabled(message.guild.id if message.guild else None):
+        if not llm_available() or not self._auto_reply_enabled(message.guild.id if message.guild else None):
             return
         # Ignore self/bots
         if message.author.bot:
@@ -638,22 +840,20 @@ class Bot(discord.Client):
                 except Exception:
                     pass
                 return
-            # KB quick search
-            if len(content) >= 3 and getattr(self, "_rag", None) and self._rag.kb:
-                hits = self._rag.search_kb(content, limit=3)
+            # Optional: KB suggestion blurb (disabled by default)
+            if KB_SUGGEST_IN_CHAT and len(content) >= 3 and getattr(self, "_rag", None) and self._rag.kb:
+                hits = [h for h in (e for e in self._rag.search_kb(content, limit=2))]
                 if hits:
                     try:
-                        lines = ["Knowledge base matches:"]
+                        lines = ["You might find these helpful:"]
                         for h in hits:
                             snippet = h.get("text", "").strip().splitlines()[0][:120]
                             lines.append(f"- [{h.get('id')}] {h.get('title')} — {snippet}")
-                        lines.append("Use `/wowkb_show id:<id>` to view full entry.")
                         await message.reply("\n".join(lines), mention_author=False)
-                        return
                     except Exception:
                         pass
             # Vision quick reply: describe image
-            if has_image and OLLAMA_ENABLED and OLLAMA_VISION_ENABLED:
+            if has_image and LLM_PROVIDER == "ollama" and OLLAMA_ENABLED and OLLAMA_VISION_ENABLED:
                 if not ratelimit(message.author.id):
                     return
                 try:
@@ -699,8 +899,11 @@ class Bot(discord.Client):
                         content = content.replace(m, "").strip()
                 prompt = content
                 hist = self._get_history(message.channel.id)
-                system = self._build_rag_system(prompt, message.guild.id if message.guild else None)
-                text = await asyncio.to_thread(ollama_chat, prompt.strip(), 20.0, system, hist)
+                gid = message.guild.id if message.guild else None
+                sys_prompt = self._get_system_prompt(gid)
+                if self._rag_enabled(gid):
+                    sys_prompt = self._build_rag_system(prompt, gid)
+                text = await asyncio.to_thread(llm_chat, prompt.strip(), system=sys_prompt, history=hist)
             if not text:
                 return
             await send_long_reply(message, text)
@@ -710,7 +913,7 @@ class Bot(discord.Client):
         except Exception as e:
             # Best-effort friendly error; avoid spamming
             try:
-                await message.reply(f"🤖 {format_ollama_error(e)}", mention_author=False)
+                await message.reply(f"🤖 {format_llm_error(e)}", mention_author=False)
             except Exception:
                 pass
 
@@ -817,6 +1020,61 @@ async def wowhelp(interaction: discord.Interaction, topic: Optional[str] = None)
         return await interaction.response.send_message("Use `/wowchangepass` to change/reset your password (private modal).", ephemeral=True)
     # Default overview
     await interaction.response.send_message(get_help_overview(), ephemeral=True)
+
+@bot.tree.command(name="wowrates", description="Show server rates context")
+async def wowrates(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    lines = get_rates_lines()
+    if not lines:
+        return await interaction.response.send_message("No rates configured.", ephemeral=True)
+    await interaction.response.send_message("Server rates:\n" + "\n".join(lines), ephemeral=True)
+
+@bot.tree.command(name="wowbots", description="Show bot status via SOAP (if configured)")
+async def wowbots(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    text = await get_bots_status()
+    await interaction.followup.send(text, ephemeral=True)
+
+@bot.tree.command(name="wowmetrics", description="Show recent server metrics (lightweight, no Grafana)")
+async def wowmetrics(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    if not METRICS_ENABLED:
+        return await interaction.response.send_message("Metrics are disabled. Set METRICS_ENABLED=true.", ephemeral=True)
+    try:
+        data = (getattr(bot, "_metrics", None) or [])[-120:]
+        if not data:
+            return await interaction.response.send_message("No metrics collected yet.", ephemeral=True)
+        last = data[-1]
+        now = int(time.time())
+        hour_cut = now - 3600
+        hour = [s for s in data if s.get("ts", 0) >= hour_cut]
+        peak = max((s.get("connected", 0) for s in hour), default=0)
+        mean = last.get("update_mean")
+        p95 = last.get("update_p95")
+        p99 = last.get("update_p99")
+        mx = last.get("update_max")
+        lines = [
+            f"Connected (last): {last.get('connected', 'n/a')}",
+            f"Connected (1h peak): {peak}",
+        ]
+        diffs = []
+        if mean is not None:
+            diffs.append(f"mean {mean}ms")
+        if p95 is not None:
+            diffs.append(f"p95 {p95}ms")
+        if p99 is not None:
+            diffs.append(f"p99 {p99}ms")
+        if mx is not None:
+            diffs.append(f"max {mx}ms")
+        if diffs:
+            lines.append("Update diffs: " + ", ".join(diffs))
+        await interaction.response.send_message("\n".join(lines), ephemeral=True)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ Metrics error: {e}", ephemeral=True)
 
 @bot.tree.command(name="wowreloadinfo", description="Reload server info from file")
 async def wowreloadinfo(interaction: discord.Interaction):
@@ -1005,12 +1263,18 @@ async def wowonline(interaction: discord.Interaction):
         return await interaction.response.send_message(f"⏳ Please wait {wait}s.", ephemeral=True)
 
     await interaction.response.defer(ephemeral=True, thinking=True)
+    # Prefer DB if configured
+    cfg = _db_cfg()
+    if cfg:
+        count = await asyncio.to_thread(db_get_online_count, cfg)
+        if count is not None:
+            return await interaction.followup.send(f"🟢 Players online: {count}", ephemeral=True)
+    # Fallback to SOAP
     try:
         out = await run_soap(".server info")
         info = parse_server_info(out)
         connected = info.get("connected")
         if connected is None:
-            # Fallback to raw search if parser missed it
             m = re.search(r"Connected players:\s*(\d+)", out, re.I)
             connected = int(m.group(1)) if m else None
         if connected is None:
@@ -1020,31 +1284,128 @@ async def wowonline(interaction: discord.Interaction):
     except Exception as e:
         await interaction.followup.send(f"❌ {format_soap_error(e)}", ephemeral=True)
 
-@bot.tree.command(name="wowask", description="Ask Ollama a question (if enabled)")
+@bot.tree.command(name="wowstats", description="Show DB stats: accounts, characters, guilds (if DB enabled)")
+async def wowstats(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    cfg = _db_cfg()
+    if not cfg:
+        return await interaction.response.send_message("DB is not configured. Set DB_ENABLED=true and credentials.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        accounts, characters, guilds = await asyncio.to_thread(db_get_totals, cfg)
+        await interaction.followup.send(
+            f"Accounts: {accounts or 0}\nCharacters: {characters or 0}\nGuilds: {guilds or 0}",
+            ephemeral=True,
+        )
+    except Exception as e:
+        await interaction.followup.send(f"❌ DB error: {e}", ephemeral=True)
+
+@bot.tree.command(name="wowask", description="Ask the configured AI model a question")
 @app_commands.describe(prompt="Your question or prompt for the model")
 async def wowask(interaction: discord.Interaction, prompt: str):
-    if not guild_allowed(interaction):
+    if not require_allowed(interaction):
         return
-    if not channel_allowed(interaction):
-        return await interaction.response.send_message("🔒 Use this command in the designated channel.", ephemeral=True)
-    if not ollama_available():
-        return await interaction.response.send_message("🤖 Ollama is not enabled. Set OLLAMA_ENABLED=true in .env.", ephemeral=True)
     if not prompt or not prompt.strip():
         return await interaction.response.send_message("❌ Please provide a prompt.", ephemeral=True)
-    if not ratelimit(interaction.user.id):
-        wait = seconds_until_allowed(interaction.user.id)
-        return await interaction.response.send_message(f"⏳ Please wait {wait}s.", ephemeral=True)
+    if not enforce_ratelimit_inter(interaction):
+        return
 
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
-        # Stateless chat by default, but include system prompt for style
         system = bot._build_rag_system(prompt, interaction.guild.id if interaction.guild else None)
-        text = await asyncio.to_thread(ollama_chat, prompt.strip(), 20.0, system, None)
+        text = await asyncio.to_thread(llm_chat, prompt.strip(), system=system, history=None)
         if not text:
             return await interaction.followup.send("⚠️ No response from model.", ephemeral=True)
         await send_long_ephemeral(interaction, text)
     except Exception as e:
-        await interaction.followup.send(f"❌ {format_ollama_error(e)}", ephemeral=True)
+        await interaction.followup.send(f"❌ {format_llm_error(e)}", ephemeral=True)
+
+@bot.tree.command(name="wowimage", description="Generate an image with the configured AI provider")
+@app_commands.describe(prompt="Describe the image", negative="Optional negatives", width="px", height="px")
+async def wowimage(interaction: discord.Interaction, prompt: str, negative: Optional[str] = None, width: int = 1024, height: int = 1024):
+    if not require_allowed(interaction):
+        return
+    if not prompt or not prompt.strip():
+        return await interaction.response.send_message("❌ Please provide a prompt.", ephemeral=True)
+    if not enforce_ratelimit_inter(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        if LLM_PROVIDER == "arliai" and arliai_client:
+            data = arliai_client.txt2img(LLM_IMAGE_MODEL or ARLIAI_IMAGE_MODEL, prompt.strip(), negative_prompt=(negative or ""), width=width, height=height)
+            imgs = data.get("images") or []
+            if not imgs:
+                return await interaction.followup.send("⚠️ No image returned.", ephemeral=True)
+            b = base64.b64decode(imgs[0])
+            file = discord.File(io.BytesIO(b), filename="ai_image.png")
+            await interaction.followup.send(content="Here you go:", file=file, ephemeral=True)
+        else:
+            await interaction.followup.send("🤖 The current provider does not support text-to-image.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ {format_llm_error(e)}", ephemeral=True)
+
+@bot.tree.command(name="wowupscale", description="Upscale an image with the configured AI provider")
+@app_commands.describe(image="Image to upscale", factor="Upscale factor (2-4)")
+async def wowupscale(interaction: discord.Interaction, image: discord.Attachment, factor: int = 2):
+    if not require_allowed(interaction):
+        return
+    if factor < 2:
+        factor = 2
+    if factor > 4:
+        factor = 4
+    if not enforce_ratelimit_inter(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        if LLM_PROVIDER == "arliai" and arliai_client:
+            raw = await image.read()
+            b64 = base64.b64encode(raw).decode("ascii")
+            data = arliai_client.upscale(b64, upscaling_resize=factor)
+            out = data.get("image")
+            if not out:
+                return await interaction.followup.send("⚠️ No image returned.", ephemeral=True)
+            b = base64.b64decode(out)
+            file = discord.File(io.BytesIO(b), filename="ai_upscaled.png")
+            await interaction.followup.send(content=f"Upscaled x{factor}:", file=file, ephemeral=True)
+        else:
+            await interaction.followup.send("🤖 The current provider does not support upscaling.", ephemeral=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ {format_llm_error(e)}", ephemeral=True)
+
+@bot.tree.command(name="wowllminfo", description="Show configured LLM provider/model and token limits")
+async def wowllminfo(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    parts = [
+        f"Provider: {LLM_PROVIDER}",
+        f"Text model: {LLM_TEXT_MODEL or (ARLIAI_TEXT_MODEL if LLM_PROVIDER=='arliai' else OLLAMA_MODEL)}",
+    ]
+    ctx = LLM_CONTEXT_TOKENS if LLM_CONTEXT_TOKENS > 0 else None
+    max_out = LLM_MAX_TOKENS
+    if LLM_PROVIDER == 'ollama':
+        parts.append(f"Host: {OLLAMA_HOST}")
+        parts.append(f"Max output tokens (configured): {max_out}")
+        if ctx:
+            parts.append(f"Context tokens (hint): {ctx}")
+    elif LLM_PROVIDER == 'arliai':
+        parts.append(f"Host: {ARLIAI_BASE_URL}")
+        parts.append(f"Max output tokens (configured): {max_out}")
+        if ctx:
+            parts.append(f"Context tokens (hint): {ctx}")
+        # Best-effort fetch of model info
+        try:
+            if arliai_client:
+                info = arliai_client.model_info(LLM_TEXT_MODEL or ARLIAI_TEXT_MODEL)
+                if info:
+                    parts.append("Model info (from API):")
+                    # Common keys people care about
+                    for k in ("id", "context_length", "max_tokens", "max_context_tokens", "owner", "created"):
+                        if k in info:
+                            parts.append(f"- {k}: {info[k]}")
+        except Exception:
+            pass
+    await interaction.response.send_message("\n".join(parts), ephemeral=True)
 
 @bot.tree.command(name="wowaskimg", description="Ask about an image using Ollama (if enabled)")
 @app_commands.describe(image="Image attachment", prompt="Optional question about the image")
@@ -1053,6 +1414,9 @@ async def wowaskimg(interaction: discord.Interaction, image: discord.Attachment,
         return
     if not channel_allowed(interaction):
         return await interaction.response.send_message("🔒 Use this command in the designated channel.", ephemeral=True)
+    # Only supported with Ollama vision
+    if LLM_PROVIDER != "ollama":
+        return await interaction.response.send_message("🤖 The current provider does not support image understanding.", ephemeral=True)
     if not OLLAMA_ENABLED or not OLLAMA_VISION_ENABLED:
         return await interaction.response.send_message("🤖 Vision is not enabled. Set OLLAMA_ENABLED=true and OLLAMA_VISION_ENABLED=true.", ephemeral=True)
     if not image or not (getattr(image, "content_type", "").startswith("image/") or str(image.filename).lower().endswith((".png",".jpg",".jpeg",".webp",".bmp",".gif"))):
@@ -1072,6 +1436,32 @@ async def wowaskimg(interaction: discord.Interaction, image: discord.Attachment,
         await send_long_ephemeral(interaction, text)
     except Exception as e:
         await interaction.followup.send(f"❌ {format_ollama_error(e)}", ephemeral=True)
+
+@bot.tree.command(name="wowascii", description="Generate ASCII art with the configured AI model")
+@app_commands.describe(subject="Describe what to draw (ASCII)", width="Max characters per line (hint to the model)")
+async def wowascii(interaction: discord.Interaction, subject: str, width: Optional[int] = 60):
+    if not require_allowed(interaction):
+        return
+    if not subject or not subject.strip():
+        return await interaction.response.send_message("❌ Please describe what to draw.", ephemeral=True)
+    if not enforce_ratelimit_inter(interaction):
+        return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        # Nudge the model to output only ASCII inside a code block friendly width
+        w = max(20, min(200, int(width or 60)))
+        sys_prompt = (
+            "You output ONLY ASCII art using standard keyboard characters. "
+            "Do not include explanations, headers, or backticks. Keep lines <= " + str(w) + " chars."
+        )
+        text = await asyncio.to_thread(llm_chat, f"ASCII art of: {subject.strip()}", system=sys_prompt, history=None)
+        if not text:
+            return await interaction.followup.send("⚠️ No output.", ephemeral=True)
+        # Wrap in a code block for monospace display
+        await send_long_ephemeral(interaction, text, code_block=True)
+    except Exception as e:
+        await interaction.followup.send(f"❌ {format_llm_error(e)}", ephemeral=True)
+
 
 @bot.tree.command(name="wowpersona_set", description="Set the Ollama system prompt for this server (non-persistent)")
 @app_commands.describe(prompt="Describe how the bot should behave in this server")
@@ -1116,6 +1506,45 @@ async def wowclearhistory(interaction: discord.Interaction):
         return await interaction.response.send_message("❌ No channel context.", ephemeral=True)
     bot._clear_history(interaction.channel.id)
     await interaction.response.send_message("✅ Cleared conversation history for this channel.", ephemeral=True)
+
+@bot.tree.command(name="wowrag_on", description="Enable RAG context in auto-replies for this server")
+async def wowrag_on(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    if not (interaction.user and getattr(interaction.user, 'guild_permissions', None) and interaction.user.guild_permissions.manage_guild):
+        return await interaction.response.send_message("❌ You need Manage Server permission to change this setting.", ephemeral=True)
+    if not interaction.guild:
+        return await interaction.response.send_message("❌ Must be used in a server.", ephemeral=True)
+    bot._rag_override[interaction.guild.id] = True
+    try:
+        bot._save_history_file()
+    except Exception:
+        pass
+    await interaction.response.send_message("✅ RAG enabled for auto-replies in this server.", ephemeral=True)
+
+@bot.tree.command(name="wowrag_off", description="Disable RAG context in auto-replies for this server")
+async def wowrag_off(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    if not (interaction.user and getattr(interaction.user, 'guild_permissions', None) and interaction.user.guild_permissions.manage_guild):
+        return await interaction.response.send_message("❌ You need Manage Server permission to change this setting.", ephemeral=True)
+    if not interaction.guild:
+        return await interaction.response.send_message("❌ Must be used in a server.", ephemeral=True)
+    bot._rag_override[interaction.guild.id] = False
+    try:
+        bot._save_history_file()
+    except Exception:
+        pass
+    await interaction.response.send_message("✅ RAG disabled for auto-replies in this server.", ephemeral=True)
+
+@bot.tree.command(name="wowrag_show", description="Show whether RAG is used in auto-replies for this server")
+async def wowrag_show(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    gid = interaction.guild.id if interaction.guild else None
+    enabled = bot._rag_enabled(gid)
+    src = "override" if (gid and gid in bot._rag_override) else "default"
+    await interaction.response.send_message(f"RAG in auto-replies: {'ON' if enabled else 'OFF'} ({src})", ephemeral=True)
 
 @bot.tree.command(name="wowautoreply_on", description="Enable auto-replies in this server")
 async def wowautoreply_on(interaction: discord.Interaction):
