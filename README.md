@@ -199,8 +199,14 @@ DB-backed metrics
   DB_CHAR_DB=characters
   DB_WORLD_DB=world
 
-- Create a read-only user (adjust DB names/host): see `sql/create_readonly_grants.sql`.
-- See `docs/metrics.md` for schema notes and profession skill IDs.
+  - Create a read-only user (adjust DB names/host): see `sql/create_readonly_grants.sql`.
+  - Verify the grants are read-only with:
+
+    ```
+    python scripts/verify_readonly_grants.py
+    ```
+
+  - See `docs/metrics.md` for schema notes and profession skill IDs.
 
  LLM provider selection
 

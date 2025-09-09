@@ -3,6 +3,11 @@ import re
 from typing import List, Dict, Any, Optional
 
 
+def sanitize_text(text: str, max_bytes: int = 1000) -> str:
+    """Remove control chars and cap bytes for embedding."""
+    text = re.sub(r"[\x00-\x1f\x7f]", " ", text or "")
+    b = text.encode("utf-8", errors="ignore")[:max_bytes]
+    return b.decode("utf-8", errors="ignore").strip()
 META_FIELDS = ["phase", "class", "spec", "dungeon", "raid"]
 
 
@@ -21,7 +26,7 @@ def _meta_to_tags(data: Dict[str, Any]) -> List[str]:
 
 
 def _chunk_text(s: str, limit: int = 800) -> List[str]:
-    s = (s or "").strip()
+    s = sanitize_text(s)
     if not s:
         return []
     out: List[str] = []
@@ -33,7 +38,7 @@ def _chunk_text(s: str, limit: int = 800) -> List[str]:
         if cut == -1 or cut < int(limit * 0.6):
             cut = limit
         chunk, s = s[:cut].rstrip(), s[cut:].lstrip()
-        out.append(chunk)
+        out.append(sanitize_text(chunk, limit))
     return out
 
 
@@ -111,8 +116,8 @@ class RagStore:
             if not isinstance(e, dict):
                 continue
             _id = str(e.get("id") or "").strip()
-            title = str(e.get("title") or "").strip()
-            text = str(e.get("text") or "").strip()
+            title = sanitize_text(str(e.get("title") or ""))
+            text = sanitize_text(str(e.get("text") or ""))
             tags = e.get("tags") or []
             if not _id or not title or not text:
                 continue
@@ -155,6 +160,8 @@ class RagStore:
                         tags.extend(_meta_to_tags(data))
                 else:
                     continue
+                title = sanitize_text(title)
+                text = sanitize_text(text, 4000)
                 if not text:
                     continue
                 chunks = _chunk_text(text, 800)

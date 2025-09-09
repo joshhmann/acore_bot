@@ -2,6 +2,11 @@ import os
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    import pymysql  # type: ignore
+except Exception:  # pragma: no cover
+    pymysql = None  # type: ignore
 import pymysql
 from utils.formatters import copper_to_gsc
 # --- PyMySQL import with safe fallback (for test envs without pymysql) ---
@@ -51,6 +56,9 @@ DICT = pymysql.cursors.DictCursor if pymysql else None
 _cache: Dict[Any, Dict[str, Any]] = {}
 # Track whether the last cache access was a hit for external logging.
 last_cache_hit: bool = False
+
+MAX_LEVEL_ROWS = 80
+MAX_ARENA_ROWS = 100
 
 
 def _cache_get(key):
@@ -154,9 +162,12 @@ def kpi_level_distribution() -> List[Dict[str, int]]:
     memo = _cache_get(key)
     if memo is not None:
         return memo
-    q = "SELECT level, COUNT(*) AS n FROM characters GROUP BY level ORDER BY level"
+    q = (
+        "SELECT level, COUNT(*) AS n FROM characters "
+        "GROUP BY level ORDER BY level LIMIT %s"
+    )
     with conn(DB_CHAR) as c, c.cursor() as cur:
-        cur.execute(q)
+        cur.execute(q, (MAX_LEVEL_ROWS,))
         rows = cur.fetchall()
     _cache_set(key, rows)
     return rows
@@ -274,11 +285,17 @@ def kpi_auction_count() -> int:
 
 
 def kpi_arena_rating_distribution(limit_rows: Optional[int] = None) -> List[Dict[str, Any]]:
-    q = "SELECT rating, COUNT(*) AS teams FROM arena_team GROUP BY rating ORDER BY rating DESC"
+    limit = int(limit_rows) if limit_rows else MAX_ARENA_ROWS
+    if limit > MAX_ARENA_ROWS:
+        limit = MAX_ARENA_ROWS
+    q = (
+        "SELECT rating, COUNT(*) AS teams FROM arena_team "
+        "GROUP BY rating ORDER BY rating DESC LIMIT %s"
+    )
     with conn(DB_CHAR) as c, c.cursor() as cur:
-        cur.execute(q)
+        cur.execute(q, (limit,))
         rows = cur.fetchall()
-    return rows[:limit_rows] if limit_rows else rows
+    return rows
 
 
 def kpi_arena_distribution(limit_rows: Optional[int] = None) -> List[Dict[str, Any]]:
