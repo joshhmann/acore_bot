@@ -113,7 +113,13 @@ def setup_kpi(tree: app_commands.CommandTree):
         out_lines = []
         for r in rows:
             name = r.get("name") or f"Template {r['item_template']}"
-            out_lines.append(f"{name}: {int(r['listings'])} listings, avg {kpi.copper_to_gold_s(r['avg_buyout'])}")
+            delta = r.get("delta_24h")
+            delta_s = f" (Δ24h {delta:+d})" if delta is not None else ""
+            out_lines.append(
+                f"{name}: {int(r['listings'])} listings{delta_s}, {int(r['sellers'])} sellers, "
+                f"total {kpi.copper_to_gold_s(r['total_buyout'])} / {kpi.copper_to_gold_s(r['total_bid'])}, "
+                f"avg {kpi.copper_to_gold_s(r['avg_buyout'])}"
+            )
         await itx.followup.send("\n".join(out_lines), ephemeral=True)
         _log_cmd("wowah_hot", t0, rows=len(rows), limit=limit)
 

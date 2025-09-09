@@ -133,7 +133,7 @@ Slash Commands
  - /wowlevels: Level distribution
  - /wowgold_top [limit]: Richest characters
  - /wowguilds [days] [limit]: Active guilds
- - /wowah_hot [limit]: Auction hot items
+ - /wowah_hot [limit]: Auction hot items with totals and 24h delta
  - /wowarena [top]: Arena rating distribution
  - /wowprof [skill_id] [min_value]: Profession counts
  - /health: Bot health ping

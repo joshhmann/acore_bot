@@ -158,15 +158,25 @@ def kpi_guild_activity(days: int = 14, limit: int = 10) -> List[Dict[str, Any]]:
 
 
 def kpi_auction_hot_items(limit: int = 10) -> List[Dict[str, Any]]:
-    """Top auction items by listings; include item name when world DB is accessible.
+    """Top auction items with summary stats and 24h delta.
 
-    Uses COALESCE(MIN(wt.name), CONCAT('Template ', a.item_template)) AS name and GROUP BY item_template
-    to satisfy ONLY_FULL_GROUP_BY on MySQL 8.
+    Returns aggregated listings, total and average buyout/bid, unique sellers,
+    and the delta in listings versus a cached 24h snapshot. Item names are
+    joined from the world database when available.
     """
+
+    cache_key = f"kpi:ah_hot:{limit}"
+    memo = _cache_get(cache_key)
+    if memo is not None:
+        return memo
+
     q_join = f"""
     SELECT a.item_template,
            COUNT(*) AS listings,
+           SUM(a.buyoutprice) AS total_buyout,
+           SUM(a.startbid)  AS total_bid,
            AVG(a.buyoutprice) AS avg_buyout,
+           COUNT(DISTINCT a.owner) AS sellers,
            COALESCE(MIN(wt.name), CONCAT('Template ', a.item_template)) AS name
     FROM auctionhouse a
     LEFT JOIN {DB_WORLD}.item_template wt ON wt.entry = a.item_template
@@ -174,13 +184,19 @@ def kpi_auction_hot_items(limit: int = 10) -> List[Dict[str, Any]]:
     ORDER BY listings DESC
     LIMIT %s
     """
+
     try:
         with conn(DB_CHAR) as c, c.cursor() as cur:
             cur.execute(q_join, (limit,))
-            return cur.fetchall()
+            rows = cur.fetchall()
     except Exception:
         q_fallback = """
-        SELECT a.item_template, COUNT(*) AS listings, AVG(a.buyoutprice) AS avg_buyout
+        SELECT a.item_template,
+               COUNT(*) AS listings,
+               SUM(a.buyoutprice) AS total_buyout,
+               SUM(a.startbid)  AS total_bid,
+               AVG(a.buyoutprice) AS avg_buyout,
+               COUNT(DISTINCT a.owner) AS sellers
         FROM auctionhouse a
         GROUP BY a.item_template
         ORDER BY listings DESC
@@ -188,7 +204,28 @@ def kpi_auction_hot_items(limit: int = 10) -> List[Dict[str, Any]]:
         """
         with conn(DB_CHAR) as c, c.cursor() as cur:
             cur.execute(q_fallback, (limit,))
-            return cur.fetchall()
+            rows = cur.fetchall()
+        for r in rows:
+            r["name"] = f"Template {r['item_template']}"
+
+    snap = _cache.get("ah_hot_snapshot")
+    snap_data: Dict[int, int] = {}
+    if snap and time.time() - snap["ts"] <= 86400:
+        snap_data = snap["val"]
+
+    for r in rows:
+        prev = int(snap_data.get(r["item_template"], 0))
+        r["delta_24h"] = int(r["listings"]) - prev
+
+    if not snap or time.time() - snap["ts"] > 86400:
+        _cache_set(
+            "ah_hot_snapshot",
+            {r["item_template"]: int(r["listings"]) for r in rows},
+            ttl=86400 * 2,
+        )
+
+    _cache_set(cache_key, rows)
+    return rows
 
 
 def kpi_auction_count() -> int:
