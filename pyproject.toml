@@ -11,4 +11,5 @@ dependencies = [
     "PyYAML>=6.0.1",
     "PyPDF2>=3.0.1",
     "PyMySQL>=1.1.0",
+    "cryptography>=41.0.0",
 ]

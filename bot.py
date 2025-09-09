@@ -9,6 +9,7 @@ from discord.ui import Modal, TextInput
 from dotenv import load_dotenv
 import requests
 from utils import json_load, json_save_atomic, chunk_text, send_ephemeral, send_long_ephemeral, send_long_reply
+from utils.intent import classify as classify_intent
 from soap import SoapClient
 from ollama import OllamaClient
 from rag_store import RagStore
@@ -16,6 +17,8 @@ from arliai import ArliaiClient
 from ac_db import DBConfig as ACDBConfig, get_online_count as db_get_online_count, get_totals as db_get_totals
 
 load_dotenv()
+import ac_metrics as kpi
+from commands.kpi import setup_kpi as setup_kpi_commands
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 SOAP_HOST = os.getenv("SOAP_HOST", "127.0.0.1")
@@ -52,6 +55,7 @@ RAG_DOCS_TOPK = int(os.getenv("RAG_DOCS_TOPK", "2"))
 RAG_MIN_SCORE = int(os.getenv("RAG_MIN_SCORE", "10"))
 RAG_IN_AUTOREPLY = os.getenv("RAG_IN_AUTOREPLY", "false").lower() in {"1","true","yes","on"}
 KB_SUGGEST_IN_CHAT = os.getenv("KB_SUGGEST_IN_CHAT", "false").lower() in {"1","true","yes","on"}
+METRICS_STRICT = os.getenv("METRICS_STRICT", "true").lower() in {"1","true","yes","on"}
 
 # Arliai (optional)
 ARLIAI_ENABLED = os.getenv("ARLIAI_ENABLED", "false").lower() in {"1","true","yes","on"}
@@ -91,10 +95,10 @@ PROFESSION_RATE = os.getenv("PROFESSION_RATE", "")
 BOTS_SOAP_COMMAND = os.getenv("BOTS_SOAP_COMMAND", "")
 BOTS_PARSE_REGEX = os.getenv("BOTS_PARSE_REGEX", "")
 DB_ENABLED = os.getenv("DB_ENABLED", "false").lower() in {"1","true","yes","on"}
-DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
+DB_HOST = os.getenv("DB_HOST", "192.168.0.80")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
-DB_USER = os.getenv("DB_USER", "")
-DB_PASS = os.getenv("DB_PASS", "")
+DB_USER = os.getenv("DB_USER", "acbot_ro")
+DB_PASS = os.getenv("DB_PASS", "CHANGE_ME")
 DB_AUTH_DB = os.getenv("DB_AUTH_DB", "auth")
 DB_CHAR_DB = os.getenv("DB_CHAR_DB", "characters")
 DB_WORLD_DB = os.getenv("DB_WORLD_DB", "world")
@@ -249,6 +253,26 @@ def format_llm_error(e: Exception) -> str:
         return _C.format_error(e)
     return format_ollama_error(e)
 
+
+def _is_realm_health_query(text: str) -> bool:
+    s = (text or "").lower()
+    keys = [
+        "realm", "server", "population", "online", "busy", "alive", "dead",
+        "how's the realm", "how is the realm", "anyone online", "players online",
+    ]
+    return any(k in s for k in keys)
+
+def _is_numeric_query(text: str) -> bool:
+    s = (text or "").lower()
+    return ("how many" in s) or ("how much" in s) or ("count" in s) or ("number of" in s)
+
+def _matches(s: str, *subs: str) -> bool:
+    s = s.lower()
+    return any(x in s for x in subs)
+
+def _is_rates_query(s: str) -> bool:
+    return _matches(s, "xp rate", "rates", "xp rates", "drop rate", "gold rate", "honor rate", "reputation rate", "profession rate")
+
 class RegisterModal(Modal, title="Create Game Account"):
     username: TextInput = TextInput(label="Username", placeholder="3–16 chars: A–Z a–z 0–9 _ -", min_length=3, max_length=16)
     password: TextInput = TextInput(label="Password", style=discord.TextStyle.paragraph, placeholder="6–32 chars", min_length=6, max_length=32)
@@ -399,6 +423,12 @@ def get_help_overview() -> str:
         "- /wowrates — Show server rates",
         "- /wowbots — Show bot status (if configured)",
     ]
+    # Hide image understanding when not supported
+    if not (LLM_PROVIDER == "ollama" and OLLAMA_VISION_ENABLED):
+        try:
+            lines.remove("- /wowaskimg — Ask about an image")
+        except ValueError:
+            pass
     return "\n".join(lines)
 
 def info_get(key: str, default: str | None = None):
@@ -438,8 +468,23 @@ class Bot(discord.Client):
 
     async def setup_hook(self):
         # If you restrict to a single guild, register commands there for instant availability
+        # Provider-dependent: hide unsupported commands before sync
+        try:
+            if LLM_PROVIDER != "ollama" or not OLLAMA_VISION_ENABLED:
+                self.tree.remove_command("wowaskimg")
+            if LLM_PROVIDER != "arliai":
+                self.tree.remove_command("wowimage")
+                self.tree.remove_command("wowupscale")
+        except Exception:
+            pass
+
+        # Register KPI commands (DB-driven metrics) only if DB is enabled
+        if DB_ENABLED and DB_USER:
+            setup_kpi_commands(self.tree)
+
         if ALLOWED_GUILD_ID:
             guild = discord.Object(id=ALLOWED_GUILD_ID)
+            # Copy globals (including KPI commands registered above) to guild for instant availability
             self.tree.copy_global_to(guild=guild)
             await self.tree.sync(guild=guild)
         else:
@@ -869,9 +914,43 @@ class Bot(discord.Client):
                         content = content.replace(m, "").strip()
                 prompt = content
                 hist = self._get_history(message.channel.id)
+                # Deterministic metric intents (avoid LLM hallucinations)
+                low = prompt.lower()
+                if METRICS_STRICT:
+                    intent = classify_intent(low)
+                    if intent:
+                        name, slots = intent
+                        try:
+                            if name == "online_count":
+                                n = kpi.kpi_players_online()
+                                return await message.reply(f"🟢 Players online: {n}", mention_author=False)
+                            if name == "total_characters":
+                                totals = kpi.kpi_totals()
+                                return await message.reply(f"Characters: {totals.get('total_chars', 0)}", mention_author=False)
+                            if name == "total_accounts":
+                                totals = kpi.kpi_totals()
+                                return await message.reply(f"Accounts: {totals.get('total_accounts', 0)}", mention_author=False)
+                            if name == "auction_count":
+                                n = kpi.kpi_auction_count()
+                                return await message.reply(f"Active auctions: {n}", mention_author=False)
+                            if name == "server_rates":
+                                lines = get_rates_lines()
+                                return await message.reply("Server rates:\n" + ("\n".join(lines) if lines else "No rates configured."), mention_author=False)
+                            if name == "gold_per_hour":
+                                return await message.reply("I don’t track gold per hour. Try /wowgold_top or /wowah_hot.", mention_author=False)
+                            if name == "bots_count":
+                                return await message.reply("Bot count isn’t exposed. Use /wowbots if configured, or ask an admin.", mention_author=False)
+                        except Exception:
+                            # fall through to LLM
+                            pass
+
                 gid = message.guild.id if message.guild else None
                 sys_prompt = self._get_system_prompt(gid)
-                if self._rag_enabled(gid):
+                guard = "Never invent numbers—if a metric is unavailable, say so and suggest a command like /wowkpi."
+                if _is_realm_health_query(prompt):
+                    facts = kpi.kpi_summary_text()
+                    sys_prompt = sys_prompt + "\n\n" + guard + "\nFACTS (live):\n" + facts
+                elif self._rag_enabled(gid):
                     sys_prompt = self._build_rag_system(prompt, gid)
                 text = await asyncio.to_thread(llm_chat, prompt.strip(), system=sys_prompt, history=hist)
             if not text:
@@ -990,6 +1069,12 @@ async def wowhelp(interaction: discord.Interaction, topic: Optional[str] = None)
         return await interaction.response.send_message("Use `/wowchangepass` to change/reset your password (private modal).", ephemeral=True)
     # Default overview
     await interaction.response.send_message(get_help_overview(), ephemeral=True)
+
+@bot.tree.command(name="health", description="Bot health ping")
+async def health(interaction: discord.Interaction):
+    if not require_allowed(interaction):
+        return
+    await interaction.response.send_message("ok", ephemeral=True)
 
 @bot.tree.command(name="wowrates", description="Show server rates context")
 async def wowrates(interaction: discord.Interaction):
@@ -1186,37 +1271,7 @@ async def wowchangepass(interaction: discord.Interaction):
         return
     await interaction.response.send_modal(ChangePasswordModal(user_id=interaction.user.id))
 
-@bot.tree.command(name="wowonline", description="Show number of connected players")
-async def wowonline(interaction: discord.Interaction):
-    if not guild_allowed(interaction):
-        return
-    if not channel_allowed(interaction):
-        return await interaction.response.send_message("🔒 Use this command in the designated channel.", ephemeral=True)
-    if not ratelimit(interaction.user.id):
-        wait = seconds_until_allowed(interaction.user.id)
-        return await interaction.response.send_message(f"⏳ Please wait {wait}s.", ephemeral=True)
-
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    # Prefer DB if configured
-    cfg = _db_cfg()
-    if cfg:
-        count = await asyncio.to_thread(db_get_online_count, cfg)
-        if count is not None:
-            return await interaction.followup.send(f"🟢 Players online: {count}", ephemeral=True)
-    # Fallback to SOAP
-    try:
-        out = await run_soap(".server info")
-        info = parse_server_info(out)
-        connected = info.get("connected")
-        if connected is None:
-            m = re.search(r"Connected players:\s*(\d+)", out, re.I)
-            connected = int(m.group(1)) if m else None
-        if connected is None:
-            await interaction.followup.send("⚠️ Could not determine online players.", ephemeral=True)
-        else:
-            await interaction.followup.send(f"🟢 Players online: {connected}", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ {format_soap_error(e)}", ephemeral=True)
+## /wowonline moved to commands/kpi.py (DB-first with SOAP fallback)
 
 @bot.tree.command(name="wowstats", description="Show DB stats: accounts, characters, guilds (if DB enabled)")
 async def wowstats(interaction: discord.Interaction):
@@ -1247,7 +1302,39 @@ async def wowask(interaction: discord.Interaction, prompt: str):
 
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
-        system = bot._build_rag_system(prompt, interaction.guild.id if interaction.guild else None)
+        # Deterministic metric intents
+        low = prompt.lower()
+        if METRICS_STRICT:
+            intent = classify_intent(low)
+            if intent:
+                name, slots = intent
+                if name == "online_count":
+                    n = kpi.kpi_players_online()
+                    return await interaction.followup.send(f"🟢 Players online: {n}", ephemeral=True)
+                if name == "total_characters":
+                    totals = kpi.kpi_totals()
+                    return await interaction.followup.send(f"Characters: {totals.get('total_chars', 0)}", ephemeral=True)
+                if name == "total_accounts":
+                    totals = kpi.kpi_totals()
+                    return await interaction.followup.send(f"Accounts: {totals.get('total_accounts', 0)}", ephemeral=True)
+                if name == "auction_count":
+                    n = kpi.kpi_auction_count()
+                    return await interaction.followup.send(f"Active auctions: {n}", ephemeral=True)
+                if name == "server_rates":
+                    lines = get_rates_lines()
+                    return await interaction.followup.send("Server rates:\n" + ("\n".join(lines) if lines else "No rates configured."), ephemeral=True)
+                if name == "gold_per_hour":
+                    return await interaction.followup.send("I don’t track gold per hour. Try /wowgold_top or /wowah_hot.", ephemeral=True)
+                if name == "bots_count":
+                    return await interaction.followup.send("Bot count isn’t exposed. Use /wowbots if configured, or ask an admin.", ephemeral=True)
+
+        # Facts injection for realm-health queries
+        if _is_realm_health_query(prompt):
+            facts = kpi.kpi_summary_text()
+            guard = "Never invent numbers—if a metric is unavailable, say so and suggest a command like /wowkpi."
+            system = bot._get_system_prompt(interaction.guild.id if interaction.guild else None) + "\n\n" + guard + "\nFACTS (live):\n" + facts
+        else:
+            system = bot._build_rag_system(prompt, interaction.guild.id if interaction.guild else None)
         text = await asyncio.to_thread(llm_chat, prompt.strip(), system=system, history=None)
         if not text:
             return await interaction.followup.send("⚠️ No response from model.", ephemeral=True)

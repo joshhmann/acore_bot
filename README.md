@@ -10,11 +10,12 @@ Simple Discord bot for AzerothCore that uses SOAP to:
 - Sends a message when the server goes offline/online
  - Unified chat command: `/wowask` (uses configured LLM provider)
 - Optional auto-replies: Respond to chatter in a channel using Ollama
- - Built-in helpful replies: server status, how to connect, register, reset password
- - Vision (optional): Ask about images via `/wowaskimg` or by posting an image (auto-reply)
- - Knowledge base: Search 3.3.5a cheatsheet via `/wowkb` and `/wowkb_show`
+  - Built-in helpful replies: server status, how to connect, register, reset password
+  - Vision (optional): Ask about images via `/wowaskimg` or by posting an image (auto-reply)
+  - Knowledge base: Search 3.3.5a cheatsheet via `/wowkb` and `/wowkb_show`
   - RAG (optional): Answers use local KB + server info as context
   - Curated docs: Drop `.md`/`.txt` in `docs/`, search via `/wowdocs`
+  - Metrics (DB): Realm KPIs via `/wowkpi`, `/wowlevels`, `/wowgold_top`, `/wowguilds`, `/wowah_hot`, `/wowarena`, `/wowprof`
   - Images (provider-dependent): `/wowimage` (txt2img), `/wowupscale` (upscale)
 
 Requirements
@@ -128,6 +129,14 @@ Slash Commands
  - /wowkb_reload: Reload KB from JSON or YAML.
  - /wowdocs_reload: Reload curated docs from the docs directory.
  - /wowautoreply_on|off|show: Toggle/show auto-replies per server.
+ - /wowkpi: Realm snapshot (online, totals, arena buckets, top gold)
+ - /wowlevels: Level distribution
+ - /wowgold_top [limit]: Richest characters
+ - /wowguilds [days] [limit]: Active guilds
+ - /wowah_hot [limit]: Auction hot items
+ - /wowarena [top]: Arena rating distribution
+ - /wowprof [skill_id] [min_value]: Profession counts
+ - /health: Bot health ping
  - /wowimage: Generate an image (if provider supports).
  - /wowupscale: Upscale an image (if provider supports).
 
@@ -163,6 +172,23 @@ Curated documents
 - Search: `/wowdocs query:"..."` shows top passages with ids; `/wowdocs_show id:<id>` shows the full passage.
 - Reload docs without restart: `/wowdocs_reload` (Manage Server required).
 - RAG: Top `RAG_DOCS_TOPK` passages are automatically included as additional context when generating answers.
+
+DB-backed metrics
+-----------------
+
+- Enable DB access in `.env`:
+
+  DB_ENABLED=true
+  DB_HOST=127.0.0.1
+  DB_PORT=3306
+  DB_USER=acbot_ro
+  DB_PASS=CHANGE_ME
+  DB_AUTH_DB=auth
+  DB_CHAR_DB=characters
+  DB_WORLD_DB=world
+
+- Create a read-only user (adjust DB names/host): see `sql/create_readonly_grants.sql`.
+- See `docs/metrics.md` for schema notes and profession skill IDs.
 
  LLM provider selection
 
