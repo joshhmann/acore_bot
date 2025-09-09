@@ -8,6 +8,21 @@ def sanitize_text(text: str, max_bytes: int = 1000) -> str:
     text = re.sub(r"[\x00-\x1f\x7f]", " ", text or "")
     b = text.encode("utf-8", errors="ignore")[:max_bytes]
     return b.decode("utf-8", errors="ignore").strip()
+META_FIELDS = ["phase", "class", "spec", "dungeon", "raid"]
+
+
+def _meta_to_tags(data: Dict[str, Any]) -> List[str]:
+    """Extract optional metadata fields as tags."""
+    tags: List[str] = []
+    for key in META_FIELDS:
+        val = data.get(key)
+        if not val:
+            continue
+        if isinstance(val, list):
+            tags.extend([str(v) for v in val if v])
+        else:
+            tags.append(str(val))
+    return tags
 
 
 def _chunk_text(s: str, limit: int = 800) -> List[str]:
@@ -108,7 +123,9 @@ class RagStore:
                 continue
             if not isinstance(tags, list):
                 tags = []
-            entries.append({"id": _id, "title": title, "text": text, "tags": [str(t) for t in tags]})
+            tags = [str(t) for t in tags]
+            tags.extend(_meta_to_tags(e))
+            entries.append({"id": _id, "title": title, "text": text, "tags": tags})
         self.kb = entries
 
     def load_docs(self) -> None:
@@ -123,6 +140,7 @@ class RagStore:
                 lower = name.lower()
                 title = name
                 text = ""
+                tags: List[str] = ["docs"]
                 if lower.endswith(".md") or lower.endswith(".txt"):
                     try:
                         text = _read_text_file(path)
@@ -139,6 +157,7 @@ class RagStore:
                             text = "\n\n".join([str(x) for x in data.get("sections") if x])
                         elif data.get("text"):
                             text = str(data.get("text"))
+                        tags.extend(_meta_to_tags(data))
                 else:
                     continue
                 title = sanitize_text(title)
@@ -151,7 +170,7 @@ class RagStore:
                         "id": f"{path}#{i}",
                         "title": title,
                         "text": ch,
-                        "tags": ["docs"],
+                        "tags": tags.copy(),
                     })
         self.docs = out
 
@@ -174,12 +193,12 @@ class RagStore:
             if q and (q in hay_text):
                 score += 5
             if q and (q in hay_tags):
-                score += 6
+                score += 11
             for t in tokens:
                 if t in hay_title:
                     score += 4
                 if t in hay_tags:
-                    score += 3
+                    score += 6
                 if t in hay_text:
                     score += 1
             if score > 0:
@@ -199,16 +218,22 @@ class RagStore:
         for e in self.docs:
             title = e.get("title", "")
             text = e.get("text", "")
+            tags = e.get("tags", [])
             hay_title = title.lower()
             hay_text = text.lower()
+            hay_tags = " ".join([str(t).lower() for t in tags])
             score = 0
             if q and (q in hay_title):
                 score += 8
             if q and (q in hay_text):
                 score += 5
+            if q and (q in hay_tags):
+                score += 11
             for t in tokens:
                 if t in hay_title:
                     score += 3
+                if t in hay_tags:
+                    score += 6
                 if t in hay_text:
                     score += 1
             if score > 0:
