@@ -3,23 +3,11 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-# PyMySQL is optional for environments without DB access (e.g., tests).
-try:
-    import pymysql
-except Exception:  # pragma: no cover - handled at runtime
-    pymysql = None
-=======
+# --- PyMySQL import with safe fallback (for test environments) ---
 try:
     import pymysql  # type: ignore
-except Exception:  # pragma: no cover
-    pymysql = None  # type: ignore
-import pymysql
-from utils.formatters import copper_to_gsc
-# --- PyMySQL import with safe fallback (for test envs without pymysql) ---
-try:
-    import pymysql  # type: ignore
-except Exception:  # pragma: no cover - fallback for environments without pymysql
-    class _DummyPyMysql:  # minimal stub to satisfy references in code/tests
+except Exception:  # pragma: no cover - fallback when pymysql is missing
+    class _DummyPyMysql:
         class cursors:
             DictCursor = dict
 
@@ -28,6 +16,8 @@ except Exception:  # pragma: no cover - fallback for environments without pymysq
             raise RuntimeError("pymysql not installed")
 
     pymysql = _DummyPyMysql()  # type: ignore
+
+from utils.formatters import copper_to_gsc
 
 # --- Optional formatter imports (provide fallbacks if module is absent) ---
 try:
@@ -45,7 +35,6 @@ except Exception:
 
     def wrap_response(title: str, content: str) -> str:
         return f"**{title}**\n{content}"
-
 
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")

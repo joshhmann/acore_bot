@@ -1,7 +1,27 @@
+"""Async queries for WowSlums MySQL with circuit breaker.
+
+This module exposes a small helper to run read-only queries against the
+``WowSlums`` database.  Connections are managed via an ``aiomysql`` pool whose
+min/max sizes are configured through environment variables
+``SLUM_DB_MIN_POOL`` and ``SLUM_DB_MAX_POOL``.  Queries are wrapped with
+``asyncio.wait_for`` to enforce a short timeout and a basic circuit breaker is
+used to avoid hammering the database when it is slow or down.
+
+The goal of the circuit breaker is to fail fast after repeated problems and to
+recover automatically after a cooldown period.
+"""
+
 from __future__ import annotations
-from typing import Dict, Optional, Union
+
+import asyncio
+import logging
+import os
+import time
+from typing import Any, Dict, Iterable, Optional, Union
 
 from ac_metrics import kpi_profession_counts
+
+log = logging.getLogger("acbot.slumdb")
 
 # Mapping of profession names to their skill IDs
 PROFESSION_IDS: Dict[str, int] = {
@@ -24,14 +44,7 @@ PROFESSION_IDS: Dict[str, int] = {
 
 
 def resolve_skill_id(name_or_id: Union[str, int]) -> Optional[int]:
-    """Resolve a profession name or numeric ID to an integer skill ID.
-
-    Args:
-        name_or_id: Either the numeric ID or profession name.
-
-    Returns:
-        The corresponding skill ID, or None if it cannot be resolved.
-    """
+    """Resolve a profession name or numeric ID to an integer skill ID."""
     try:
         return int(name_or_id)  # type: ignore[arg-type]
     except (TypeError, ValueError):
@@ -43,35 +56,8 @@ def resolve_skill_id(name_or_id: Union[str, int]) -> Optional[int]:
 
 
 def profession_counts(skill_id: int, min_value: int = 225) -> int:
-    """Return count of characters with a profession at or above a value.
-
-    This function passes through to the underlying metrics layer which
-    performs the actual query. It defaults the minimum value to 225.
-    """
+    """Return count of characters with a profession at or above a value."""
     return kpi_profession_counts(skill_id=skill_id, min_value=min_value)
-=======
-"""Async queries for WowSlums MySQL with circuit breaker.
-
-This module exposes a small helper to run read-only queries against the
-``WowSlums`` database.  Connections are managed via an ``aiomysql`` pool whose
-min/max sizes are configured through environment variables
-``SLUM_DB_MIN_POOL`` and ``SLUM_DB_MAX_POOL``.  Queries are wrapped with
-``asyncio.wait_for`` to enforce a short timeout and a basic circuit breaker is
-used to avoid hammering the database when it is slow or down.
-
-The goal of the circuit breaker is to fail fast after repeated problems and to
-recover automatically after a cooldown period.
-"""
-
-from __future__ import annotations
-
-import asyncio
-import logging
-import os
-import time
-from typing import Any, Iterable
-
-log = logging.getLogger("acbot.slumdb")
 
 # Pool and breaker state
 _pool: Any | None = None
