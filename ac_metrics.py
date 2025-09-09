@@ -3,7 +3,13 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-import pymysql
+try:
+    import pymysql
+except Exception:  # pragma: no cover - allow module import without pymysql
+    class _Dummy:
+        class cursors:
+            DictCursor = object
+    pymysql = _Dummy()  # type: ignore
 
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")

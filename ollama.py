@@ -22,32 +22,20 @@ class OllamaClient:
     def available(self) -> bool:
         return bool(self.host) and bool(self.model)
 
-    def chat(self, prompt: str, timeout: float = 15.0, system: Optional[str] = None, history: Optional[list[dict]] = None, images: Optional[list[bytes]] = None) -> str:
-        base = _ensure_http(self.host).rstrip('/')
+    def chat_raw(self, messages: list[dict], *, timeout: float = 15.0, tools: Optional[list[dict]] = None) -> dict:
+        base = _ensure_http(self.host).rstrip("/")
         url = f"{base}/api/chat"
-        messages = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        if history:
-            for m in history:
-                role = m.get("role")
-                content = m.get("content", "")
-                if role in {"user", "assistant", "system"} and content:
-                    messages.append({"role": role, "content": content})
-        user_msg: dict = {"role": "user", "content": prompt}
-        if images:
-            try:
-                b64s = [base64.b64encode(b).decode("ascii") for b in images if isinstance(b, (bytes, bytearray))]
+        norm: list[dict] = []
+        for m in messages:
+            msg = {k: v for k, v in m.items() if k in {"role", "content", "name", "tool_call_id", "tool_calls"}}
+            if m.get("role") == "user" and m.get("images"):
+                b64s = [base64.b64encode(b).decode("ascii") for b in m.get("images", []) if isinstance(b, (bytes, bytearray))]
                 if b64s:
-                    user_msg["images"] = b64s
-            except Exception:
-                pass
-        messages.append(user_msg)
-        body = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-        }
+                    msg["images"] = b64s
+            norm.append(msg)
+        body = {"model": self.model, "messages": norm, "stream": False}
+        if tools:
+            body["tools"] = tools
         opts = {}
         if isinstance(self.num_predict, int) and self.num_predict > 0:
             opts["num_predict"] = self.num_predict
@@ -61,7 +49,29 @@ class OllamaClient:
             body["options"] = opts
         r = requests.post(url, json=body, timeout=timeout)
         r.raise_for_status()
-        data = r.json()
+        return r.json()
+
+    def chat(self, prompt: str, timeout: float = 15.0, system: Optional[str] = None, history: Optional[list[dict]] = None, images: Optional[list[bytes]] = None, tools: Optional[list[dict]] = None) -> str:
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        if history:
+            for m in history:
+                role = m.get("role")
+                content = m.get("content", "")
+                msg = {k: v for k, v in m.items() if k in {"role", "content", "name", "tool_call_id", "tool_calls"}}
+                if role in {"user", "assistant", "system", "tool"} and (content or msg.get("tool_calls")):
+                    messages.append(msg)
+        user_msg: dict = {"role": "user", "content": prompt}
+        if images:
+            try:
+                b64s = [base64.b64encode(b).decode("ascii") for b in images if isinstance(b, (bytes, bytearray))]
+                if b64s:
+                    user_msg["images"] = b64s
+            except Exception:
+                pass
+        messages.append(user_msg)
+        data = self.chat_raw(messages, timeout=timeout, tools=tools)
         msg = data.get("message") or {}
         text = msg.get("content") or data.get("response") or ""
         return str(text).strip()
