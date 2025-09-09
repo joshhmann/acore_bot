@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import json
 import os
 from typing import List
 
-import discord
+try:
+    import discord  # type: ignore
+except Exception:  # pragma: no cover - allow import without discord
+    discord = None  # type: ignore
 
 
 def json_load(path: str, default):
