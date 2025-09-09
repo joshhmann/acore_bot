@@ -9,6 +9,7 @@ from discord.ui import Modal, TextInput
 from dotenv import load_dotenv
 import requests
 from utils import json_load, json_save_atomic, chunk_text, send_ephemeral, send_long_ephemeral, send_long_reply
+from utils.formatter import normalize_ratio, wrap_response
 from utils.intent import classify as classify_intent
 from soap import SoapClient
 from ollama import OllamaClient
@@ -397,7 +398,7 @@ def get_rates_lines() -> list[str]:
         if not val:
             val = globals().get(k_env, "")
         if val:
-            lines.append(f"- {label}: {val}")
+            lines.append(f"- {label}: {normalize_ratio(val)}")
     add("XP_RATE", "XP")
     add("QUEST_XP_RATE", "Quest XP")
     add("DROP_RATE", "Drop")
@@ -945,19 +946,38 @@ class Bot(discord.Client):
                         try:
                             if name == "online_count":
                                 n = kpi.kpi_players_online()
-                                return await message.reply(f"🟢 Players online: {n}", mention_author=False)
+                                return await message.reply(
+                                    wrap_response("Players online", str(n)), mention_author=False
+                                )
                             if name == "total_characters":
                                 totals = kpi.kpi_totals()
-                                return await message.reply(f"Characters: {totals.get('total_chars', 0)}", mention_author=False)
+                                return await message.reply(
+                                    wrap_response(
+                                        "Characters", str(totals.get("total_chars", 0))
+                                    ),
+                                    mention_author=False,
+                                )
                             if name == "total_accounts":
                                 totals = kpi.kpi_totals()
-                                return await message.reply(f"Accounts: {totals.get('total_accounts', 0)}", mention_author=False)
+                                return await message.reply(
+                                    wrap_response(
+                                        "Accounts", str(totals.get("total_accounts", 0))
+                                    ),
+                                    mention_author=False,
+                                )
                             if name == "auction_count":
                                 n = kpi.kpi_auction_count()
-                                return await message.reply(f"Active auctions: {n}", mention_author=False)
+                                return await message.reply(
+                                    wrap_response("Active auctions", str(n)),
+                                    mention_author=False,
+                                )
                             if name == "server_rates":
                                 lines = get_rates_lines()
-                                return await message.reply("Server rates:\n" + ("\n".join(lines) if lines else "No rates configured."), mention_author=False)
+                                rates = "\n".join(lines) if lines else "No rates configured."
+                                return await message.reply(
+                                    wrap_response("Server rates", "\n" + rates),
+                                    mention_author=False,
+                                )
                             if name == "gold_per_hour":
                                 return await message.reply("I don’t track gold per hour. Try /wowgold_top or /wowah_hot.", mention_author=False)
                             if name == "bots_count":
@@ -1105,7 +1125,9 @@ async def wowrates(interaction: discord.Interaction):
     lines = get_rates_lines()
     if not lines:
         return await interaction.response.send_message("No rates configured.", ephemeral=True)
-    await interaction.response.send_message("Server rates:\n" + "\n".join(lines), ephemeral=True)
+    await interaction.response.send_message(
+        wrap_response("Server rates", "\n" + "\n".join(lines)), ephemeral=True
+    )
 
 @bot.tree.command(name="wowbots", description="Show bot status via SOAP (if configured)")
 async def wowbots(interaction: discord.Interaction):
@@ -1333,19 +1355,32 @@ async def wowask(interaction: discord.Interaction, prompt: str):
                 name, slots = intent
                 if name == "online_count":
                     n = kpi.kpi_players_online()
-                    return await interaction.followup.send(f"🟢 Players online: {n}", ephemeral=True)
+                    return await interaction.followup.send(
+                        wrap_response("Players online", str(n)), ephemeral=True
+                    )
                 if name == "total_characters":
                     totals = kpi.kpi_totals()
-                    return await interaction.followup.send(f"Characters: {totals.get('total_chars', 0)}", ephemeral=True)
+                    return await interaction.followup.send(
+                        wrap_response("Characters", str(totals.get("total_chars", 0))),
+                        ephemeral=True,
+                    )
                 if name == "total_accounts":
                     totals = kpi.kpi_totals()
-                    return await interaction.followup.send(f"Accounts: {totals.get('total_accounts', 0)}", ephemeral=True)
+                    return await interaction.followup.send(
+                        wrap_response("Accounts", str(totals.get("total_accounts", 0))),
+                        ephemeral=True,
+                    )
                 if name == "auction_count":
                     n = kpi.kpi_auction_count()
-                    return await interaction.followup.send(f"Active auctions: {n}", ephemeral=True)
+                    return await interaction.followup.send(
+                        wrap_response("Active auctions", str(n)), ephemeral=True
+                    )
                 if name == "server_rates":
                     lines = get_rates_lines()
-                    return await interaction.followup.send("Server rates:\n" + ("\n".join(lines) if lines else "No rates configured."), ephemeral=True)
+                    rates = "\n".join(lines) if lines else "No rates configured."
+                    return await interaction.followup.send(
+                        wrap_response("Server rates", "\n" + rates), ephemeral=True
+                    )
                 if name == "gold_per_hour":
                     return await interaction.followup.send("I don’t track gold per hour. Try /wowgold_top or /wowah_hot.", ephemeral=True)
                 if name == "bots_count":

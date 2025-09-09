@@ -2,9 +2,29 @@ import os, re, time, json, logging, io, csv
 import discord
 from discord import app_commands
 from typing import Literal
+
 import ac_metrics as kpi
 from soap import SoapClient
 from utils.tool_logging import tool_context
+
+# Optional formatter helpers (fallbacks provided if module not present)
+try:
+    from utils.formatter import format_gold, normalize_item_name, wrap_response
+except Exception:
+    def format_gold(copper: int) -> str:
+        # fallback to existing util if present, else simple formatter
+        try:
+            return kpi.copper_to_gold_s(copper)
+        except Exception:
+            g, rem = divmod(int(copper), 10000)
+            s, c = divmod(rem, 100)
+            return f"{g}g {s}s {c}c"
+
+    def normalize_item_name(name: str) -> str:
+        return str(name)
+
+    def wrap_response(title: str, content: str) -> str:
+        return f"**{title}**\n{content}"
 
 
 async def _send_defer(itx: discord.Interaction):
@@ -123,10 +143,11 @@ def setup_kpi(tree: app_commands.CommandTree):
         if n is None:
             await itx.followup.send("⚠️ Could not determine online players.", ephemeral=True)
             return
+
         if format:
             await _send_serialized(itx, {"online": n}, format, "wowonline")
         else:
-            await itx.followup.send(f"🟢 Players online: **{n}**", ephemeral=True)
+            await itx.followup.send(wrap_response("Players online", str(n)), ephemeral=True)
         _log_cmd("wowonline", t0, rows=1, fmt=format)
 
     @app_commands.command(name="wowgold_top", description="Top characters by gold")
@@ -151,14 +172,15 @@ def setup_kpi(tree: app_commands.CommandTree):
             tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
+
         if format:
             await _send_serialized(itx, rows, format, "wowgold_top")
         else:
             lines = [
-                f"{i+1}. **{r['name']}** (Lv {r['level']}) — {kpi.copper_to_gold_s(r['money'])}"
+                f"{i+1}. **{r['name']}** (Lv {r['level']}) — {format_gold(r['money'])}"
                 for i, r in enumerate(rows)
             ]
-            await itx.followup.send("\n".join(lines), ephemeral=True)
+            await itx.followup.send(wrap_response("Top gold", "\n".join(lines)), ephemeral=True)
         _log_cmd("wowgold_top", t0, rows=len(rows), limit=limit, fmt=format)
 
     @app_commands.command(name="wowlevels", description="Level distribution")
@@ -176,11 +198,12 @@ def setup_kpi(tree: app_commands.CommandTree):
         ) as tlog:
             rows = kpi.kpi_level_distribution()
             tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
+
         if format:
             await _send_serialized(itx, rows, format, "wowlevels")
         else:
             out = " | ".join([f"{r['level']}:{r['n']}" for r in rows]) if rows else "No data."
-            await itx.followup.send(f"📊 Levels → {out}", ephemeral=True)
+            await itx.followup.send(wrap_response("Level distribution", out), ephemeral=True)
         _log_cmd("wowlevels", t0, rows=len(rows), fmt=format)
 
     @app_commands.command(name="wowguilds", description="Most active guilds (last N days)")
@@ -208,11 +231,12 @@ def setup_kpi(tree: app_commands.CommandTree):
             tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
+
         if format:
             await _send_serialized(itx, rows, format, "wowguilds")
         else:
             out = "\n".join([f"{r['guild']}: {r['active_members']}" for r in rows])
-            await itx.followup.send(out, ephemeral=True)
+            await itx.followup.send(wrap_response("Most active guilds", out), ephemeral=True)
         _log_cmd("wowguilds", t0, rows=len(rows), days=days, limit=limit, fmt=format)
 
     @app_commands.command(name="wowah_hot", description="Most listed items on AH")
@@ -235,16 +259,20 @@ def setup_kpi(tree: app_commands.CommandTree):
             tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
+
         if format:
             await _send_serialized(itx, rows, format, "wowah_hot")
         else:
             out_lines = []
             for r in rows:
-                name = r.get("name") or f"Template {r['item_template']}"
+                raw_name = r.get("name") or f"Template {r['item_template']}"
+                name = normalize_item_name(raw_name)
                 out_lines.append(
-                    f"{name}: {int(r['listings'])} listings, avg {kpi.copper_to_gold_s(r['avg_buyout'])}"
+                    f"{name}: {int(r['listings'])} listings, avg {format_gold(r['avg_buyout'])}"
                 )
-            await itx.followup.send("\n".join(out_lines), ephemeral=True)
+            await itx.followup.send(
+                wrap_response("Most listed AH items", "\n".join(out_lines)), ephemeral=True
+            )
         _log_cmd("wowah_hot", t0, rows=len(rows), limit=limit, fmt=format)
 
     @app_commands.command(name="wowarena", description="Arena rating distribution (top buckets)")
@@ -308,7 +336,7 @@ def setup_kpi(tree: app_commands.CommandTree):
                 await itx.followup.send(embed=embed, ephemeral=True)
             else:
                 out = " | ".join([f"{r.get('rating', '?')}:{r.get('teams', '?')}" for r in rows]) if rows else "No data."
-                await itx.followup.send(out, ephemeral=True)
+                await itx.followup.send(wrap_response("Arena rating distribution", out), ephemeral=True)
 
         _log_cmd("wowarena", t0, rows=len(rows), top=top, fmt=format)
 
@@ -335,13 +363,13 @@ def setup_kpi(tree: app_commands.CommandTree):
         ) as tlog:
             n = kpi.kpi_profession_counts(skill_id=skill_id, min_value=min_value)
             tlog(rows=1, cache_hit=getattr(kpi, "last_cache_hit", False))
+
         if format:
             data = {"skill_id": skill_id, "min_value": min_value, "count": n}
             await _send_serialized(itx, data, format, "wowprof")
         else:
             await itx.followup.send(
-                f"🛠️ Skill {skill_id} ≥ {min_value}: **{n}** characters",
-                ephemeral=True,
+                wrap_response(f"Skill {skill_id} ≥ {min_value}", str(n)), ephemeral=True
             )
         _log_cmd("wowprof", t0, rows=1, skill_id=skill_id, min_value=min_value, fmt=format)
 
@@ -384,6 +412,7 @@ def setup_kpi(tree: app_commands.CommandTree):
         if not rows:
             await itx.followup.send("No characters found.", ephemeral=True)
             return
+
         if format:
             await _send_serialized(itx, rows, format, "wowfind_char")
         else:
@@ -392,7 +421,9 @@ def setup_kpi(tree: app_commands.CommandTree):
                 online = "🟢" if r.get("online") else "⚫"
                 guild = r.get("guild") or "(no guild)"
                 lines.append(f"{online} {r['name']} (Lv {r['level']}) — {guild}")
-            await itx.followup.send("\n".join(lines), ephemeral=True)
+            await itx.followup.send(
+                wrap_response("Characters found", "\n".join(lines)), ephemeral=True
+            )
         _log_cmd("wowfind_char", t0, rows=len(rows), query=name, limit=limit, fmt=format)
 
     tree.add_command(wowfind_char)
