@@ -38,7 +38,17 @@ OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "false").lower() in {"1","true","ye
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")
 OLLAMA_AUTO_REPLY = os.getenv("OLLAMA_AUTO_REPLY", "false").lower() in {"1","true","yes","on"}
-OLLAMA_SYSTEM_PROMPT = os.getenv("OLLAMA_SYSTEM_PROMPT", "You are WowSlumsBot, a concise, friendly assistant focused on AzerothCore, World of Warcraft private server operations, and helpful Discord chat. Answer briefly (<= 4 sentences) unless asked for details.")
+OLLAMA_SYSTEM_PROMPT = os.getenv(
+    "OLLAMA_SYSTEM_PROMPT",
+    (
+        "You are WowSlumsBot, a concise, friendly assistant focused on AzerothCore, "
+        "World of Warcraft private server operations, and helpful Discord chat. "
+        "Answer briefly (<= 4 sentences) unless asked for details. "
+        "For economy, player, guild, auction, faction, or arena questions, call the "
+        "appropriate tool instead of guessing. When discussing WotLK mechanics, cite "
+        "relevant documentation."
+    ),
+)
 OLLAMA_HISTORY_TURNS = int(os.getenv("OLLAMA_HISTORY_TURNS", "50"))
 OLLAMA_VISION_ENABLED = os.getenv("OLLAMA_VISION_ENABLED", "false").lower() in {"1","true","yes","on"}
 OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "256"))
@@ -1300,10 +1310,11 @@ async def wowask(interaction: discord.Interaction, prompt: str):
     if not enforce_ratelimit_inter(interaction):
         return
 
+    user_prompt = prompt.strip()
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         # Deterministic metric intents
-        low = prompt.lower()
+        low = user_prompt.lower()
         if METRICS_STRICT:
             intent = classify_intent(low)
             if intent:
@@ -1329,13 +1340,22 @@ async def wowask(interaction: discord.Interaction, prompt: str):
                     return await interaction.followup.send("Bot count isn’t exposed. Use /wowbots if configured, or ask an admin.", ephemeral=True)
 
         # Facts injection for realm-health queries
-        if _is_realm_health_query(prompt):
+        if _is_realm_health_query(user_prompt):
             facts = kpi.kpi_summary_text()
             guard = "Never invent numbers—if a metric is unavailable, say so and suggest a command like /wowkpi."
-            system = bot._get_system_prompt(interaction.guild.id if interaction.guild else None) + "\n\n" + guard + "\nFACTS (live):\n" + facts
+            system = (
+                bot._get_system_prompt(interaction.guild.id if interaction.guild else None)
+                + "\n\n" + guard + "\nFACTS (live):\n" + facts
+            )
         else:
-            system = bot._build_rag_system(prompt, interaction.guild.id if interaction.guild else None)
-        text = await asyncio.to_thread(llm_chat, prompt.strip(), system=system, history=None)
+            system = bot._build_rag_system(user_prompt, interaction.guild.id if interaction.guild else None)
+        guard_text = "If the needed data or docs are missing, reply with 'not sure.'\n"
+        text = await asyncio.to_thread(
+            llm_chat,
+            guard_text + user_prompt,
+            system=system,
+            history=None,
+        )
         if not text:
             return await interaction.followup.send("⚠️ No response from model.", ephemeral=True)
         await send_long_ephemeral(interaction, text)
