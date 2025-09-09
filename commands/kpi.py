@@ -5,6 +5,8 @@ from typing import Literal
 
 import ac_metrics as kpi
 from soap import SoapClient
+from utils.formatters import copper_to_gsc, rows_to_embed
+
 from named_queries import run_named_query
 
 import slum_queries as sq
@@ -195,6 +197,12 @@ def setup_kpi(tree: app_commands.CommandTree):
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
 
+        lines = [
+            f"{i+1}. **{r['name']}** (Lv {r['level']}) — {copper_to_gsc(r['money'])}"
+            for i, r in enumerate(rows)
+        ]
+        await itx.followup.send(embed=rows_to_embed("Top characters by gold", lines), ephemeral=True)
+        _log_cmd("wowgold_top", t0, rows=len(rows), limit=limit)
         if format:
             await _send_serialized(itx, rows, format, "wowgold_top")
         else:
@@ -204,7 +212,6 @@ def setup_kpi(tree: app_commands.CommandTree):
             ]
             await itx.followup.send(wrap_response("Top gold", "\n".join(lines)), ephemeral=True)
         _log_cmd("wowgold_top", t0, rows=len(rows), limit=limit, fmt=format)
-
     @app_commands.command(name="wowlevels", description="Level distribution")
     @app_commands.describe(format="Optional export format")
     async def wowlevels(
@@ -212,6 +219,11 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
+        rows = kpi.kpi_level_distribution()
+        if not rows:
+            return await itx.followup.send("No data.", ephemeral=True)
+        lines = [f"{r['level']}: {r['n']}" for r in rows]
+        await itx.followup.send(embed=rows_to_embed("Level distribution", lines), ephemeral=True)
         if not DB_ENABLED:
             await itx.followup.send("DB is not enabled.", ephemeral=True)
             _log_cmd("wowlevels", t0, rows=0)
@@ -269,6 +281,11 @@ def setup_kpi(tree: app_commands.CommandTree):
             tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
+        lines = [f"{r['guild']}: {r['active_members']}" for r in rows]
+        await itx.followup.send(
+            embed=rows_to_embed("Most active guilds", lines), ephemeral=True
+        )
+        _log_cmd("wowguilds", t0, rows=len(rows), days=days, limit=limit)
 
         if format:
             await _send_serialized(itx, rows, format, "wowguilds")
@@ -307,6 +324,11 @@ def setup_kpi(tree: app_commands.CommandTree):
         for r in rows:
             name = r.get("name") or f"Template {r['item_template']}"
             out_lines.append(
+                f"{name}: {int(r['listings'])} listings, avg {copper_to_gsc(r['avg_buyout'])}"
+            )
+        await itx.followup.send(
+            embed=rows_to_embed("Most listed items on AH", out_lines), ephemeral=True
+        )
                 f"{name}: {int(r['listings'])} listings, avg {kpi.copper_to_gold_s(r['avg_buyout'])}"
             delta = r.get("delta_24h")
             delta_s = f" (Δ24h {delta:+d})" if delta is not None else ""
@@ -327,6 +349,14 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
+
+        rows = kpi.kpi_arena_rating_distribution(limit_rows=top)
+        if not rows:
+            return await itx.followup.send("No data.", ephemeral=True)
+        lines = [f"{r['rating']}: {r['teams']}" for r in rows]
+        await itx.followup.send(
+            embed=rows_to_embed("Arena rating distribution", lines), ephemeral=True
+        )
         if not DB_ENABLED:
             await itx.followup.send("DB is not enabled.", ephemeral=True)
             _log_cmd("wowarena", t0, rows=0, top=top)
@@ -523,6 +553,15 @@ def setup_kpi(tree: app_commands.CommandTree):
         if not rows:
             await itx.followup.send("No characters found.", ephemeral=True)
             return
+        lines = []
+        for r in rows:
+            online = "🟢" if r.get("online") else "⚫"
+            guild = r.get("guild") or "(no guild)"
+            lines.append(f"{online} {r['name']} (Lv {r['level']}) — {guild}")
+        await itx.followup.send(
+            embed=rows_to_embed("Characters", lines), ephemeral=True
+        )
+        _log_cmd("wowfind_char", t0, rows=len(rows), query=name, limit=limit)
 
         if format:
             await _send_serialized(itx, rows, format, "wowfind_char")

@@ -4,9 +4,9 @@ import json
 import os
 from typing import List
 
-try:
+try:  # pragma: no cover - fallback when discord is missing
     import discord  # type: ignore
-except Exception:  # pragma: no cover - allow import without discord
+except Exception:  # pragma: no cover - optional dependency
     discord = None  # type: ignore
 
 

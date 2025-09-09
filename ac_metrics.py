@@ -2,7 +2,8 @@ import os
 import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
-
+import pymysql
+from utils.formatters import copper_to_gsc
 # --- PyMySQL import with safe fallback (for test envs without pymysql) ---
 try:
     import pymysql  # type: ignore
@@ -360,7 +361,7 @@ def kpi_summary_text() -> str:
         lines.append(wrap_response("Arena (top buckets)", head))
     if topgold:
         tg = " | ".join(
-            f"{r['name']} (Lv {r['level']}): {format_gold(r['money'])}" for r in topgold
+            f"{r['name']} (Lv {r['level']}): {copper_to_gsc(r['money'])}" for r in topgold
         )
         lines.append(wrap_response("Top gold", tg))
     return "\n".join(lines)
