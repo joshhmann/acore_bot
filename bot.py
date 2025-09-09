@@ -15,6 +15,7 @@ from ollama import OllamaClient
 from rag_store import RagStore
 from arliai import ArliaiClient
 from ac_db import DBConfig as ACDBConfig, get_online_count as db_get_online_count, get_totals as db_get_totals
+from bot.tools import get_current_time
 
 load_dotenv()
 import ac_metrics as kpi
@@ -213,6 +214,9 @@ if ARLIAI_ENABLED and (ARLIAI_API_KEY or ARLIAI_TEXT_API_KEY or ARLIAI_IMAGE_API
     except Exception:
         arliai_client = None
 
+# Tool registry for LLM providers
+LLM_TOOLS = {"get_current_time": get_current_time}
+
 def llm_available() -> bool:
     if LLM_PROVIDER == "ollama":
         return OLLAMA_ENABLED and ollama_available()
@@ -272,6 +276,11 @@ def _matches(s: str, *subs: str) -> bool:
 
 def _is_rates_query(s: str) -> bool:
     return _matches(s, "xp rate", "rates", "xp rates", "drop rate", "gold rate", "honor rate", "reputation rate", "profession rate")
+
+
+def _is_time_query(text: str) -> bool:
+    s = (text or "").lower()
+    return any(k in s for k in ("what time", "time is it", "current time", "time now"))
 
 class RegisterModal(Modal, title="Create Game Account"):
     username: TextInput = TextInput(label="Username", placeholder="3–16 chars: A–Z a–z 0–9 _ -", min_length=3, max_length=16)
@@ -1327,6 +1336,16 @@ async def wowask(interaction: discord.Interaction, prompt: str):
                     return await interaction.followup.send("I don’t track gold per hour. Try /wowgold_top or /wowah_hot.", ephemeral=True)
                 if name == "bots_count":
                     return await interaction.followup.send("Bot count isn’t exposed. Use /wowbots if configured, or ask an admin.", ephemeral=True)
+
+        # Time queries via tool
+        if _is_time_query(prompt):
+            t = get_current_time()
+            if t.get("ok"):
+                return await interaction.followup.send(
+                    f"🕒 Current time: {t['iso_local']} ({t['tz_local']})",
+                    ephemeral=True,
+                )
+            return await interaction.followup.send("⚠️ Could not determine current time.", ephemeral=True)
 
         # Facts injection for realm-health queries
         if _is_realm_health_query(prompt):
