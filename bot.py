@@ -1,5 +1,6 @@
 # bot_modal.py
 import os, re, time, asyncio, base64, io
+from collections import defaultdict, deque
 from typing import Optional
 from urllib.parse import urlparse
 import discord
@@ -46,6 +47,8 @@ try:
     OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.7"))
 except Exception:
     OLLAMA_TEMPERATURE = 0.7
+OLLAMA_TOOLS_ENABLED = os.getenv("OLLAMA_TOOLS_ENABLED", "true").lower() in {"1","true","yes","on"}
+OLLAMA_TOOLS_ROLE = os.getenv("OLLAMA_TOOLS_ROLE", "").strip()
 
 # Optional: Retrieval-Augmented Generation (use local KB/server info as context)
 RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() in {"1","true","yes","on"}
@@ -108,21 +111,43 @@ def _db_cfg() -> Optional[ACDBConfig]:
         return None
     return ACDBConfig(DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_AUTH_DB, DB_CHAR_DB, DB_WORLD_DB)
 
-RATE_SECONDS = 5
-_last_call: dict[int, float] = {}
+USER_QPS = (1, 3)  # 1 request per 3 seconds
+CHANNEL_QPS = (5, 10)  # 5 requests per 10 seconds
 
-def ratelimit(user_id: int) -> bool:
-    now = time.time()
-    if now - _last_call.get(user_id, 0) < RATE_SECONDS:
-        return False
-    _last_call[user_id] = now
-    return True
+_user_calls: dict[int, deque[float]] = defaultdict(deque)
+_channel_calls: dict[int, deque[float]] = defaultdict(deque)
 
-def seconds_until_allowed(user_id: int) -> int:
+def _qps_check(user_id: int, channel_id: int | None, *, update: bool = True) -> tuple[bool, float, str]:
     now = time.time()
-    last = _last_call.get(user_id, 0)
-    remaining = int(max(0, RATE_SECONDS - (now - last)))
-    return remaining
+    dq_u = _user_calls[user_id]
+    while dq_u and now - dq_u[0] > USER_QPS[1]:
+        dq_u.popleft()
+    if len(dq_u) >= USER_QPS[0]:
+        wait = USER_QPS[1] - (now - dq_u[0])
+        return False, wait, "user"
+    dq_c = None
+    if channel_id is not None:
+        dq_c = _channel_calls[channel_id]
+        while dq_c and now - dq_c[0] > CHANNEL_QPS[1]:
+            dq_c.popleft()
+        if len(dq_c) >= CHANNEL_QPS[0]:
+            wait = CHANNEL_QPS[1] - (now - dq_c[0])
+            return False, wait, "channel"
+    if update:
+        dq_u.append(now)
+        if dq_c is not None:
+            dq_c.append(now)
+    return True, 0.0, ""
+
+def ratelimit(user_id: int, channel_id: int | None = None) -> bool:
+    ok, _, _ = _qps_check(user_id, channel_id, update=True)
+    return ok
+
+def seconds_until_allowed(user_id: int, channel_id: int | None = None) -> int:
+    ok, wait, _ = _qps_check(user_id, channel_id, update=False)
+    if ok:
+        return 0
+    return int(wait + 0.999)
 
 def valid_username(u: str) -> bool:
     return 3 <= len(u) <= 16 and re.fullmatch(r"[A-Za-z0-9_\-]+", u) is not None
@@ -165,16 +190,27 @@ def format_soap_error(e: Exception) -> str:
 
 """Utility helpers moved to utils.py"""
 
+def _has_tools_role_member(member) -> bool:
+    if not OLLAMA_TOOLS_ROLE:
+        return False
+    try:
+        return any(getattr(r, "name", "").lower() == OLLAMA_TOOLS_ROLE.lower() for r in getattr(member, "roles", []))
+    except Exception:
+        return False
+
+def _has_tools_role(inter: discord.Interaction) -> bool:
+    return _has_tools_role_member(getattr(inter, "user", None))
+
 def require_allowed(inter: discord.Interaction) -> bool:
     if not ((ALLOWED_GUILD_ID == 0) or (inter.guild and inter.guild.id == ALLOWED_GUILD_ID)):
         return False
-    if not ((ALLOWED_CHANNEL_ID == 0) or (inter.channel and inter.channel.id == ALLOWED_CHANNEL_ID)):
+    if not ((ALLOWED_CHANNEL_ID == 0) or (inter.channel and inter.channel.id == ALLOWED_CHANNEL_ID) or _has_tools_role(inter)):
         # Channel restricted; attempt to notify
         try:
             # Note: function may be called before a response is created
             # Use send_ephemeral for safety
             import asyncio as _a
-            _a.create_task(send_ephemeral(inter, "🔒 Use this command in the designated channel."))
+            _a.create_task(send_ephemeral(inter, "🔒 Use this command in the designated channel or with the required role."))
         except Exception:
             pass
         return False
@@ -182,11 +218,15 @@ def require_allowed(inter: discord.Interaction) -> bool:
 
 def enforce_ratelimit_inter(inter: discord.Interaction) -> bool:
     uid = inter.user.id if inter.user else 0
-    if not ratelimit(uid):
+    cid = inter.channel.id if inter.channel else None
+    ok, wait, scope = _qps_check(uid, cid, update=True)
+    if not ok:
         try:
-            wait = seconds_until_allowed(uid)
+            msg = f"⏳ Please wait {int(wait)+1}s."
+            if scope == "channel":
+                msg = f"⏳ Channel busy. Retry in {int(wait)+1}s."
             import asyncio as _a
-            _a.create_task(send_ephemeral(inter, f"⏳ Please wait {wait}s."))
+            _a.create_task(send_ephemeral(inter, msg))
         except Exception:
             pass
         return False
@@ -283,8 +323,9 @@ class RegisterModal(Modal, title="Create Game Account"):
 
     async def on_submit(self, interaction: discord.Interaction):
         # Rate limit & validate
-        if not ratelimit(self._user_id):
-            wait = seconds_until_allowed(self._user_id)
+        cid = interaction.channel.id if interaction.channel else None
+        if not ratelimit(self._user_id, cid):
+            wait = seconds_until_allowed(self._user_id, cid)
             return await interaction.response.send_message(f"⏳ Please wait {wait}s before trying again.", ephemeral=True)
 
         u = str(self.username.value).strip()
@@ -475,6 +516,25 @@ class Bot(discord.Client):
             if LLM_PROVIDER != "arliai":
                 self.tree.remove_command("wowimage")
                 self.tree.remove_command("wowupscale")
+            if not OLLAMA_TOOLS_ENABLED:
+                for name in (
+                    "wowask",
+                    "wowimage",
+                    "wowupscale",
+                    "wowaskimg",
+                    "wowascii",
+                    "wowpersona_set",
+                    "wowpersona_show",
+                    "wowclearhistory",
+                    "wowrag_on",
+                    "wowrag_off",
+                    "wowrag_show",
+                    "wowautoreply_on",
+                    "wowautoreply_off",
+                    "wowautoreply_show",
+                    "wowllminfo",
+                ):
+                    self.tree.remove_command(name)
         except Exception:
             pass
 
@@ -793,9 +853,10 @@ class Bot(discord.Client):
             return
         # Channel restriction: if ALLOWED_CHANNEL_ID is set, only reply there
         in_allowed_channel = (ALLOWED_CHANNEL_ID == 0) or (message.channel and message.channel.id == ALLOWED_CHANNEL_ID)
+        role_allowed = _has_tools_role_member(message.author)
         # If no explicit channel, only reply when mentioned to avoid spam
         mentioned = self.user in getattr(message, "mentions", []) if self.user else False
-        if not (in_allowed_channel or mentioned):
+        if not (in_allowed_channel or role_allowed or mentioned):
             return
         # Need content or image
         content = (message.content or "").strip()
@@ -869,7 +930,7 @@ class Bot(discord.Client):
                         pass
             # Vision quick reply: describe image
             if has_image and LLM_PROVIDER == "ollama" and OLLAMA_ENABLED and OLLAMA_VISION_ENABLED:
-                if not ratelimit(message.author.id):
+                if not ratelimit(message.author.id, message.channel.id if message.channel else None):
                     return
                 try:
                     async with message.channel.typing():
@@ -903,7 +964,7 @@ class Bot(discord.Client):
             except Exception:
                 pass
         # Simple per-user rate limit
-        if not ratelimit(message.author.id):
+        if not ratelimit(message.author.id, message.channel.id if message.channel else None):
             return  # silent skip to reduce noise
         try:
             async with message.channel.typing():
@@ -969,7 +1030,7 @@ class Bot(discord.Client):
 bot = Bot()
 
 def channel_allowed(inter: discord.Interaction) -> bool:
-    return (ALLOWED_CHANNEL_ID == 0) or (inter.channel and inter.channel.id == ALLOWED_CHANNEL_ID)
+    return (ALLOWED_CHANNEL_ID == 0) or (inter.channel and inter.channel.id == ALLOWED_CHANNEL_ID) or _has_tools_role(inter)
 
 def guild_allowed(inter: discord.Interaction) -> bool:
     return (ALLOWED_GUILD_ID == 0) or (inter.guild and inter.guild.id == ALLOWED_GUILD_ID)
@@ -1244,8 +1305,9 @@ class ChangePasswordModal(Modal, title="Change Game Password"):
         self._user_id = user_id
 
     async def on_submit(self, interaction: discord.Interaction):
-        if not ratelimit(self._user_id):
-            wait = seconds_until_allowed(self._user_id)
+        cid = interaction.channel.id if interaction.channel else None
+        if not ratelimit(self._user_id, cid):
+            wait = seconds_until_allowed(self._user_id, cid)
             return await interaction.response.send_message(f"⏳ Please wait {wait}s before trying again.", ephemeral=True)
 
         u = str(self.username.value).strip()
@@ -1434,7 +1496,7 @@ async def wowaskimg(interaction: discord.Interaction, image: discord.Attachment,
     if not guild_allowed(interaction):
         return
     if not channel_allowed(interaction):
-        return await interaction.response.send_message("🔒 Use this command in the designated channel.", ephemeral=True)
+        return await interaction.response.send_message("🔒 Use this command in the designated channel or with the required role.", ephemeral=True)
     # Only supported with Ollama vision
     if LLM_PROVIDER != "ollama":
         return await interaction.response.send_message("🤖 The current provider does not support image understanding.", ephemeral=True)
@@ -1442,8 +1504,9 @@ async def wowaskimg(interaction: discord.Interaction, image: discord.Attachment,
         return await interaction.response.send_message("🤖 Vision is not enabled. Set OLLAMA_ENABLED=true and OLLAMA_VISION_ENABLED=true.", ephemeral=True)
     if not image or not (getattr(image, "content_type", "").startswith("image/") or str(image.filename).lower().endswith((".png",".jpg",".jpeg",".webp",".bmp",".gif"))):
         return await interaction.response.send_message("❌ Please attach an image.", ephemeral=True)
-    if not ratelimit(interaction.user.id):
-        wait = seconds_until_allowed(interaction.user.id)
+    cid = interaction.channel.id if interaction.channel else None
+    if not ratelimit(interaction.user.id, cid):
+        wait = seconds_until_allowed(interaction.user.id, cid)
         return await interaction.response.send_message(f"⏳ Please wait {wait}s.", ephemeral=True)
 
     await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1522,7 +1585,7 @@ async def wowclearhistory(interaction: discord.Interaction):
     if not OLLAMA_ENABLED:
         return await interaction.response.send_message("🤖 Ollama is not enabled.", ephemeral=True)
     if not channel_allowed(interaction):
-        return await interaction.response.send_message("🔒 Use this command in the designated channel.", ephemeral=True)
+        return await interaction.response.send_message("🔒 Use this command in the designated channel or with the required role.", ephemeral=True)
     if not interaction.channel:
         return await interaction.response.send_message("❌ No channel context.", ephemeral=True)
     bot._clear_history(interaction.channel.id)
