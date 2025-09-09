@@ -3,7 +3,37 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-import pymysql
+# --- PyMySQL import with safe fallback (for test envs without pymysql) ---
+try:
+    import pymysql  # type: ignore
+except Exception:  # pragma: no cover - fallback for environments without pymysql
+    class _DummyPyMysql:  # minimal stub to satisfy references in code/tests
+        class cursors:
+            DictCursor = dict
+
+        @staticmethod
+        def connect(*args, **kwargs):  # type: ignore[empty-body]
+            raise RuntimeError("pymysql not installed")
+
+    pymysql = _DummyPyMysql()  # type: ignore
+
+# --- Optional formatter imports (provide fallbacks if module is absent) ---
+try:
+    from utils.formatter import format_gold, wrap_response
+except Exception:
+    def format_gold(copper: int) -> str:
+        # Very small fallback; replace if you have kpi.copper_to_gold_s
+        try:
+            from ac_metrics import copper_to_gold_s  # lazy import to avoid cycles
+            return copper_to_gold_s(int(copper))
+        except Exception:
+            g, rem = divmod(int(copper), 10000)
+            s, c = divmod(rem, 100)
+            return f"{g}g {s}s {c}c"
+
+    def wrap_response(title: str, content: str) -> str:
+        return f"**{title}**\n{content}"
+
 
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
@@ -16,26 +46,36 @@ DB_WORLD = os.getenv("DB_WORLD_DB", os.getenv("DB_WORLD", "world"))
 
 TTL_HOT = int(os.getenv("METRICS_TTL_SECONDS", "8"))
 
-DICT = pymysql.cursors.DictCursor
+DICT = pymysql.cursors.DictCursor if pymysql else None
 _cache: Dict[Any, Dict[str, Any]] = {}
+# Track whether the last cache access was a hit for external logging.
+last_cache_hit: bool = False
 
 
 def _cache_get(key):
+    global last_cache_hit
     hit = _cache.get(key)
     if not hit:
+        last_cache_hit = False
         return None
     if time.time() - hit["ts"] > hit["ttl"]:
         _cache.pop(key, None)
+        last_cache_hit = False
         return None
+    last_cache_hit = True
     return hit["val"]
 
 
 def _cache_set(key, val, ttl=TTL_HOT):
+    global last_cache_hit
     _cache[key] = {"val": val, "ts": time.time(), "ttl": ttl}
+    last_cache_hit = False
 
 
 @contextmanager
 def conn(dbname: str):
+    if pymysql is None:
+        raise RuntimeError("pymysql is required for database access")
     cn = pymysql.connect(
         host=DB_HOST,
         port=DB_PORT,
@@ -69,16 +109,8 @@ def _has_table(dbname: str, table: str) -> bool:
 
 
 def copper_to_gold_s(copper: int) -> str:
-    g, rem = divmod(int(copper or 0), 10000)
-    s, c = divmod(rem, 100)
-    out: List[str] = []
-    if g:
-        out.append(f"{g}g")
-    if s:
-        out.append(f"{s}s")
-    if c or not out:
-        out.append(f"{c}c")
-    return " ".join(out)
+    """Backwards-compatible helper using :func:`format_gold`."""
+    return format_gold(copper)
 
 
 def kpi_players_online() -> int:
@@ -248,6 +280,22 @@ def kpi_arena_rating_distribution(limit_rows: Optional[int] = None) -> List[Dict
     return rows[:limit_rows] if limit_rows else rows
 
 
+def kpi_arena_distribution(limit_rows: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Arena team counts per rating and bracket."""
+    q = (
+        """
+    SELECT type AS bracket, rating, COUNT(*) AS teams
+    FROM arena_team
+    GROUP BY type, rating
+    ORDER BY rating DESC
+    """
+    )
+    with conn(DB_CHAR) as c, c.cursor() as cur:
+        cur.execute(q)
+        rows = cur.fetchall()
+    return rows[:limit_rows] if limit_rows else rows
+
+
 def kpi_profession_counts(skill_id: int, min_value: int = 300) -> int:
     q = (
         """
@@ -303,17 +351,18 @@ def kpi_summary_text() -> str:
     arena = kpi_arena_rating_distribution(limit_rows=5)
     topgold = kpi_top_gold(limit=3)
     lines = [
-        f"🟢 Online now: **{online}**",
-        f"🧍 Characters: **{totals['total_chars']}**, 👤 Accounts: **{totals['total_accounts']}**",
+        wrap_response("Online now", str(online)),
+        wrap_response("Characters", str(totals['total_chars'])),
+        wrap_response("Accounts", str(totals['total_accounts'])),
     ]
     if arena:
         head = ", ".join(f"{r['rating']}: {r['teams']}" for r in arena[:5])
-        lines.append(f"🏟️ Arena (top buckets): {head}")
+        lines.append(wrap_response("Arena (top buckets)", head))
     if topgold:
         tg = " | ".join(
-            f"{r['name']} (Lv {r['level']}): {copper_to_gold_s(r['money'])}" for r in topgold
+            f"{r['name']} (Lv {r['level']}): {format_gold(r['money'])}" for r in topgold
         )
-        lines.append(f"💰 Top gold: {tg}")
+        lines.append(wrap_response("Top gold", tg))
     return "\n".join(lines)
 
 
