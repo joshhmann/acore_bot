@@ -4,6 +4,7 @@ from discord import app_commands
 from typing import Literal
 import ac_metrics as kpi
 from soap import SoapClient
+from utils.tool_logging import tool_context
 
 
 async def _send_defer(itx: discord.Interaction):
@@ -74,13 +75,21 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
-        if format:
-            data = json.loads(kpi.kpi_summary_json())
-            await _send_serialized(itx, data, format, "wowkpi")
-        else:
-            text = kpi.kpi_summary_text()
-            await itx.followup.send(text, ephemeral=True)
-        _log_cmd("wowkpi", t0, fmt=format)
+        with tool_context(
+            "kpi_summary",
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            if format:
+                data = json.loads(kpi.kpi_summary_json())
+                await _send_serialized(itx, data, format, "wowkpi")
+                tlog(rows=1, cache_hit=getattr(kpi, "last_cache_hit", False))
+            else:
+                text = kpi.kpi_summary_text()
+                await itx.followup.send(text, ephemeral=True)
+                tlog(rows=1, cache_hit=getattr(kpi, "last_cache_hit", False))
+        _log_cmd("wowkpi", t0, rows=1, fmt=format)
 
     @app_commands.command(name="wowonline", description="Players online now")
     @app_commands.describe(format="Optional export format")
@@ -90,11 +99,18 @@ def setup_kpi(tree: app_commands.CommandTree):
         t0 = time.time()
         await _send_defer(itx)
         n = None
-        try:
-            # Try DB
-            n = kpi.kpi_players_online()
-        except Exception:
-            n = None
+        with tool_context(
+            "kpi_players_online",
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            try:
+                # Try DB
+                n = kpi.kpi_players_online()
+                tlog(rows=1, cache_hit=getattr(kpi, "last_cache_hit", False))
+            except Exception as e:
+                tlog(error=str(e), db_timeout="timeout" in str(e).lower())
         if n is None or n == 0:
             # SOAP fallback
             try:
@@ -124,7 +140,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_top_gold(limit=limit)
+        with tool_context(
+            "kpi_top_gold",
+            params={"limit": limit},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            rows = kpi.kpi_top_gold(limit=limit)
+            tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
         if format:
@@ -144,7 +168,14 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_level_distribution()
+        with tool_context(
+            "kpi_level_distribution",
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            rows = kpi.kpi_level_distribution()
+            tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if format:
             await _send_serialized(itx, rows, format, "wowlevels")
         else:
@@ -166,7 +197,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_guild_activity(days=days, limit=limit)
+        with tool_context(
+            "kpi_guild_activity",
+            params={"days": days, "limit": limit},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            rows = kpi.kpi_guild_activity(days=days, limit=limit)
+            tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
         if format:
@@ -185,7 +224,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_auction_hot_items(limit=limit)
+        with tool_context(
+            "kpi_auction_hot_items",
+            params={"limit": limit},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            rows = kpi.kpi_auction_hot_items(limit=limit)
+            tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
         if format:
@@ -209,7 +256,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_arena_rating_distribution(limit_rows=top)
+        with tool_context(
+            "kpi_arena_rating_distribution",
+            params={"top": top},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            rows = kpi.kpi_arena_rating_distribution(limit_rows=top)
+            tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if format:
             await _send_serialized(itx, rows, format, "wowarena")
         else:
@@ -231,7 +286,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
-        n = kpi.kpi_profession_counts(skill_id=skill_id, min_value=min_value)
+        with tool_context(
+            "kpi_profession_counts",
+            params={"skill_id": skill_id, "min_value": min_value},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            n = kpi.kpi_profession_counts(skill_id=skill_id, min_value=min_value)
+            tlog(rows=1, cache_hit=getattr(kpi, "last_cache_hit", False))
         if format:
             data = {"skill_id": skill_id, "min_value": min_value, "count": n}
             await _send_serialized(itx, data, format, "wowprof")
@@ -265,10 +328,19 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
-        try:
-            rows = kpi.kpi_find_characters(name, limit=max(1, min(50, limit)))
-        except Exception:
-            rows = []
+        with tool_context(
+            "kpi_find_characters",
+            params={"name": name, "limit": limit},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as tlog:
+            try:
+                rows = kpi.kpi_find_characters(name, limit=max(1, min(50, limit)))
+                tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
+            except Exception as e:
+                tlog(error=str(e), db_timeout="timeout" in str(e).lower())
+                rows = []
         if not rows:
             await itx.followup.send("No characters found.", ephemeral=True)
             return

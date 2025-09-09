@@ -20,6 +20,7 @@ from bot.tools import get_current_time
 load_dotenv()
 import ac_metrics as kpi
 from commands.kpi import setup_kpi as setup_kpi_commands
+from commands.health import setup_health as setup_health_commands
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 SOAP_HOST = os.getenv("SOAP_HOST", "127.0.0.1")
@@ -499,6 +500,9 @@ class Bot(discord.Client):
         # Register KPI commands (DB-driven metrics) only if DB is enabled
         if DB_ENABLED and DB_USER:
             setup_kpi_commands(self.tree)
+
+        # Health check command available always
+        setup_health_commands(self.tree)
 
         if ALLOWED_GUILD_ID:
             guild = discord.Object(id=ALLOWED_GUILD_ID)
