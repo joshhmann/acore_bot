@@ -1,6 +1,7 @@
 # bot_modal.py
-import os, re, time, asyncio, base64, io
-from typing import Optional
+import os, re, time, asyncio, base64, io, json
+from typing import Optional, Any
+from collections import defaultdict, deque
 from urllib.parse import urlparse
 import discord
 import html 
@@ -9,16 +10,20 @@ from discord.ui import Modal, TextInput
 from dotenv import load_dotenv
 import requests
 from utils import json_load, json_save_atomic, chunk_text, send_ephemeral, send_long_ephemeral, send_long_reply
+from utils.formatter import normalize_ratio, wrap_response
 from utils.intent import classify as classify_intent
 from soap import SoapClient
 from ollama import OllamaClient
-from rag_store import RagStore
+from rag_store import RagStore, sanitize_text
 from arliai import ArliaiClient
 from ac_db import DBConfig as ACDBConfig, get_online_count as db_get_online_count, get_totals as db_get_totals
+from bot.tools import get_current_time
 
 load_dotenv()
 import ac_metrics as kpi
 from commands.kpi import setup_kpi as setup_kpi_commands
+from bot.tools import SLUM_QUERY_TOOL, run_named_query
+from commands.health import setup_health as setup_health_commands
 
 TOKEN = os.getenv("DISCORD_TOKEN")
 SOAP_HOST = os.getenv("SOAP_HOST", "127.0.0.1")
@@ -38,7 +43,17 @@ OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "false").lower() in {"1","true","ye
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")
 OLLAMA_AUTO_REPLY = os.getenv("OLLAMA_AUTO_REPLY", "false").lower() in {"1","true","yes","on"}
-OLLAMA_SYSTEM_PROMPT = os.getenv("OLLAMA_SYSTEM_PROMPT", "You are WowSlumsBot, a concise, friendly assistant focused on AzerothCore, World of Warcraft private server operations, and helpful Discord chat. Answer briefly (<= 4 sentences) unless asked for details.")
+OLLAMA_SYSTEM_PROMPT = os.getenv(
+    "OLLAMA_SYSTEM_PROMPT",
+    (
+        "You are WowSlumsBot, a concise, friendly assistant focused on AzerothCore, "
+        "World of Warcraft private server operations, and helpful Discord chat. "
+        "Answer briefly (<= 4 sentences) unless asked for details. "
+        "For economy, player, guild, auction, faction, or arena questions, call the "
+        "appropriate tool instead of guessing. When discussing WotLK mechanics, cite "
+        "relevant documentation."
+    ),
+)
 OLLAMA_HISTORY_TURNS = int(os.getenv("OLLAMA_HISTORY_TURNS", "50"))
 OLLAMA_VISION_ENABLED = os.getenv("OLLAMA_VISION_ENABLED", "false").lower() in {"1","true","yes","on"}
 OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "256"))
@@ -46,12 +61,13 @@ try:
     OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.7"))
 except Exception:
     OLLAMA_TEMPERATURE = 0.7
+OLLAMA_TOOLS_ENABLED = os.getenv("OLLAMA_TOOLS_ENABLED", "true").lower() in {"1","true","yes","on"}
+OLLAMA_TOOLS_ROLE = os.getenv("OLLAMA_TOOLS_ROLE", "").strip()
 
 # Optional: Retrieval-Augmented Generation (use local KB/server info as context)
 RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() in {"1","true","yes","on"}
-RAG_KB_TOPK = int(os.getenv("RAG_KB_TOPK", "3"))
+RAG_TOPK = int(os.getenv("RAG_TOPK", "3"))
 RAG_MAX_CHARS = int(os.getenv("RAG_MAX_CHARS", "3000"))
-RAG_DOCS_TOPK = int(os.getenv("RAG_DOCS_TOPK", "2"))
 RAG_MIN_SCORE = int(os.getenv("RAG_MIN_SCORE", "10"))
 RAG_IN_AUTOREPLY = os.getenv("RAG_IN_AUTOREPLY", "false").lower() in {"1","true","yes","on"}
 KB_SUGGEST_IN_CHAT = os.getenv("KB_SUGGEST_IN_CHAT", "false").lower() in {"1","true","yes","on"}
@@ -108,21 +124,43 @@ def _db_cfg() -> Optional[ACDBConfig]:
         return None
     return ACDBConfig(DB_HOST, DB_PORT, DB_USER, DB_PASS, DB_AUTH_DB, DB_CHAR_DB, DB_WORLD_DB)
 
-RATE_SECONDS = 5
-_last_call: dict[int, float] = {}
+USER_QPS = (1, 3)  # 1 request per 3 seconds
+CHANNEL_QPS = (5, 10)  # 5 requests per 10 seconds
 
-def ratelimit(user_id: int) -> bool:
-    now = time.time()
-    if now - _last_call.get(user_id, 0) < RATE_SECONDS:
-        return False
-    _last_call[user_id] = now
-    return True
+_user_calls: dict[int, deque[float]] = defaultdict(deque)
+_channel_calls: dict[int, deque[float]] = defaultdict(deque)
 
-def seconds_until_allowed(user_id: int) -> int:
+def _qps_check(user_id: int, channel_id: int | None, *, update: bool = True) -> tuple[bool, float, str]:
     now = time.time()
-    last = _last_call.get(user_id, 0)
-    remaining = int(max(0, RATE_SECONDS - (now - last)))
-    return remaining
+    dq_u = _user_calls[user_id]
+    while dq_u and now - dq_u[0] > USER_QPS[1]:
+        dq_u.popleft()
+    if len(dq_u) >= USER_QPS[0]:
+        wait = USER_QPS[1] - (now - dq_u[0])
+        return False, wait, "user"
+    dq_c = None
+    if channel_id is not None:
+        dq_c = _channel_calls[channel_id]
+        while dq_c and now - dq_c[0] > CHANNEL_QPS[1]:
+            dq_c.popleft()
+        if len(dq_c) >= CHANNEL_QPS[0]:
+            wait = CHANNEL_QPS[1] - (now - dq_c[0])
+            return False, wait, "channel"
+    if update:
+        dq_u.append(now)
+        if dq_c is not None:
+            dq_c.append(now)
+    return True, 0.0, ""
+
+def ratelimit(user_id: int, channel_id: int | None = None) -> bool:
+    ok, _, _ = _qps_check(user_id, channel_id, update=True)
+    return ok
+
+def seconds_until_allowed(user_id: int, channel_id: int | None = None) -> int:
+    ok, wait, _ = _qps_check(user_id, channel_id, update=False)
+    if ok:
+        return 0
+    return int(wait + 0.999)
 
 def valid_username(u: str) -> bool:
     return 3 <= len(u) <= 16 and re.fullmatch(r"[A-Za-z0-9_\-]+", u) is not None
@@ -165,16 +203,27 @@ def format_soap_error(e: Exception) -> str:
 
 """Utility helpers moved to utils.py"""
 
+def _has_tools_role_member(member) -> bool:
+    if not OLLAMA_TOOLS_ROLE:
+        return False
+    try:
+        return any(getattr(r, "name", "").lower() == OLLAMA_TOOLS_ROLE.lower() for r in getattr(member, "roles", []))
+    except Exception:
+        return False
+
+def _has_tools_role(inter: discord.Interaction) -> bool:
+    return _has_tools_role_member(getattr(inter, "user", None))
+
 def require_allowed(inter: discord.Interaction) -> bool:
     if not ((ALLOWED_GUILD_ID == 0) or (inter.guild and inter.guild.id == ALLOWED_GUILD_ID)):
         return False
-    if not ((ALLOWED_CHANNEL_ID == 0) or (inter.channel and inter.channel.id == ALLOWED_CHANNEL_ID)):
+    if not ((ALLOWED_CHANNEL_ID == 0) or (inter.channel and inter.channel.id == ALLOWED_CHANNEL_ID) or _has_tools_role(inter)):
         # Channel restricted; attempt to notify
         try:
             # Note: function may be called before a response is created
             # Use send_ephemeral for safety
             import asyncio as _a
-            _a.create_task(send_ephemeral(inter, "🔒 Use this command in the designated channel."))
+            _a.create_task(send_ephemeral(inter, "🔒 Use this command in the designated channel or with the required role."))
         except Exception:
             pass
         return False
@@ -182,11 +231,15 @@ def require_allowed(inter: discord.Interaction) -> bool:
 
 def enforce_ratelimit_inter(inter: discord.Interaction) -> bool:
     uid = inter.user.id if inter.user else 0
-    if not ratelimit(uid):
+    cid = inter.channel.id if inter.channel else None
+    ok, wait, scope = _qps_check(uid, cid, update=True)
+    if not ok:
         try:
-            wait = seconds_until_allowed(uid)
+            msg = f"⏳ Please wait {int(wait)+1}s."
+            if scope == "channel":
+                msg = f"⏳ Channel busy. Retry in {int(wait)+1}s."
             import asyncio as _a
-            _a.create_task(send_ephemeral(inter, f"⏳ Please wait {wait}s."))
+            _a.create_task(send_ephemeral(inter, msg))
         except Exception:
             pass
         return False
@@ -196,6 +249,7 @@ def enforce_ratelimit_inter(inter: discord.Interaction) -> bool:
 
 # ---- Ollama helpers ----
 ollama_client = OllamaClient(OLLAMA_HOST, OLLAMA_MODEL, num_predict=OLLAMA_NUM_PREDICT, temperature=OLLAMA_TEMPERATURE)
+OLLAMA_TOOLS = [SLUM_QUERY_TOOL]
 
 def ollama_available() -> bool:
     return OLLAMA_ENABLED and ollama_client.available
@@ -213,6 +267,9 @@ if ARLIAI_ENABLED and (ARLIAI_API_KEY or ARLIAI_TEXT_API_KEY or ARLIAI_IMAGE_API
     except Exception:
         arliai_client = None
 
+# Tool registry for LLM providers
+LLM_TOOLS = {"get_current_time": get_current_time}
+
 def llm_available() -> bool:
     if LLM_PROVIDER == "ollama":
         return OLLAMA_ENABLED and ollama_available()
@@ -222,7 +279,48 @@ def llm_available() -> bool:
 
 def llm_chat(prompt: str, *, system: Optional[str], history: Optional[list[dict]], images: Optional[list[bytes]] = None) -> str:
     if LLM_PROVIDER == "ollama":
-        return ollama_chat(prompt, 20.0, system, history, images)
+        messages: list[dict] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        if history:
+            messages.extend(history)
+        user_msg: dict = {"role": "user", "content": prompt}
+        if images:
+            user_msg["images"] = images
+        messages.append(user_msg)
+        data = ollama_client.chat_raw(messages, tools=OLLAMA_TOOLS, timeout=20.0)
+        msg = data.get("message") or {}
+        tool_calls = msg.get("tool_calls") or []
+        while tool_calls:
+            messages.append(msg)
+            for call in tool_calls:
+                fn = call.get("function", {})
+                fname = fn.get("name")
+                args_s = fn.get("arguments") or "{}"
+                try:
+                    args = json.loads(args_s)
+                except Exception:
+                    args = {}
+                result: Any
+                if fname == "slum_query":
+                    qname = args.get("name")
+                    qparams = args.get("params", {}) if isinstance(args.get("params"), dict) else {}
+                    try:
+                        result = asyncio.run(run_named_query(qname, qparams))
+                    except Exception as e:
+                        result = {"error": str(e)}
+                else:
+                    result = {"error": f"unknown function {fname}"}
+                messages.append({
+                    "role": "tool",
+                    "name": fname,
+                    "tool_call_id": call.get("id"),
+                    "content": json.dumps(result, default=str),
+                })
+            data = ollama_client.chat_raw(messages, tools=OLLAMA_TOOLS, timeout=20.0)
+            msg = data.get("message") or {}
+            tool_calls = msg.get("tool_calls") or []
+        return str(msg.get("content") or data.get("response") or "").strip()
     if LLM_PROVIDER == "arliai":
         if not arliai_client:
             raise RuntimeError("Arliai client not available")
@@ -273,6 +371,11 @@ def _matches(s: str, *subs: str) -> bool:
 def _is_rates_query(s: str) -> bool:
     return _matches(s, "xp rate", "rates", "xp rates", "drop rate", "gold rate", "honor rate", "reputation rate", "profession rate")
 
+
+def _is_time_query(text: str) -> bool:
+    s = (text or "").lower()
+    return any(k in s for k in ("what time", "time is it", "current time", "time now"))
+
 class RegisterModal(Modal, title="Create Game Account"):
     username: TextInput = TextInput(label="Username", placeholder="3–16 chars: A–Z a–z 0–9 _ -", min_length=3, max_length=16)
     password: TextInput = TextInput(label="Password", style=discord.TextStyle.paragraph, placeholder="6–32 chars", min_length=6, max_length=32)
@@ -283,8 +386,9 @@ class RegisterModal(Modal, title="Create Game Account"):
 
     async def on_submit(self, interaction: discord.Interaction):
         # Rate limit & validate
-        if not ratelimit(self._user_id):
-            wait = seconds_until_allowed(self._user_id)
+        cid = interaction.channel.id if interaction.channel else None
+        if not ratelimit(self._user_id, cid):
+            wait = seconds_until_allowed(self._user_id, cid)
             return await interaction.response.send_message(f"⏳ Please wait {wait}s before trying again.", ephemeral=True)
 
         u = str(self.username.value).strip()
@@ -378,7 +482,7 @@ def get_rates_lines() -> list[str]:
         if not val:
             val = globals().get(k_env, "")
         if val:
-            lines.append(f"- {label}: {val}")
+            lines.append(f"- {label}: {normalize_ratio(val)}")
     add("XP_RATE", "XP")
     add("QUEST_XP_RATE", "Quest XP")
     add("DROP_RATE", "Drop")
@@ -475,12 +579,34 @@ class Bot(discord.Client):
             if LLM_PROVIDER != "arliai":
                 self.tree.remove_command("wowimage")
                 self.tree.remove_command("wowupscale")
+            if not OLLAMA_TOOLS_ENABLED:
+                for name in (
+                    "wowask",
+                    "wowimage",
+                    "wowupscale",
+                    "wowaskimg",
+                    "wowascii",
+                    "wowpersona_set",
+                    "wowpersona_show",
+                    "wowclearhistory",
+                    "wowrag_on",
+                    "wowrag_off",
+                    "wowrag_show",
+                    "wowautoreply_on",
+                    "wowautoreply_off",
+                    "wowautoreply_show",
+                    "wowllminfo",
+                ):
+                    self.tree.remove_command(name)
         except Exception:
             pass
 
         # Register KPI commands (DB-driven metrics) only if DB is enabled
         if DB_ENABLED and DB_USER:
             setup_kpi_commands(self.tree)
+
+        # Health check command available always
+        setup_health_commands(self.tree)
 
         if ALLOWED_GUILD_ID:
             guild = discord.Object(id=ALLOWED_GUILD_ID)
@@ -708,25 +834,25 @@ class Bot(discord.Client):
         # KB hits (with score threshold)
         try:
             if getattr(self, "_rag", None) and self._rag.kb and query:
-                scored = self._rag.search_kb(query, limit=max(1, RAG_KB_TOPK), return_scores=True)
+                scored = self._rag.search_kb(query, limit=max(1, RAG_TOPK), return_scores=True)
                 for score, h in scored:
                     if score < RAG_MIN_SCORE:
                         continue
-                    title = h.get("title", "")
-                    text = (h.get("text", "") or "").strip()
+                    title = sanitize_text(h.get("title", ""))
+                    text = sanitize_text(h.get("text", ""), RAG_MAX_CHARS)
                     if text:
                         pieces.append(f"KB: {title}\n{text}")
         except Exception:
             pass
         # Curated docs hits (with score threshold)
         try:
-            if getattr(self, "_rag", None) and self._rag.docs and query and RAG_DOCS_TOPK > 0:
-                scored = self._rag.search_docs(query, limit=RAG_DOCS_TOPK, return_scores=True)
+            if getattr(self, "_rag", None) and self._rag.docs and query and RAG_TOPK > 0:
+                scored = self._rag.search_docs(query, limit=RAG_TOPK, return_scores=True)
                 for score, h in scored:
                     if score < RAG_MIN_SCORE:
                         continue
-                    title = h.get("title", "")
-                    text = (h.get("text", "") or "").strip()
+                    title = sanitize_text(h.get("title", ""))
+                    text = sanitize_text(h.get("text", ""), RAG_MAX_CHARS)
                     if text:
                         pieces.append(f"DOC: {title}\n{text}")
         except Exception:
@@ -793,9 +919,10 @@ class Bot(discord.Client):
             return
         # Channel restriction: if ALLOWED_CHANNEL_ID is set, only reply there
         in_allowed_channel = (ALLOWED_CHANNEL_ID == 0) or (message.channel and message.channel.id == ALLOWED_CHANNEL_ID)
+        role_allowed = _has_tools_role_member(message.author)
         # If no explicit channel, only reply when mentioned to avoid spam
         mentioned = self.user in getattr(message, "mentions", []) if self.user else False
-        if not (in_allowed_channel or mentioned):
+        if not (in_allowed_channel or role_allowed or mentioned):
             return
         # Need content or image
         content = (message.content or "").strip()
@@ -869,7 +996,7 @@ class Bot(discord.Client):
                         pass
             # Vision quick reply: describe image
             if has_image and LLM_PROVIDER == "ollama" and OLLAMA_ENABLED and OLLAMA_VISION_ENABLED:
-                if not ratelimit(message.author.id):
+                if not ratelimit(message.author.id, message.channel.id if message.channel else None):
                     return
                 try:
                     async with message.channel.typing():
@@ -903,7 +1030,7 @@ class Bot(discord.Client):
             except Exception:
                 pass
         # Simple per-user rate limit
-        if not ratelimit(message.author.id):
+        if not ratelimit(message.author.id, message.channel.id if message.channel else None):
             return  # silent skip to reduce noise
         try:
             async with message.channel.typing():
@@ -923,19 +1050,38 @@ class Bot(discord.Client):
                         try:
                             if name == "online_count":
                                 n = kpi.kpi_players_online()
-                                return await message.reply(f"🟢 Players online: {n}", mention_author=False)
+                                return await message.reply(
+                                    wrap_response("Players online", str(n)), mention_author=False
+                                )
                             if name == "total_characters":
                                 totals = kpi.kpi_totals()
-                                return await message.reply(f"Characters: {totals.get('total_chars', 0)}", mention_author=False)
+                                return await message.reply(
+                                    wrap_response(
+                                        "Characters", str(totals.get("total_chars", 0))
+                                    ),
+                                    mention_author=False,
+                                )
                             if name == "total_accounts":
                                 totals = kpi.kpi_totals()
-                                return await message.reply(f"Accounts: {totals.get('total_accounts', 0)}", mention_author=False)
+                                return await message.reply(
+                                    wrap_response(
+                                        "Accounts", str(totals.get("total_accounts", 0))
+                                    ),
+                                    mention_author=False,
+                                )
                             if name == "auction_count":
                                 n = kpi.kpi_auction_count()
-                                return await message.reply(f"Active auctions: {n}", mention_author=False)
+                                return await message.reply(
+                                    wrap_response("Active auctions", str(n)),
+                                    mention_author=False,
+                                )
                             if name == "server_rates":
                                 lines = get_rates_lines()
-                                return await message.reply("Server rates:\n" + ("\n".join(lines) if lines else "No rates configured."), mention_author=False)
+                                rates = "\n".join(lines) if lines else "No rates configured."
+                                return await message.reply(
+                                    wrap_response("Server rates", "\n" + rates),
+                                    mention_author=False,
+                                )
                             if name == "gold_per_hour":
                                 return await message.reply("I don’t track gold per hour. Try /wowgold_top or /wowah_hot.", mention_author=False)
                             if name == "bots_count":
@@ -969,7 +1115,7 @@ class Bot(discord.Client):
 bot = Bot()
 
 def channel_allowed(inter: discord.Interaction) -> bool:
-    return (ALLOWED_CHANNEL_ID == 0) or (inter.channel and inter.channel.id == ALLOWED_CHANNEL_ID)
+    return (ALLOWED_CHANNEL_ID == 0) or (inter.channel and inter.channel.id == ALLOWED_CHANNEL_ID) or _has_tools_role(inter)
 
 def guild_allowed(inter: discord.Interaction) -> bool:
     return (ALLOWED_GUILD_ID == 0) or (inter.guild and inter.guild.id == ALLOWED_GUILD_ID)
@@ -1083,7 +1229,9 @@ async def wowrates(interaction: discord.Interaction):
     lines = get_rates_lines()
     if not lines:
         return await interaction.response.send_message("No rates configured.", ephemeral=True)
-    await interaction.response.send_message("Server rates:\n" + "\n".join(lines), ephemeral=True)
+    await interaction.response.send_message(
+        wrap_response("Server rates", "\n" + "\n".join(lines)), ephemeral=True
+    )
 
 @bot.tree.command(name="wowbots", description="Show bot status via SOAP (if configured)")
 async def wowbots(interaction: discord.Interaction):
@@ -1244,8 +1392,9 @@ class ChangePasswordModal(Modal, title="Change Game Password"):
         self._user_id = user_id
 
     async def on_submit(self, interaction: discord.Interaction):
-        if not ratelimit(self._user_id):
-            wait = seconds_until_allowed(self._user_id)
+        cid = interaction.channel.id if interaction.channel else None
+        if not ratelimit(self._user_id, cid):
+            wait = seconds_until_allowed(self._user_id, cid)
             return await interaction.response.send_message(f"⏳ Please wait {wait}s before trying again.", ephemeral=True)
 
         u = str(self.username.value).strip()
@@ -1300,42 +1449,75 @@ async def wowask(interaction: discord.Interaction, prompt: str):
     if not enforce_ratelimit_inter(interaction):
         return
 
+    user_prompt = prompt.strip()
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         # Deterministic metric intents
-        low = prompt.lower()
+        low = user_prompt.lower()
         if METRICS_STRICT:
             intent = classify_intent(low)
             if intent:
                 name, slots = intent
                 if name == "online_count":
                     n = kpi.kpi_players_online()
-                    return await interaction.followup.send(f"🟢 Players online: {n}", ephemeral=True)
+                    return await interaction.followup.send(
+                        wrap_response("Players online", str(n)), ephemeral=True
+                    )
                 if name == "total_characters":
                     totals = kpi.kpi_totals()
-                    return await interaction.followup.send(f"Characters: {totals.get('total_chars', 0)}", ephemeral=True)
+                    return await interaction.followup.send(
+                        wrap_response("Characters", str(totals.get("total_chars", 0))),
+                        ephemeral=True,
+                    )
                 if name == "total_accounts":
                     totals = kpi.kpi_totals()
-                    return await interaction.followup.send(f"Accounts: {totals.get('total_accounts', 0)}", ephemeral=True)
+                    return await interaction.followup.send(
+                        wrap_response("Accounts", str(totals.get("total_accounts", 0))),
+                        ephemeral=True,
+                    )
                 if name == "auction_count":
                     n = kpi.kpi_auction_count()
-                    return await interaction.followup.send(f"Active auctions: {n}", ephemeral=True)
+                    return await interaction.followup.send(
+                        wrap_response("Active auctions", str(n)), ephemeral=True
+                    )
                 if name == "server_rates":
                     lines = get_rates_lines()
-                    return await interaction.followup.send("Server rates:\n" + ("\n".join(lines) if lines else "No rates configured."), ephemeral=True)
+                    rates = "\n".join(lines) if lines else "No rates configured."
+                    return await interaction.followup.send(
+                        wrap_response("Server rates", "\n" + rates), ephemeral=True
+                    )
                 if name == "gold_per_hour":
                     return await interaction.followup.send("I don’t track gold per hour. Try /wowgold_top or /wowah_hot.", ephemeral=True)
                 if name == "bots_count":
                     return await interaction.followup.send("Bot count isn’t exposed. Use /wowbots if configured, or ask an admin.", ephemeral=True)
 
+        # Time queries via tool
+        if _is_time_query(prompt):
+            t = get_current_time()
+            if t.get("ok"):
+                return await interaction.followup.send(
+                    f"🕒 Current time: {t['iso_local']} ({t['tz_local']})",
+                    ephemeral=True,
+                )
+            return await interaction.followup.send("⚠️ Could not determine current time.", ephemeral=True)
+
         # Facts injection for realm-health queries
-        if _is_realm_health_query(prompt):
+        if _is_realm_health_query(user_prompt):
             facts = kpi.kpi_summary_text()
             guard = "Never invent numbers—if a metric is unavailable, say so and suggest a command like /wowkpi."
-            system = bot._get_system_prompt(interaction.guild.id if interaction.guild else None) + "\n\n" + guard + "\nFACTS (live):\n" + facts
+            system = (
+                bot._get_system_prompt(interaction.guild.id if interaction.guild else None)
+                + "\n\n" + guard + "\nFACTS (live):\n" + facts
+            )
         else:
-            system = bot._build_rag_system(prompt, interaction.guild.id if interaction.guild else None)
-        text = await asyncio.to_thread(llm_chat, prompt.strip(), system=system, history=None)
+            system = bot._build_rag_system(user_prompt, interaction.guild.id if interaction.guild else None)
+        guard_text = "If the needed data or docs are missing, reply with 'not sure.'\n"
+        text = await asyncio.to_thread(
+            llm_chat,
+            guard_text + user_prompt,
+            system=system,
+            history=None,
+        )
         if not text:
             return await interaction.followup.send("⚠️ No response from model.", ephemeral=True)
         await send_long_ephemeral(interaction, text)
@@ -1434,7 +1616,7 @@ async def wowaskimg(interaction: discord.Interaction, image: discord.Attachment,
     if not guild_allowed(interaction):
         return
     if not channel_allowed(interaction):
-        return await interaction.response.send_message("🔒 Use this command in the designated channel.", ephemeral=True)
+        return await interaction.response.send_message("🔒 Use this command in the designated channel or with the required role.", ephemeral=True)
     # Only supported with Ollama vision
     if LLM_PROVIDER != "ollama":
         return await interaction.response.send_message("🤖 The current provider does not support image understanding.", ephemeral=True)
@@ -1442,8 +1624,9 @@ async def wowaskimg(interaction: discord.Interaction, image: discord.Attachment,
         return await interaction.response.send_message("🤖 Vision is not enabled. Set OLLAMA_ENABLED=true and OLLAMA_VISION_ENABLED=true.", ephemeral=True)
     if not image or not (getattr(image, "content_type", "").startswith("image/") or str(image.filename).lower().endswith((".png",".jpg",".jpeg",".webp",".bmp",".gif"))):
         return await interaction.response.send_message("❌ Please attach an image.", ephemeral=True)
-    if not ratelimit(interaction.user.id):
-        wait = seconds_until_allowed(interaction.user.id)
+    cid = interaction.channel.id if interaction.channel else None
+    if not ratelimit(interaction.user.id, cid):
+        wait = seconds_until_allowed(interaction.user.id, cid)
         return await interaction.response.send_message(f"⏳ Please wait {wait}s.", ephemeral=True)
 
     await interaction.response.defer(ephemeral=True, thinking=True)
@@ -1522,7 +1705,7 @@ async def wowclearhistory(interaction: discord.Interaction):
     if not OLLAMA_ENABLED:
         return await interaction.response.send_message("🤖 Ollama is not enabled.", ephemeral=True)
     if not channel_allowed(interaction):
-        return await interaction.response.send_message("🔒 Use this command in the designated channel.", ephemeral=True)
+        return await interaction.response.send_message("🔒 Use this command in the designated channel or with the required role.", ephemeral=True)
     if not interaction.channel:
         return await interaction.response.send_message("❌ No channel context.", ephemeral=True)
     bot._clear_history(interaction.channel.id)

@@ -56,11 +56,10 @@ Setup
    DOCS_DIR=docs
    # Optional: Retrieval-Augmented Generation (context for better answers)
    RAG_ENABLED=true
-   RAG_KB_TOPK=3
+   RAG_TOPK=3
    RAG_MAX_CHARS=3000
-   RAG_DOCS_TOPK=2
    RAG_MIN_SCORE=10
-   RAG_MAX_CHARS=3000
+   RAG_IN_AUTOREPLY=true
    # Optional: enable Ollama chat
    OLLAMA_ENABLED=true
    OLLAMA_HOST=http://127.0.0.1:11434
@@ -79,6 +78,10 @@ Setup
    SUPPORT_URL=https://discord.gg/yourserver
    # Optional: vision support (use a vision-capable model like llava)
    OLLAMA_VISION_ENABLED=true
+   # Optional: enable tool-based server insights
+   OLLAMA_TOOLS_ENABLED=true
+   # Optional: per-user QPS limit for tool queries
+   INSIGHTS_QPS=5
 
 Ollama
 
@@ -134,9 +137,10 @@ Slash Commands
  - /wowgold_top [limit]: Richest characters
  - /wowguilds [days] [limit]: Active guilds
  - /wowactive_guilds [days] [limit]: Active guilds with cached delta
- - /wowah_hot [limit]: Auction hot items
+ - /wowah_hot [limit]: Auction hot items with totals and 24h delta
  - /wowarena [top]: Arena rating distribution
- - /wowprof [skill_id] [min_value]: Profession counts
+ - /wowprof skill_id:<name|id> [min_value=225]: Profession counts
+ - /wowfind_char [name] [limit]: Search for characters by name
  - /health: Bot health ping
  - /wowimage: Generate an image (if provider supports).
  - /wowupscale: Upscale an image (if provider supports).
@@ -157,7 +161,7 @@ Knowledge base
 RAG (local retrieval)
 
 - When `RAG_ENABLED=true`, the bot augments Ollama with snippets from `kb.json` and `server_info.json`.
-- It selects top `RAG_KB_TOPK` entries that match the user’s query and adds them to the system prompt (up to `RAG_MAX_CHARS`).
+- It selects top `RAG_TOPK` entries that match the user’s query and adds them to the system prompt (up to `RAG_MAX_CHARS`).
 - This improves accuracy for 3.3.5a questions without needing internet access.
 
 Curated documents
@@ -172,7 +176,15 @@ Curated documents
     - "Horde portals are at Sunreaver's Sanctuary..."
 - Search: `/wowdocs query:"..."` shows top passages with ids; `/wowdocs_show id:<id>` shows the full passage.
 - Reload docs without restart: `/wowdocs_reload` (Manage Server required).
-- RAG: Top `RAG_DOCS_TOPK` passages are automatically included as additional context when generating answers.
+- RAG: Top `RAG_TOPK` passages are automatically included as additional context when generating answers.
+
+Server Insights
+---------------
+
+- Enable named queries such as realm KPIs or guild activity with `OLLAMA_TOOLS_ENABLED=true`.
+- Results are cached for `METRICS_TTL_SECONDS` (default 8s) to avoid hammering the DB.
+- A simple per-user rate limiter enforces `INSIGHTS_QPS` queries per second.
+- RAG settings (`RAG_*`, e.g. `RAG_IN_AUTOREPLY`) control how KB snippets are injected.
 
 DB-backed metrics
 -----------------
@@ -188,8 +200,14 @@ DB-backed metrics
   DB_CHAR_DB=characters
   DB_WORLD_DB=world
 
-- Create a read-only user (adjust DB names/host): see `sql/create_readonly_grants.sql`.
-- See `docs/metrics.md` for schema notes and profession skill IDs.
+  - Create a read-only user (adjust DB names/host): see `sql/create_readonly_grants.sql`.
+  - Verify the grants are read-only with:
+
+    ```
+    python scripts/verify_readonly_grants.py
+    ```
+
+  - See `docs/metrics.md` for schema notes and profession skill IDs.
 
  LLM provider selection
 

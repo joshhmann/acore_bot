@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import json
 import os
 from typing import List
 
-import discord
+try:  # pragma: no cover - fallback when discord is missing
+    import discord  # type: ignore
+except Exception:  # pragma: no cover - optional dependency
+    discord = None  # type: ignore
 
 
 def json_load(path: str, default):
