@@ -265,11 +265,51 @@ def setup_kpi(tree: app_commands.CommandTree):
         ) as tlog:
             rows = kpi.kpi_arena_rating_distribution(limit_rows=top)
             tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
+
         if format:
             await _send_serialized(itx, rows, format, "wowarena")
         else:
-            out = " | ".join([f"{r['rating']}:{r['teams']}" for r in rows]) if rows else "No data."
-            await itx.followup.send(out, ephemeral=True)
+            # Try to render a bracketed histogram embed if data includes 'bracket' and 'rating'
+            def _build_embed(rws: list[dict]) -> discord.Embed | None:
+                have_bracket = rws and "bracket" in rws[0]
+                have_rating = rws and "rating" in rws[0]
+                have_teams = rws and "teams" in rws[0]
+                if not (have_bracket and have_rating and have_teams):
+                    return None
+
+                brackets = {2: "2v2", 3: "3v3", 5: "5v5"}
+                grouped: dict[int, list[dict]] = {b: [] for b in brackets}
+                for r in rws:
+                    b = r.get("bracket")
+                    if b in grouped:
+                        grouped[b].append(r)
+                for lst in grouped.values():
+                    lst.sort(key=lambda x: x["rating"], reverse=True)
+
+                def _hist(lst: list[dict]) -> str:
+                    if not lst:
+                        return "No data"
+                    sub = lst[:top]
+                    max_n = max((r["teams"] for r in sub), default=1) or 1
+                    lines = []
+                    for r in sub:
+                        blocks = max(1, int(r["teams"] / max_n * 10))
+                        bar = "▉" * blocks
+                        lines.append(f"{r['rating']}: {bar} ({r['teams']})")
+                    return "\n".join(lines)
+
+                embed = discord.Embed(title="Arena rating distribution")
+                for b, label in brackets.items():
+                    embed.add_field(name=label, value=_hist(grouped[b]), inline=False)
+                return embed
+
+            embed = _build_embed(rows)
+            if embed:
+                await itx.followup.send(embed=embed, ephemeral=True)
+            else:
+                out = " | ".join([f"{r.get('rating', '?')}:{r.get('teams', '?')}" for r in rows]) if rows else "No data."
+                await itx.followup.send(out, ephemeral=True)
+
         _log_cmd("wowarena", t0, rows=len(rows), top=top, fmt=format)
 
     @app_commands.command(name="wowprof", description="Profession counts ≥ threshold (skill_id, min_value)")
