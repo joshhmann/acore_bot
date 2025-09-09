@@ -214,35 +214,62 @@ SLUM_QUERY_TOOL = {
         "parameters": {
             "type": "object",
             "oneOf": [
-                {"properties": {"name": {"const": "realm_online"}}, "required": ["name"]},
-                {"properties": {"name": {"const": "faction_ratio"}}, "required": ["name"]},
-                {"properties": {"name": {"const": "race_class_counts"}}, "required": ["name"]},
-                {"properties": {"name": {"const": "economy_snapshot"}}, "required": ["name"]},
                 {
+                    "type": "object",
+                    "properties": {"name": {"const": "realm_online"}},
+                    "required": ["name"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {"name": {"const": "faction_ratio"}},
+                    "required": ["name"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {"name": {"const": "race_class_counts"}},
+                    "required": ["name"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
+                    "properties": {"name": {"const": "economy_snapshot"}},
+                    "required": ["name"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
                     "properties": {
                         "name": {"const": "top_gold"},
                         "params": {
                             "type": "object",
-                            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
-                            "required": ["limit"],
+                            "properties": {
+                                "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+                            },
                             "additionalProperties": False,
                         },
                     },
-                    "required": ["name", "params"],
+                    "required": ["name"],
+                    "additionalProperties": False,
                 },
                 {
+                    "type": "object",
                     "properties": {
                         "name": {"const": "ah_hot"},
                         "params": {
                             "type": "object",
-                            "properties": {"limit": {"type": "integer", "minimum": 1, "maximum": 100}},
-                            "required": ["limit"],
+                            "properties": {
+                                "limit": {"type": "integer", "minimum": 1, "maximum": 100}
+                            },
                             "additionalProperties": False,
                         },
                     },
-                    "required": ["name", "params"],
+                    "required": ["name"],
+                    "additionalProperties": False,
                 },
                 {
+                    "type": "object",
                     "properties": {
                         "name": {"const": "profession_counts"},
                         "params": {
@@ -256,9 +283,16 @@ SLUM_QUERY_TOOL = {
                         },
                     },
                     "required": ["name", "params"],
+                    "additionalProperties": False,
                 },
-                {"properties": {"name": {"const": "level_histogram"}}, "required": ["name"]},
                 {
+                    "type": "object",
+                    "properties": {"name": {"const": "level_histogram"}},
+                    "required": ["name"],
+                    "additionalProperties": False,
+                },
+                {
+                    "type": "object",
                     "properties": {
                         "name": {"const": "arena_distribution"},
                         "params": {
@@ -268,8 +302,10 @@ SLUM_QUERY_TOOL = {
                         },
                     },
                     "required": ["name"],
+                    "additionalProperties": False,
                 },
                 {
+                    "type": "object",
                     "properties": {
                         "name": {"const": "active_guilds"},
                         "params": {
@@ -282,6 +318,7 @@ SLUM_QUERY_TOOL = {
                         },
                     },
                     "required": ["name"],
+                    "additionalProperties": False,
                 },
             ],
         },

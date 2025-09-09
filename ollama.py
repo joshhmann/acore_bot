@@ -1,7 +1,6 @@
-import base64
-import os
 from typing import Optional
 
+import base64
 import requests
 
 
