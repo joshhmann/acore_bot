@@ -12,7 +12,7 @@ from utils import json_load, json_save_atomic, chunk_text, send_ephemeral, send_
 from utils.intent import classify as classify_intent
 from soap import SoapClient
 from ollama import OllamaClient
-from rag_store import RagStore
+from rag_store import RagStore, sanitize_text
 from arliai import ArliaiClient
 from ac_db import DBConfig as ACDBConfig, get_online_count as db_get_online_count, get_totals as db_get_totals
 
@@ -712,8 +712,8 @@ class Bot(discord.Client):
                 for score, h in scored:
                     if score < RAG_MIN_SCORE:
                         continue
-                    title = h.get("title", "")
-                    text = (h.get("text", "") or "").strip()
+                    title = sanitize_text(h.get("title", ""))
+                    text = sanitize_text(h.get("text", ""), RAG_MAX_CHARS)
                     if text:
                         pieces.append(f"KB: {title}\n{text}")
         except Exception:
@@ -725,8 +725,8 @@ class Bot(discord.Client):
                 for score, h in scored:
                     if score < RAG_MIN_SCORE:
                         continue
-                    title = h.get("title", "")
-                    text = (h.get("text", "") or "").strip()
+                    title = sanitize_text(h.get("title", ""))
+                    text = sanitize_text(h.get("text", ""), RAG_MAX_CHARS)
                     if text:
                         pieces.append(f"DOC: {title}\n{text}")
         except Exception:
