@@ -138,7 +138,7 @@ Slash Commands
  - /wowguilds [days] [limit]: Active guilds
  - /wowah_hot [limit]: Auction hot items
  - /wowarena [top]: Arena rating distribution
- - /wowprof [skill_id] [min_value]: Profession counts
+ - /wowprof skill_id:<name|id> [min_value=225]: Profession counts
  - /wowfind_char [name] [limit]: Search for characters by name
  - /health: Bot health ping
  - /wowimage: Generate an image (if provider supports).

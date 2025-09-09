@@ -5,6 +5,7 @@ from typing import Literal
 
 import ac_metrics as kpi
 from soap import SoapClient
+import slum_queries as sq
 from utils.tool_logging import tool_context
 
 # Optional formatter helpers (fallbacks provided if module not present)
@@ -342,36 +343,26 @@ def setup_kpi(tree: app_commands.CommandTree):
 
     @app_commands.command(name="wowprof", description="Profession counts ≥ threshold (skill_id, min_value)")
     @app_commands.describe(
+        skill_id="Profession name or skill id (e.g., Enchanting or 333)",
+        min_value="Min value (default 225)",
+    )
+    async def wowprof(itx: discord.Interaction, skill_id: str, min_value: int = 225):
+        t0 = time.time()
+        await _send_defer(itx)
+        sid = sq.resolve_skill_id(skill_id)
+        if sid is None:
+            await itx.followup.send("Unknown profession.", ephemeral=True)
+            return
+        n = sq.profession_counts(skill_id=sid, min_value=min_value)
+        await itx.followup.send(
+            f"🛠️ Skill {sid} ≥ {min_value}: **{n}** characters",
+            ephemeral=True,
+        )
+        _log_cmd("wowprof", t0, rows=1, skill_id=sid, min_value=min_value)
         skill_id="Profession skill id (e.g., Enchanting=333)",
         min_value="Min value (default 300)",
         format="Optional export format",
-    )
-    async def wowprof(
-        itx: discord.Interaction,
-        skill_id: int,
-        min_value: int = 300,
-        format: Literal["json", "csv"] | None = None,
-    ):
-        t0 = time.time()
-        await _send_defer(itx)
-        with tool_context(
-            "kpi_profession_counts",
-            params={"skill_id": skill_id, "min_value": min_value},
-            guild_id=itx.guild_id,
-            channel_id=itx.channel_id,
-            user_id=itx.user.id,
-        ) as tlog:
-            n = kpi.kpi_profession_counts(skill_id=skill_id, min_value=min_value)
-            tlog(rows=1, cache_hit=getattr(kpi, "last_cache_hit", False))
 
-        if format:
-            data = {"skill_id": skill_id, "min_value": min_value, "count": n}
-            await _send_serialized(itx, data, format, "wowprof")
-        else:
-            await itx.followup.send(
-                wrap_response(f"Skill {skill_id} ≥ {min_value}", str(n)), ephemeral=True
-            )
-        _log_cmd("wowprof", t0, rows=1, skill_id=skill_id, min_value=min_value, fmt=format)
 
     # Register all
     tree.add_command(wowkpi_cmd)

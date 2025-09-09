@@ -46,7 +46,7 @@ DB_WORLD = os.getenv("DB_WORLD_DB", os.getenv("DB_WORLD", "world"))
 
 TTL_HOT = int(os.getenv("METRICS_TTL_SECONDS", "8"))
 
-DICT = pymysql.cursors.DictCursor
+DICT = pymysql.cursors.DictCursor if pymysql else None
 _cache: Dict[Any, Dict[str, Any]] = {}
 # Track whether the last cache access was a hit for external logging.
 last_cache_hit: bool = False
@@ -74,6 +74,8 @@ def _cache_set(key, val, ttl=TTL_HOT):
 
 @contextmanager
 def conn(dbname: str):
+    if pymysql is None:
+        raise RuntimeError("pymysql is required for database access")
     cn = pymysql.connect(
         host=DB_HOST,
         port=DB_PORT,
