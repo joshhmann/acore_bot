@@ -5,6 +5,8 @@ from typing import Literal
 
 import ac_metrics as kpi
 from soap import SoapClient
+from named_queries import run_named_query
+
 import slum_queries as sq
 from utils.tool_logging import tool_context
 
@@ -34,6 +36,8 @@ async def _send_defer(itx: discord.Interaction):
 
 
 log = logging.getLogger("acbot.kpi")
+
+DB_ENABLED = os.getenv("DB_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
 
 
 def _log_cmd(name: str, t0: float, rows: int | None = None, **extra):
@@ -96,6 +100,17 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowkpi", t0, rows=0)
+            return
+        text = await run_named_query("wowkpi")
+        if not text:
+            await itx.followup.send("No data.", ephemeral=True)
+        else:
+            await itx.followup.send(text, ephemeral=True)
+        _log_cmd("wowkpi", t0)
+
         with tool_context(
             "kpi_summary",
             guild_id=itx.guild_id,
@@ -162,6 +177,12 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowgold_top", t0, rows=0, limit=limit)
+            return
+        rows = await run_named_query("wowgold_top", limit=limit)
+
         with tool_context(
             "kpi_top_gold",
             params={"limit": limit},
@@ -191,6 +212,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowlevels", t0, rows=0)
+            return
+        rows = await run_named_query("wowlevels")
+        out = " | ".join([f"{r['level']}:{r['n']}" for r in rows]) if rows else "No data."
+        await itx.followup.send(f"📊 Levels → {out}", ephemeral=True)
+        _log_cmd("wowlevels", t0, rows=len(rows))
+
         with tool_context(
             "kpi_level_distribution",
             guild_id=itx.guild_id,
@@ -221,6 +251,13 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
+
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowguilds", t0, rows=0, days=days, limit=limit)
+            return
+        rows = await run_named_query("wowguilds", days=days, limit=limit)
+
         with tool_context(
             "kpi_guild_activity",
             params={"days": days, "limit": limit},
@@ -249,6 +286,12 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowah_hot", t0, rows=0, limit=limit)
+            return
+        rows = await run_named_query("wowah_hot", limit=limit)
+
         with tool_context(
             "kpi_auction_hot_items",
             params={"limit": limit},
@@ -263,6 +306,8 @@ def setup_kpi(tree: app_commands.CommandTree):
         out_lines = []
         for r in rows:
             name = r.get("name") or f"Template {r['item_template']}"
+            out_lines.append(
+                f"{name}: {int(r['listings'])} listings, avg {kpi.copper_to_gold_s(r['avg_buyout'])}"
             delta = r.get("delta_24h")
             delta_s = f" (Δ24h {delta:+d})" if delta is not None else ""
             out_lines.append(
@@ -282,6 +327,14 @@ def setup_kpi(tree: app_commands.CommandTree):
     ):
         t0 = time.time()
         await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowarena", t0, rows=0, top=top)
+            return
+        rows = await run_named_query("wowarena", top=top)
+        out = " | ".join([f"{r['rating']}:{r['teams']}" for r in rows]) if rows else "No data."
+        await itx.followup.send(out, ephemeral=True)
+        _log_cmd("wowarena", t0, rows=len(rows), top=top)
         with tool_context(
             "kpi_arena_rating_distribution",
             params={"top": top},
@@ -346,6 +399,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowprof(itx: discord.Interaction, skill_id: str, min_value: int = 225):
         t0 = time.time()
         await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowprof", t0, rows=0, skill_id=skill_id, min_value=min_value)
+            return
+        n = await run_named_query("wowprof", skill_id=skill_id, min_value=min_value)
+        await itx.followup.send(
+            f"🛠️ Skill {skill_id} ≥ {min_value}: **{n}** characters", ephemeral=True
+        )
+        _log_cmd("wowprof", t0, rows=1, skill_id=skill_id, min_value=min_value)
         sid = sq.resolve_skill_id(skill_id)
         if sid is None:
             await itx.followup.send("Unknown profession.", ephemeral=True)
@@ -361,6 +423,64 @@ def setup_kpi(tree: app_commands.CommandTree):
         format="Optional export format",
 
 
+    @app_commands.command(name="wowfactions", description="Faction counts ≥ min level")
+    @app_commands.describe(min_level="Minimum level filter (default 1)")
+    async def wowfactions(itx: discord.Interaction, min_level: int = 1):
+        t0 = time.time()
+        await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowfactions", t0, rows=0, min_level=min_level)
+            return
+        rows = await run_named_query("wowfactions", min_level=min_level)
+        if not rows:
+            return await itx.followup.send("No data.", ephemeral=True)
+        out = " | ".join(
+            [
+                f"{r.get('faction', r.get('name', '?'))}: {r.get('n', r.get('count', r.get('players')))}"
+                for r in rows
+            ]
+        )
+        await itx.followup.send(out, ephemeral=True)
+        _log_cmd("wowfactions", t0, rows=len(rows), min_level=min_level)
+
+    @app_commands.command(name="wowraceclass", description="Race/Class counts ≥ min level")
+    @app_commands.describe(min_level="Minimum level filter (default 1)", limit="Max rows (default 10)")
+    async def wowraceclass(itx: discord.Interaction, min_level: int = 1, limit: int = 10):
+        t0 = time.time()
+        await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowraceclass", t0, rows=0, min_level=min_level, limit=limit)
+            return
+        rows = await run_named_query("wowraceclass", min_level=min_level, limit=limit)
+        if not rows:
+            return await itx.followup.send("No data.", ephemeral=True)
+        lines = [
+            f"{i+1}. {r.get('race', '?')}/{r.get('class', '?')}: {r.get('n', r.get('count', r.get('players')))}"
+            for i, r in enumerate(rows)
+        ]
+        await itx.followup.send("\n".join(lines), ephemeral=True)
+        _log_cmd("wowraceclass", t0, rows=len(rows), min_level=min_level, limit=limit)
+
+    @app_commands.command(name="wowactive_guilds", description="Guilds with active members in last N days")
+    @app_commands.describe(days="Days window (default 14)", limit="Max rows (default 10)")
+    async def wowactive_guilds(itx: discord.Interaction, days: int = 14, limit: int = 10):
+        t0 = time.time()
+        await _send_defer(itx)
+        if not DB_ENABLED:
+            await itx.followup.send("DB is not enabled.", ephemeral=True)
+            _log_cmd("wowactive_guilds", t0, rows=0, days=days, limit=limit)
+            return
+        rows = await run_named_query("wowactive_guilds", days=days, limit=limit)
+        if not rows:
+            return await itx.followup.send("No data.", ephemeral=True)
+        out = "\n".join(
+            [f"{r.get('guild', '?')}: {r.get('active_members', r.get('n', r.get('count', 0)))}" for r in rows]
+        )
+        await itx.followup.send(out, ephemeral=True)
+        _log_cmd("wowactive_guilds", t0, rows=len(rows), days=days, limit=limit)
+
     # Register all
     tree.add_command(wowkpi_cmd)
     tree.add_command(wowgold_top)
@@ -369,6 +489,9 @@ def setup_kpi(tree: app_commands.CommandTree):
     tree.add_command(wowah_hot)
     tree.add_command(wowarena)
     tree.add_command(wowprof)
+    tree.add_command(wowfactions)
+    tree.add_command(wowraceclass)
+    tree.add_command(wowactive_guilds)
 
     @app_commands.command(name="wowfind_char", description="Find characters by name (partial match)")
     @app_commands.describe(
