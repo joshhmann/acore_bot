@@ -3,7 +3,11 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-import pymysql
+# PyMySQL is optional for environments without DB access (e.g., tests).
+try:
+    import pymysql
+except Exception:  # pragma: no cover - handled at runtime
+    pymysql = None
 
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
@@ -16,7 +20,7 @@ DB_WORLD = os.getenv("DB_WORLD_DB", os.getenv("DB_WORLD", "world"))
 
 TTL_HOT = int(os.getenv("METRICS_TTL_SECONDS", "8"))
 
-DICT = pymysql.cursors.DictCursor
+DICT = pymysql.cursors.DictCursor if pymysql else None
 _cache: Dict[Any, Dict[str, Any]] = {}
 
 
@@ -36,6 +40,8 @@ def _cache_set(key, val, ttl=TTL_HOT):
 
 @contextmanager
 def conn(dbname: str):
+    if not pymysql:  # pragma: no cover - protective guard
+        raise RuntimeError("pymysql is required for DB connections")
     cn = pymysql.connect(
         host=DB_HOST,
         port=DB_PORT,
@@ -155,6 +161,33 @@ def kpi_guild_activity(days: int = 14, limit: int = 10) -> List[Dict[str, Any]]:
     with conn(DB_CHAR) as c, c.cursor() as cur:
         cur.execute(q, (days, limit))
         return cur.fetchall()
+
+
+def active_guilds(window_secs: int, limit: int = 10) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]] | None]:
+    """Guild member counts for characters active within ``window_secs``.
+
+    Returns a tuple of ``(rows, previous_rows)`` where ``previous_rows`` is the
+    cached result from the last call with the same parameters, if available.
+    """
+    key = f"active_guilds:{window_secs}:{limit}"
+    prev = _cache_get(key)
+    q = (
+        """
+    SELECT g.name AS guild, COUNT(*) AS active_members
+    FROM guild_member gm
+    JOIN characters c ON c.guid = gm.guid
+    JOIN guild g ON g.guildid = gm.guildid
+    WHERE c.logout_time >= UNIX_TIMESTAMP() - %s
+    GROUP BY g.name
+    ORDER BY active_members DESC
+    LIMIT %s
+    """
+    )
+    with conn(DB_CHAR) as c, c.cursor() as cur:
+        cur.execute(q, (int(window_secs), int(limit)))
+        rows = cur.fetchall()
+    _cache_set(key, rows)
+    return rows, prev
 
 
 def kpi_auction_hot_items(limit: int = 10) -> List[Dict[str, Any]]:
