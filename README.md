@@ -59,6 +59,7 @@ Setup
    RAG_TOPK=3
    RAG_MAX_CHARS=3000
    RAG_MIN_SCORE=10
+   RAG_IN_AUTOREPLY=true
    # Optional: enable Ollama chat
    OLLAMA_ENABLED=true
    OLLAMA_HOST=http://127.0.0.1:11434
@@ -77,6 +78,10 @@ Setup
    SUPPORT_URL=https://discord.gg/yourserver
    # Optional: vision support (use a vision-capable model like llava)
    OLLAMA_VISION_ENABLED=true
+   # Optional: enable tool-based server insights
+   OLLAMA_TOOLS_ENABLED=true
+   # Optional: per-user QPS limit for tool queries
+   INSIGHTS_QPS=5
 
 Ollama
 
@@ -134,6 +139,7 @@ Slash Commands
  - /wowah_hot [limit]: Auction hot items
  - /wowarena [top]: Arena rating distribution
  - /wowprof [skill_id] [min_value]: Profession counts
+ - /wowfind_char [name] [limit]: Search for characters by name
  - /health: Bot health ping
  - /wowimage: Generate an image (if provider supports).
  - /wowupscale: Upscale an image (if provider supports).
@@ -170,6 +176,14 @@ Curated documents
 - Search: `/wowdocs query:"..."` shows top passages with ids; `/wowdocs_show id:<id>` shows the full passage.
 - Reload docs without restart: `/wowdocs_reload` (Manage Server required).
 - RAG: Top `RAG_TOPK` passages are automatically included as additional context when generating answers.
+
+Server Insights
+---------------
+
+- Enable named queries such as realm KPIs or guild activity with `OLLAMA_TOOLS_ENABLED=true`.
+- Results are cached for `METRICS_TTL_SECONDS` (default 8s) to avoid hammering the DB.
+- A simple per-user rate limiter enforces `INSIGHTS_QPS` queries per second.
+- RAG settings (`RAG_*`, e.g. `RAG_IN_AUTOREPLY`) control how KB snippets are injected.
 
 DB-backed metrics
 -----------------
