@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 import ac_metrics as kpi
 from soap import SoapClient
+from utils.tool_logging import tool_context
 
 
 async def _send_defer(itx: discord.Interaction):
@@ -37,7 +38,14 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowkpi_cmd(itx: discord.Interaction):
         t0 = time.time()
         await _send_defer(itx)
-        text = kpi.kpi_summary_text()
+        with tool_context(
+            "kpi_summary_text",
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            text = kpi.kpi_summary_text()
+            log(rows=1, cache_hit=kpi.last_cache_hit)
         await itx.followup.send(text, ephemeral=True)
         _log_cmd("wowkpi", t0)
 
@@ -46,11 +54,18 @@ def setup_kpi(tree: app_commands.CommandTree):
         t0 = time.time()
         await _send_defer(itx)
         n = None
-        try:
-            # Try DB
-            n = kpi.kpi_players_online()
-        except Exception:
-            n = None
+        with tool_context(
+            "kpi_players_online",
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            try:
+                # Try DB
+                n = kpi.kpi_players_online()
+                log(rows=1, cache_hit=kpi.last_cache_hit)
+            except Exception as e:
+                log(error=str(e), db_timeout="timeout" in str(e).lower())
         if n is None or n == 0:
             # SOAP fallback
             try:
@@ -71,7 +86,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowgold_top(itx: discord.Interaction, limit: int = 10):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_top_gold(limit=limit)
+        with tool_context(
+            "kpi_top_gold",
+            params={"limit": limit},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            rows = kpi.kpi_top_gold(limit=limit)
+            log(rows=len(rows), cache_hit=kpi.last_cache_hit)
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
         lines = [
@@ -85,7 +108,14 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowlevels(itx: discord.Interaction):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_level_distribution()
+        with tool_context(
+            "kpi_level_distribution",
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            rows = kpi.kpi_level_distribution()
+            log(rows=len(rows), cache_hit=kpi.last_cache_hit)
         out = " | ".join([f"{r['level']}:{r['n']}" for r in rows]) if rows else "No data."
         await itx.followup.send(f"📊 Levels → {out}", ephemeral=True)
         _log_cmd("wowlevels", t0, rows=len(rows))
@@ -95,7 +125,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowguilds(itx: discord.Interaction, days: int = 14, limit: int = 10):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_guild_activity(days=days, limit=limit)
+        with tool_context(
+            "kpi_guild_activity",
+            params={"days": days, "limit": limit},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            rows = kpi.kpi_guild_activity(days=days, limit=limit)
+            log(rows=len(rows), cache_hit=kpi.last_cache_hit)
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
         out = "\n".join([f"{r['guild']}: {r['active_members']}" for r in rows])
@@ -107,7 +145,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowah_hot(itx: discord.Interaction, limit: int = 10):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_auction_hot_items(limit=limit)
+        with tool_context(
+            "kpi_auction_hot_items",
+            params={"limit": limit},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            rows = kpi.kpi_auction_hot_items(limit=limit)
+            log(rows=len(rows), cache_hit=kpi.last_cache_hit)
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
         out_lines = []
@@ -122,7 +168,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowarena(itx: discord.Interaction, top: int = 20):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_arena_rating_distribution(limit_rows=top)
+        with tool_context(
+            "kpi_arena_rating_distribution",
+            params={"top": top},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            rows = kpi.kpi_arena_rating_distribution(limit_rows=top)
+            log(rows=len(rows), cache_hit=kpi.last_cache_hit)
         out = " | ".join([f"{r['rating']}:{r['teams']}" for r in rows]) if rows else "No data."
         await itx.followup.send(out, ephemeral=True)
         _log_cmd("wowarena", t0, rows=len(rows), top=top)
@@ -132,7 +186,15 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowprof(itx: discord.Interaction, skill_id: int, min_value: int = 300):
         t0 = time.time()
         await _send_defer(itx)
-        n = kpi.kpi_profession_counts(skill_id=skill_id, min_value=min_value)
+        with tool_context(
+            "kpi_profession_counts",
+            params={"skill_id": skill_id, "min_value": min_value},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            n = kpi.kpi_profession_counts(skill_id=skill_id, min_value=min_value)
+            log(rows=1, cache_hit=kpi.last_cache_hit)
         await itx.followup.send(f"🛠️ Skill {skill_id} ≥ {min_value}: **{n}** characters", ephemeral=True)
         _log_cmd("wowprof", t0, rows=1, skill_id=skill_id, min_value=min_value)
 
@@ -150,10 +212,19 @@ def setup_kpi(tree: app_commands.CommandTree):
     async def wowfind_char(itx: discord.Interaction, name: str, limit: int = 10):
         t0 = time.time()
         await _send_defer(itx)
-        try:
-            rows = kpi.kpi_find_characters(name, limit=max(1, min(50, limit)))
-        except Exception:
-            rows = []
+        with tool_context(
+            "kpi_find_characters",
+            params={"name": name, "limit": limit},
+            guild_id=itx.guild_id,
+            channel_id=itx.channel_id,
+            user_id=itx.user.id,
+        ) as log:
+            try:
+                rows = kpi.kpi_find_characters(name, limit=max(1, min(50, limit)))
+                log(rows=len(rows), cache_hit=kpi.last_cache_hit)
+            except Exception as e:
+                log(error=str(e), db_timeout="timeout" in str(e).lower())
+                rows = []
         if not rows:
             await itx.followup.send("No characters found.", ephemeral=True)
             return
