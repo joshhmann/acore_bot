@@ -23,7 +23,7 @@ Commands
 - /wowguilds [days=14] [limit=10]
 - /wowah_hot [limit=10] — auction hot items (by item_template)
 - /wowarena [top=20] — rating:teams pairs
-- /wowprof [skill_id] [min_value=300] — profession counts
+- /wowprof skill_id:<name|id> [min_value=225] — profession counts
 
 Schema notes (AzerothCore defaults)
 -----------------------------------

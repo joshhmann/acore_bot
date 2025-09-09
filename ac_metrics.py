@@ -3,7 +3,10 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-import pymysql
+try:  # pymysql may not be installed in test environments
+    import pymysql
+except Exception:  # pragma: no cover - fallback when pymysql missing
+    pymysql = None  # type: ignore
 
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
@@ -16,7 +19,7 @@ DB_WORLD = os.getenv("DB_WORLD_DB", os.getenv("DB_WORLD", "world"))
 
 TTL_HOT = int(os.getenv("METRICS_TTL_SECONDS", "8"))
 
-DICT = pymysql.cursors.DictCursor
+DICT = pymysql.cursors.DictCursor if pymysql else None
 _cache: Dict[Any, Dict[str, Any]] = {}
 
 
@@ -36,6 +39,8 @@ def _cache_set(key, val, ttl=TTL_HOT):
 
 @contextmanager
 def conn(dbname: str):
+    if pymysql is None:
+        raise RuntimeError("pymysql is required for database access")
     cn = pymysql.connect(
         host=DB_HOST,
         port=DB_PORT,

@@ -3,6 +3,7 @@ import discord
 from discord import app_commands
 import ac_metrics as kpi
 from soap import SoapClient
+import slum_queries as sq
 
 
 async def _send_defer(itx: discord.Interaction):
@@ -128,13 +129,23 @@ def setup_kpi(tree: app_commands.CommandTree):
         _log_cmd("wowarena", t0, rows=len(rows), top=top)
 
     @app_commands.command(name="wowprof", description="Profession counts ≥ threshold (skill_id, min_value)")
-    @app_commands.describe(skill_id="Profession skill id (e.g., Enchanting=333)", min_value="Min value (default 300)")
-    async def wowprof(itx: discord.Interaction, skill_id: int, min_value: int = 300):
+    @app_commands.describe(
+        skill_id="Profession name or skill id (e.g., Enchanting or 333)",
+        min_value="Min value (default 225)",
+    )
+    async def wowprof(itx: discord.Interaction, skill_id: str, min_value: int = 225):
         t0 = time.time()
         await _send_defer(itx)
-        n = kpi.kpi_profession_counts(skill_id=skill_id, min_value=min_value)
-        await itx.followup.send(f"🛠️ Skill {skill_id} ≥ {min_value}: **{n}** characters", ephemeral=True)
-        _log_cmd("wowprof", t0, rows=1, skill_id=skill_id, min_value=min_value)
+        sid = sq.resolve_skill_id(skill_id)
+        if sid is None:
+            await itx.followup.send("Unknown profession.", ephemeral=True)
+            return
+        n = sq.profession_counts(skill_id=sid, min_value=min_value)
+        await itx.followup.send(
+            f"🛠️ Skill {sid} ≥ {min_value}: **{n}** characters",
+            ephemeral=True,
+        )
+        _log_cmd("wowprof", t0, rows=1, skill_id=sid, min_value=min_value)
 
     # Register all
     tree.add_command(wowkpi_cmd)
