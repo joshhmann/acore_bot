@@ -4,7 +4,7 @@ from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
 import pymysql
-
+from utils.formatters import copper_to_gsc
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
 DB_PORT = int(os.getenv("DB_PORT", "3306"))
@@ -66,19 +66,6 @@ def _has_table(dbname: str, table: str) -> bool:
         ok = cur.fetchone()["n"] > 0
     _cache_set(key, ok, ttl=60)
     return ok
-
-
-def copper_to_gold_s(copper: int) -> str:
-    g, rem = divmod(int(copper or 0), 10000)
-    s, c = divmod(rem, 100)
-    out: List[str] = []
-    if g:
-        out.append(f"{g}g")
-    if s:
-        out.append(f"{s}s")
-    if c or not out:
-        out.append(f"{c}c")
-    return " ".join(out)
 
 
 def kpi_players_online() -> int:
@@ -274,7 +261,7 @@ def kpi_summary_text() -> str:
         lines.append(f"🏟️ Arena (top buckets): {head}")
     if topgold:
         tg = " | ".join(
-            f"{r['name']} (Lv {r['level']}): {copper_to_gold_s(r['money'])}" for r in topgold
+            f"{r['name']} (Lv {r['level']}): {copper_to_gsc(r['money'])}" for r in topgold
         )
         lines.append(f"💰 Top gold: {tg}")
     return "\n".join(lines)
