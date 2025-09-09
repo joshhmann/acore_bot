@@ -1,7 +1,7 @@
 # bot_modal.py
-import os, re, time, asyncio, base64, io
+import os, re, time, asyncio, base64, io, json
+from typing import Optional, Any
 from collections import defaultdict, deque
-from typing import Optional
 from urllib.parse import urlparse
 import discord
 import html 
@@ -22,6 +22,7 @@ from bot.tools import get_current_time
 load_dotenv()
 import ac_metrics as kpi
 from commands.kpi import setup_kpi as setup_kpi_commands
+from bot.tools import SLUM_QUERY_TOOL, run_named_query
 from commands.health import setup_health as setup_health_commands
 
 TOKEN = os.getenv("DISCORD_TOKEN")
@@ -248,6 +249,7 @@ def enforce_ratelimit_inter(inter: discord.Interaction) -> bool:
 
 # ---- Ollama helpers ----
 ollama_client = OllamaClient(OLLAMA_HOST, OLLAMA_MODEL, num_predict=OLLAMA_NUM_PREDICT, temperature=OLLAMA_TEMPERATURE)
+OLLAMA_TOOLS = [SLUM_QUERY_TOOL]
 
 def ollama_available() -> bool:
     return OLLAMA_ENABLED and ollama_client.available
@@ -277,7 +279,48 @@ def llm_available() -> bool:
 
 def llm_chat(prompt: str, *, system: Optional[str], history: Optional[list[dict]], images: Optional[list[bytes]] = None) -> str:
     if LLM_PROVIDER == "ollama":
-        return ollama_chat(prompt, 20.0, system, history, images)
+        messages: list[dict] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        if history:
+            messages.extend(history)
+        user_msg: dict = {"role": "user", "content": prompt}
+        if images:
+            user_msg["images"] = images
+        messages.append(user_msg)
+        data = ollama_client.chat_raw(messages, tools=OLLAMA_TOOLS, timeout=20.0)
+        msg = data.get("message") or {}
+        tool_calls = msg.get("tool_calls") or []
+        while tool_calls:
+            messages.append(msg)
+            for call in tool_calls:
+                fn = call.get("function", {})
+                fname = fn.get("name")
+                args_s = fn.get("arguments") or "{}"
+                try:
+                    args = json.loads(args_s)
+                except Exception:
+                    args = {}
+                result: Any
+                if fname == "slum_query":
+                    qname = args.get("name")
+                    qparams = args.get("params", {}) if isinstance(args.get("params"), dict) else {}
+                    try:
+                        result = asyncio.run(run_named_query(qname, qparams))
+                    except Exception as e:
+                        result = {"error": str(e)}
+                else:
+                    result = {"error": f"unknown function {fname}"}
+                messages.append({
+                    "role": "tool",
+                    "name": fname,
+                    "tool_call_id": call.get("id"),
+                    "content": json.dumps(result, default=str),
+                })
+            data = ollama_client.chat_raw(messages, tools=OLLAMA_TOOLS, timeout=20.0)
+            msg = data.get("message") or {}
+            tool_calls = msg.get("tool_calls") or []
+        return str(msg.get("content") or data.get("response") or "").strip()
     if LLM_PROVIDER == "arliai":
         if not arliai_client:
             raise RuntimeError("Arliai client not available")

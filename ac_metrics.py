@@ -3,18 +3,37 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
+# --- PyMySQL import with safe fallback (for test envs without pymysql) ---
 try:
     import pymysql  # type: ignore
-except Exception:  # pragma: no cover - fallback for test envs without pymysql
-    class _DummyPyMysql:  # minimal stub
+except Exception:  # pragma: no cover - fallback for environments without pymysql
+    class _DummyPyMysql:  # minimal stub to satisfy references in code/tests
         class cursors:
             DictCursor = dict
 
-        def connect(self, *args, **kwargs):  # type: ignore[empty-body]
+        @staticmethod
+        def connect(*args, **kwargs):  # type: ignore[empty-body]
             raise RuntimeError("pymysql not installed")
 
     pymysql = _DummyPyMysql()  # type: ignore
-from utils.formatter import format_gold, wrap_response
+
+# --- Optional formatter imports (provide fallbacks if module is absent) ---
+try:
+    from utils.formatter import format_gold, wrap_response
+except Exception:
+    def format_gold(copper: int) -> str:
+        # Very small fallback; replace if you have kpi.copper_to_gold_s
+        try:
+            from ac_metrics import copper_to_gold_s  # lazy import to avoid cycles
+            return copper_to_gold_s(int(copper))
+        except Exception:
+            g, rem = divmod(int(copper), 10000)
+            s, c = divmod(rem, 100)
+            return f"{g}g {s}s {c}c"
+
+    def wrap_response(title: str, content: str) -> str:
+        return f"**{title}**\n{content}"
+
 
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
