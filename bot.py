@@ -15,6 +15,7 @@ from ollama import OllamaClient
 from rag_store import RagStore
 from arliai import ArliaiClient
 from ac_db import DBConfig as ACDBConfig, get_online_count as db_get_online_count, get_totals as db_get_totals
+from bot.tools import get_current_time
 
 load_dotenv()
 import ac_metrics as kpi
@@ -38,7 +39,17 @@ OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "false").lower() in {"1","true","ye
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gemma3:4b")
 OLLAMA_AUTO_REPLY = os.getenv("OLLAMA_AUTO_REPLY", "false").lower() in {"1","true","yes","on"}
-OLLAMA_SYSTEM_PROMPT = os.getenv("OLLAMA_SYSTEM_PROMPT", "You are WowSlumsBot, a concise, friendly assistant focused on AzerothCore, World of Warcraft private server operations, and helpful Discord chat. Answer briefly (<= 4 sentences) unless asked for details.")
+OLLAMA_SYSTEM_PROMPT = os.getenv(
+    "OLLAMA_SYSTEM_PROMPT",
+    (
+        "You are WowSlumsBot, a concise, friendly assistant focused on AzerothCore, "
+        "World of Warcraft private server operations, and helpful Discord chat. "
+        "Answer briefly (<= 4 sentences) unless asked for details. "
+        "For economy, player, guild, auction, faction, or arena questions, call the "
+        "appropriate tool instead of guessing. When discussing WotLK mechanics, cite "
+        "relevant documentation."
+    ),
+)
 OLLAMA_HISTORY_TURNS = int(os.getenv("OLLAMA_HISTORY_TURNS", "50"))
 OLLAMA_VISION_ENABLED = os.getenv("OLLAMA_VISION_ENABLED", "false").lower() in {"1","true","yes","on"}
 OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "256"))
@@ -49,9 +60,8 @@ except Exception:
 
 # Optional: Retrieval-Augmented Generation (use local KB/server info as context)
 RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() in {"1","true","yes","on"}
-RAG_KB_TOPK = int(os.getenv("RAG_KB_TOPK", "3"))
+RAG_TOPK = int(os.getenv("RAG_TOPK", "3"))
 RAG_MAX_CHARS = int(os.getenv("RAG_MAX_CHARS", "3000"))
-RAG_DOCS_TOPK = int(os.getenv("RAG_DOCS_TOPK", "2"))
 RAG_MIN_SCORE = int(os.getenv("RAG_MIN_SCORE", "10"))
 RAG_IN_AUTOREPLY = os.getenv("RAG_IN_AUTOREPLY", "false").lower() in {"1","true","yes","on"}
 KB_SUGGEST_IN_CHAT = os.getenv("KB_SUGGEST_IN_CHAT", "false").lower() in {"1","true","yes","on"}
@@ -213,6 +223,9 @@ if ARLIAI_ENABLED and (ARLIAI_API_KEY or ARLIAI_TEXT_API_KEY or ARLIAI_IMAGE_API
     except Exception:
         arliai_client = None
 
+# Tool registry for LLM providers
+LLM_TOOLS = {"get_current_time": get_current_time}
+
 def llm_available() -> bool:
     if LLM_PROVIDER == "ollama":
         return OLLAMA_ENABLED and ollama_available()
@@ -272,6 +285,11 @@ def _matches(s: str, *subs: str) -> bool:
 
 def _is_rates_query(s: str) -> bool:
     return _matches(s, "xp rate", "rates", "xp rates", "drop rate", "gold rate", "honor rate", "reputation rate", "profession rate")
+
+
+def _is_time_query(text: str) -> bool:
+    s = (text or "").lower()
+    return any(k in s for k in ("what time", "time is it", "current time", "time now"))
 
 class RegisterModal(Modal, title="Create Game Account"):
     username: TextInput = TextInput(label="Username", placeholder="3–16 chars: A–Z a–z 0–9 _ -", min_length=3, max_length=16)
@@ -708,7 +726,7 @@ class Bot(discord.Client):
         # KB hits (with score threshold)
         try:
             if getattr(self, "_rag", None) and self._rag.kb and query:
-                scored = self._rag.search_kb(query, limit=max(1, RAG_KB_TOPK), return_scores=True)
+                scored = self._rag.search_kb(query, limit=max(1, RAG_TOPK), return_scores=True)
                 for score, h in scored:
                     if score < RAG_MIN_SCORE:
                         continue
@@ -720,8 +738,8 @@ class Bot(discord.Client):
             pass
         # Curated docs hits (with score threshold)
         try:
-            if getattr(self, "_rag", None) and self._rag.docs and query and RAG_DOCS_TOPK > 0:
-                scored = self._rag.search_docs(query, limit=RAG_DOCS_TOPK, return_scores=True)
+            if getattr(self, "_rag", None) and self._rag.docs and query and RAG_TOPK > 0:
+                scored = self._rag.search_docs(query, limit=RAG_TOPK, return_scores=True)
                 for score, h in scored:
                     if score < RAG_MIN_SCORE:
                         continue
@@ -1300,10 +1318,11 @@ async def wowask(interaction: discord.Interaction, prompt: str):
     if not enforce_ratelimit_inter(interaction):
         return
 
+    user_prompt = prompt.strip()
     await interaction.response.defer(ephemeral=True, thinking=True)
     try:
         # Deterministic metric intents
-        low = prompt.lower()
+        low = user_prompt.lower()
         if METRICS_STRICT:
             intent = classify_intent(low)
             if intent:
@@ -1328,14 +1347,33 @@ async def wowask(interaction: discord.Interaction, prompt: str):
                 if name == "bots_count":
                     return await interaction.followup.send("Bot count isn’t exposed. Use /wowbots if configured, or ask an admin.", ephemeral=True)
 
+        # Time queries via tool
+        if _is_time_query(prompt):
+            t = get_current_time()
+            if t.get("ok"):
+                return await interaction.followup.send(
+                    f"🕒 Current time: {t['iso_local']} ({t['tz_local']})",
+                    ephemeral=True,
+                )
+            return await interaction.followup.send("⚠️ Could not determine current time.", ephemeral=True)
+
         # Facts injection for realm-health queries
-        if _is_realm_health_query(prompt):
+        if _is_realm_health_query(user_prompt):
             facts = kpi.kpi_summary_text()
             guard = "Never invent numbers—if a metric is unavailable, say so and suggest a command like /wowkpi."
-            system = bot._get_system_prompt(interaction.guild.id if interaction.guild else None) + "\n\n" + guard + "\nFACTS (live):\n" + facts
+            system = (
+                bot._get_system_prompt(interaction.guild.id if interaction.guild else None)
+                + "\n\n" + guard + "\nFACTS (live):\n" + facts
+            )
         else:
-            system = bot._build_rag_system(prompt, interaction.guild.id if interaction.guild else None)
-        text = await asyncio.to_thread(llm_chat, prompt.strip(), system=system, history=None)
+            system = bot._build_rag_system(user_prompt, interaction.guild.id if interaction.guild else None)
+        guard_text = "If the needed data or docs are missing, reply with 'not sure.'\n"
+        text = await asyncio.to_thread(
+            llm_chat,
+            guard_text + user_prompt,
+            system=system,
+            history=None,
+        )
         if not text:
             return await interaction.followup.send("⚠️ No response from model.", ephemeral=True)
         await send_long_ephemeral(interaction, text)
