@@ -211,6 +211,22 @@ def kpi_arena_rating_distribution(limit_rows: Optional[int] = None) -> List[Dict
     return rows[:limit_rows] if limit_rows else rows
 
 
+def kpi_arena_distribution(limit_rows: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Arena team counts per rating and bracket."""
+    q = (
+        """
+    SELECT type AS bracket, rating, COUNT(*) AS teams
+    FROM arena_team
+    GROUP BY type, rating
+    ORDER BY rating DESC
+    """
+    )
+    with conn(DB_CHAR) as c, c.cursor() as cur:
+        cur.execute(q)
+        rows = cur.fetchall()
+    return rows[:limit_rows] if limit_rows else rows
+
+
 def kpi_profession_counts(skill_id: int, min_value: int = 300) -> int:
     q = (
         """

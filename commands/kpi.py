@@ -118,14 +118,40 @@ def setup_kpi(tree: app_commands.CommandTree):
         _log_cmd("wowah_hot", t0, rows=len(rows), limit=limit)
 
     @app_commands.command(name="wowarena", description="Arena rating distribution (top buckets)")
-    @app_commands.describe(top="How many rows (default 20)")
+    @app_commands.describe(top="How many rows per bracket (default 20)")
     async def wowarena(itx: discord.Interaction, top: int = 20):
         t0 = time.time()
         await _send_defer(itx)
-        rows = kpi.kpi_arena_rating_distribution(limit_rows=top)
-        out = " | ".join([f"{r['rating']}:{r['teams']}" for r in rows]) if rows else "No data."
-        await itx.followup.send(out, ephemeral=True)
-        _log_cmd("wowarena", t0, rows=len(rows), top=top)
+
+        rows = kpi.kpi_arena_distribution()
+
+        brackets = {2: "2v2", 3: "3v3", 5: "5v5"}
+        grouped: dict[int, list[dict]] = {b: [] for b in brackets}
+        for r in rows:
+            b = r.get("bracket")
+            if b in grouped:
+                grouped[b].append(r)
+        for lst in grouped.values():
+            lst.sort(key=lambda x: x["rating"], reverse=True)
+
+        def _hist(lst: list[dict]) -> str:
+            if not lst:
+                return "No data"
+            lst = lst[:top]
+            max_n = max(r["teams"] for r in lst) or 1
+            lines = []
+            for r in lst:
+                blocks = max(1, int(r["teams"] / max_n * 10))
+                bar = "▉" * blocks
+                lines.append(f"{r['rating']}: {bar} ({r['teams']})")
+            return "\n".join(lines)
+
+        embed = discord.Embed(title="Arena rating distribution")
+        for b, label in brackets.items():
+            embed.add_field(name=label, value=_hist(grouped[b]), inline=False)
+
+        await itx.followup.send(embed=embed, ephemeral=True)
+        _log_cmd("wowarena", t0, rows=len(rows))
 
     @app_commands.command(name="wowprof", description="Profession counts ≥ threshold (skill_id, min_value)")
     @app_commands.describe(skill_id="Profession skill id (e.g., Enchanting=333)", min_value="Min value (default 300)")
