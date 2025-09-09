@@ -1,3 +1,10 @@
+import asyncio
+import sys
+import time
+from types import SimpleNamespace
+
+import pytest
+
 import slum_queries as sq
 
 
@@ -22,15 +29,6 @@ def test_profession_counts_default(monkeypatch):
     monkeypatch.setattr(sq, "kpi_profession_counts", fake_kpi)
     assert sq.profession_counts(333) == 42
     assert called["args"] == (333, 225)
-=======
-import asyncio
-import sys
-import time
-from types import SimpleNamespace
-
-import pytest
-
-import slum_queries as sq
 
 
 def test_init_pool_uses_env(monkeypatch):
