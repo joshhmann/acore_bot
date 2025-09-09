@@ -287,6 +287,30 @@ def setup_kpi(tree: app_commands.CommandTree):
         )
         _log_cmd("wowguilds", t0, rows=len(rows), days=days, limit=limit)
 
+    @app_commands.command(name="wowactive_guilds", description="Guild activity over N days (cached delta)")
+    @app_commands.describe(days="Days window (default 14)", limit="Max rows (default 10)")
+    async def wowactive_guilds(itx: discord.Interaction, days: int = 14, limit: int = 10):
+        t0 = time.time()
+        await _send_defer(itx)
+        window_secs = max(1, days) * 86400
+        rows, prev = kpi.active_guilds(window_secs=window_secs, limit=limit)
+        if not rows:
+            return await itx.followup.send("No data.", ephemeral=True)
+        prev_map = {r["guild"]: r["active_members"] for r in prev} if prev else {}
+        lines = []
+        for r in rows:
+            guild = r["guild"]
+            count = r["active_members"]
+            delta = None
+            if guild in prev_map:
+                delta = count - prev_map[guild]
+            if delta is None:
+                lines.append(f"{guild}: {count}")
+            else:
+                sign = "+" if delta >= 0 else ""
+                lines.append(f"{guild}: {count} ({sign}{delta})")
+        await itx.followup.send("\n".join(lines), ephemeral=True)
+        _log_cmd("wowactive_guilds", t0, rows=len(rows), days=days, limit=limit)
         if format:
             await _send_serialized(itx, rows, format, "wowguilds")
         else:
@@ -516,6 +540,7 @@ def setup_kpi(tree: app_commands.CommandTree):
     tree.add_command(wowgold_top)
     tree.add_command(wowlevels)
     tree.add_command(wowguilds)
+    tree.add_command(wowactive_guilds)
     tree.add_command(wowah_hot)
     tree.add_command(wowarena)
     tree.add_command(wowprof)

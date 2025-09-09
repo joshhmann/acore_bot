@@ -15,7 +15,7 @@ Simple Discord bot for AzerothCore that uses SOAP to:
   - Knowledge base: Search 3.3.5a cheatsheet via `/wowkb` and `/wowkb_show`
   - RAG (optional): Answers use local KB + server info as context
   - Curated docs: Drop `.md`/`.txt` in `docs/`, search via `/wowdocs`
-  - Metrics (DB): Realm KPIs via `/wowkpi`, `/wowlevels`, `/wowgold_top`, `/wowguilds`, `/wowah_hot`, `/wowarena`, `/wowprof`
+  - Metrics (DB): Realm KPIs via `/wowkpi`, `/wowlevels`, `/wowgold_top`, `/wowguilds`, `/wowactive_guilds`, `/wowah_hot`, `/wowarena`, `/wowprof`
   - Images (provider-dependent): `/wowimage` (txt2img), `/wowupscale` (upscale)
 
 Requirements
@@ -136,6 +136,7 @@ Slash Commands
  - /wowlevels: Level distribution
  - /wowgold_top [limit]: Richest characters
  - /wowguilds [days] [limit]: Active guilds
+ - /wowactive_guilds [days] [limit]: Active guilds with cached delta
  - /wowah_hot [limit]: Auction hot items with totals and 24h delta
  - /wowarena [top]: Arena rating distribution
  - /wowprof skill_id:<name|id> [min_value=225]: Profession counts
