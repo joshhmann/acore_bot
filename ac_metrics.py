@@ -3,7 +3,18 @@ import time
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional, Tuple
 
-import pymysql
+try:
+    import pymysql  # type: ignore
+except Exception:  # pragma: no cover - fallback for test envs without pymysql
+    class _DummyPyMysql:  # minimal stub
+        class cursors:
+            DictCursor = dict
+
+        def connect(self, *args, **kwargs):  # type: ignore[empty-body]
+            raise RuntimeError("pymysql not installed")
+
+    pymysql = _DummyPyMysql()  # type: ignore
+from utils.formatter import format_gold, wrap_response
 
 
 DB_HOST = os.getenv("DB_HOST", "127.0.0.1")
@@ -69,16 +80,8 @@ def _has_table(dbname: str, table: str) -> bool:
 
 
 def copper_to_gold_s(copper: int) -> str:
-    g, rem = divmod(int(copper or 0), 10000)
-    s, c = divmod(rem, 100)
-    out: List[str] = []
-    if g:
-        out.append(f"{g}g")
-    if s:
-        out.append(f"{s}s")
-    if c or not out:
-        out.append(f"{c}c")
-    return " ".join(out)
+    """Backwards-compatible helper using :func:`format_gold`."""
+    return format_gold(copper)
 
 
 def kpi_players_online() -> int:
@@ -266,17 +269,18 @@ def kpi_summary_text() -> str:
     arena = kpi_arena_rating_distribution(limit_rows=5)
     topgold = kpi_top_gold(limit=3)
     lines = [
-        f"🟢 Online now: **{online}**",
-        f"🧍 Characters: **{totals['total_chars']}**, 👤 Accounts: **{totals['total_accounts']}**",
+        wrap_response("Online now", str(online)),
+        wrap_response("Characters", str(totals['total_chars'])),
+        wrap_response("Accounts", str(totals['total_accounts'])),
     ]
     if arena:
         head = ", ".join(f"{r['rating']}: {r['teams']}" for r in arena[:5])
-        lines.append(f"🏟️ Arena (top buckets): {head}")
+        lines.append(wrap_response("Arena (top buckets)", head))
     if topgold:
         tg = " | ".join(
-            f"{r['name']} (Lv {r['level']}): {copper_to_gold_s(r['money'])}" for r in topgold
+            f"{r['name']} (Lv {r['level']}): {format_gold(r['money'])}" for r in topgold
         )
-        lines.append(f"💰 Top gold: {tg}")
+        lines.append(wrap_response("Top gold", tg))
     return "\n".join(lines)
 
 
