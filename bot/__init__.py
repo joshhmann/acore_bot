@@ -1,1 +1,1 @@
-# bot package marker
+"""Bot package for auxiliary tools and modules."""
