@@ -18,20 +18,28 @@ TTL_HOT = int(os.getenv("METRICS_TTL_SECONDS", "8"))
 
 DICT = pymysql.cursors.DictCursor
 _cache: Dict[Any, Dict[str, Any]] = {}
+# Track whether the last cache access was a hit for external logging.
+last_cache_hit: bool = False
 
 
 def _cache_get(key):
+    global last_cache_hit
     hit = _cache.get(key)
     if not hit:
+        last_cache_hit = False
         return None
     if time.time() - hit["ts"] > hit["ttl"]:
         _cache.pop(key, None)
+        last_cache_hit = False
         return None
+    last_cache_hit = True
     return hit["val"]
 
 
 def _cache_set(key, val, ttl=TTL_HOT):
+    global last_cache_hit
     _cache[key] = {"val": val, "ts": time.time(), "ttl": ttl}
+    last_cache_hit = False
 
 
 @contextmanager
