@@ -56,11 +56,9 @@ Setup
    DOCS_DIR=docs
    # Optional: Retrieval-Augmented Generation (context for better answers)
    RAG_ENABLED=true
-   RAG_KB_TOPK=3
+   RAG_TOPK=3
    RAG_MAX_CHARS=3000
-   RAG_DOCS_TOPK=2
    RAG_MIN_SCORE=10
-   RAG_MAX_CHARS=3000
    # Optional: enable Ollama chat
    OLLAMA_ENABLED=true
    OLLAMA_HOST=http://127.0.0.1:11434
@@ -156,7 +154,7 @@ Knowledge base
 RAG (local retrieval)
 
 - When `RAG_ENABLED=true`, the bot augments Ollama with snippets from `kb.json` and `server_info.json`.
-- It selects top `RAG_KB_TOPK` entries that match the user’s query and adds them to the system prompt (up to `RAG_MAX_CHARS`).
+- It selects top `RAG_TOPK` entries that match the user’s query and adds them to the system prompt (up to `RAG_MAX_CHARS`).
 - This improves accuracy for 3.3.5a questions without needing internet access.
 
 Curated documents
@@ -171,7 +169,7 @@ Curated documents
     - "Horde portals are at Sunreaver's Sanctuary..."
 - Search: `/wowdocs query:"..."` shows top passages with ids; `/wowdocs_show id:<id>` shows the full passage.
 - Reload docs without restart: `/wowdocs_reload` (Manage Server required).
-- RAG: Top `RAG_DOCS_TOPK` passages are automatically included as additional context when generating answers.
+- RAG: Top `RAG_TOPK` passages are automatically included as additional context when generating answers.
 
 DB-backed metrics
 -----------------

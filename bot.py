@@ -49,9 +49,8 @@ except Exception:
 
 # Optional: Retrieval-Augmented Generation (use local KB/server info as context)
 RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() in {"1","true","yes","on"}
-RAG_KB_TOPK = int(os.getenv("RAG_KB_TOPK", "3"))
+RAG_TOPK = int(os.getenv("RAG_TOPK", "3"))
 RAG_MAX_CHARS = int(os.getenv("RAG_MAX_CHARS", "3000"))
-RAG_DOCS_TOPK = int(os.getenv("RAG_DOCS_TOPK", "2"))
 RAG_MIN_SCORE = int(os.getenv("RAG_MIN_SCORE", "10"))
 RAG_IN_AUTOREPLY = os.getenv("RAG_IN_AUTOREPLY", "false").lower() in {"1","true","yes","on"}
 KB_SUGGEST_IN_CHAT = os.getenv("KB_SUGGEST_IN_CHAT", "false").lower() in {"1","true","yes","on"}
@@ -708,7 +707,7 @@ class Bot(discord.Client):
         # KB hits (with score threshold)
         try:
             if getattr(self, "_rag", None) and self._rag.kb and query:
-                scored = self._rag.search_kb(query, limit=max(1, RAG_KB_TOPK), return_scores=True)
+                scored = self._rag.search_kb(query, limit=max(1, RAG_TOPK), return_scores=True)
                 for score, h in scored:
                     if score < RAG_MIN_SCORE:
                         continue
@@ -720,8 +719,8 @@ class Bot(discord.Client):
             pass
         # Curated docs hits (with score threshold)
         try:
-            if getattr(self, "_rag", None) and self._rag.docs and query and RAG_DOCS_TOPK > 0:
-                scored = self._rag.search_docs(query, limit=RAG_DOCS_TOPK, return_scores=True)
+            if getattr(self, "_rag", None) and self._rag.docs and query and RAG_TOPK > 0:
+                scored = self._rag.search_docs(query, limit=RAG_TOPK, return_scores=True)
                 for score, h in scored:
                     if score < RAG_MIN_SCORE:
                         continue
