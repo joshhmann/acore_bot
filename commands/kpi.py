@@ -260,21 +260,18 @@ def setup_kpi(tree: app_commands.CommandTree):
             tlog(rows=len(rows), cache_hit=getattr(kpi, "last_cache_hit", False))
         if not rows:
             return await itx.followup.send("No data.", ephemeral=True)
-
-        if format:
-            await _send_serialized(itx, rows, format, "wowah_hot")
-        else:
-            out_lines = []
-            for r in rows:
-                raw_name = r.get("name") or f"Template {r['item_template']}"
-                name = normalize_item_name(raw_name)
-                out_lines.append(
-                    f"{name}: {int(r['listings'])} listings, avg {format_gold(r['avg_buyout'])}"
-                )
-            await itx.followup.send(
-                wrap_response("Most listed AH items", "\n".join(out_lines)), ephemeral=True
+        out_lines = []
+        for r in rows:
+            name = r.get("name") or f"Template {r['item_template']}"
+            delta = r.get("delta_24h")
+            delta_s = f" (Δ24h {delta:+d})" if delta is not None else ""
+            out_lines.append(
+                f"{name}: {int(r['listings'])} listings{delta_s}, {int(r['sellers'])} sellers, "
+                f"total {kpi.copper_to_gold_s(r['total_buyout'])} / {kpi.copper_to_gold_s(r['total_bid'])}, "
+                f"avg {kpi.copper_to_gold_s(r['avg_buyout'])}"
             )
-        _log_cmd("wowah_hot", t0, rows=len(rows), limit=limit, fmt=format)
+        await itx.followup.send("\n".join(out_lines), ephemeral=True)
+        _log_cmd("wowah_hot", t0, rows=len(rows), limit=limit)
 
     @app_commands.command(name="wowarena", description="Arena rating distribution (top buckets)")
     @app_commands.describe(top="How many rows (default 20)", format="Optional export format")

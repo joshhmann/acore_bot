@@ -24,7 +24,7 @@ Commands
 - /wowgold_top [limit]
 - /wowlevels — level distribution
 - /wowguilds [days=14] [limit=10]
-- /wowah_hot [limit=10] — auction hot items (by item_template)
+- /wowah_hot [limit=10] — auction hot items with totals and 24h delta
 - /wowarena [top=20] — rating:teams pairs
 
 - /wowprof skill_id:<name|id> [min_value=225] — profession counts
