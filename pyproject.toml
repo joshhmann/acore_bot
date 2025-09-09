@@ -12,6 +12,7 @@ dependencies = [
     "PyPDF2>=3.0.1",
     "PyMySQL>=1.1.0",
     "cryptography>=41.0.0",
+    "aiomysql>=0.2.0",
 ]
 
 [tool.pytest.ini_options]

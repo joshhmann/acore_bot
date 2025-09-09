@@ -29,20 +29,28 @@ TTL_HOT = int(os.getenv("METRICS_TTL_SECONDS", "8"))
 
 DICT = pymysql.cursors.DictCursor
 _cache: Dict[Any, Dict[str, Any]] = {}
+# Track whether the last cache access was a hit for external logging.
+last_cache_hit: bool = False
 
 
 def _cache_get(key):
+    global last_cache_hit
     hit = _cache.get(key)
     if not hit:
+        last_cache_hit = False
         return None
     if time.time() - hit["ts"] > hit["ttl"]:
         _cache.pop(key, None)
+        last_cache_hit = False
         return None
+    last_cache_hit = True
     return hit["val"]
 
 
 def _cache_set(key, val, ttl=TTL_HOT):
+    global last_cache_hit
     _cache[key] = {"val": val, "ts": time.time(), "ttl": ttl}
+    last_cache_hit = False
 
 
 @contextmanager
@@ -208,6 +216,22 @@ def kpi_auction_count() -> int:
 
 def kpi_arena_rating_distribution(limit_rows: Optional[int] = None) -> List[Dict[str, Any]]:
     q = "SELECT rating, COUNT(*) AS teams FROM arena_team GROUP BY rating ORDER BY rating DESC"
+    with conn(DB_CHAR) as c, c.cursor() as cur:
+        cur.execute(q)
+        rows = cur.fetchall()
+    return rows[:limit_rows] if limit_rows else rows
+
+
+def kpi_arena_distribution(limit_rows: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Arena team counts per rating and bracket."""
+    q = (
+        """
+    SELECT type AS bracket, rating, COUNT(*) AS teams
+    FROM arena_team
+    GROUP BY type, rating
+    ORDER BY rating DESC
+    """
+    )
     with conn(DB_CHAR) as c, c.cursor() as cur:
         cur.execute(q)
         rows = cur.fetchall()
