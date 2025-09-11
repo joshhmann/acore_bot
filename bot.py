@@ -1,8 +1,8 @@
 # bot_modal.py
 import os, re, time, asyncio, base64, io, json
+from datetime import datetime
 from typing import Optional, Any
 from collections import defaultdict, deque
-from urllib.parse import urlparse
 import discord
 import html 
 from discord import app_commands
@@ -90,11 +90,6 @@ LLM_HOST = os.getenv("LLM_HOST", "") or (ARLIAI_BASE_URL if LLM_PROVIDER == "arl
 LLM_API_KEY = os.getenv("LLM_API_KEY", "") or (ARLIAI_API_KEY if LLM_PROVIDER == "arliai" else "")
 LLM_CONTEXT_TOKENS = int(os.getenv("LLM_CONTEXT_TOKENS", "0"))  # optional hint
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", str(OLLAMA_NUM_PREDICT)))
-OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "256"))
-try:
-    OLLAMA_TEMPERATURE = float(os.getenv("OLLAMA_TEMPERATURE", "0.7"))
-except Exception:
-    OLLAMA_TEMPERATURE = 0.7
 
 # Optional: public info to answer FAQs
 REALMLIST_HOST = os.getenv("REALMLIST_HOST", "set realmlist logon.yourserver.com")
@@ -249,7 +244,16 @@ def enforce_ratelimit_inter(inter: discord.Interaction) -> bool:
 
 # ---- Ollama helpers ----
 ollama_client = OllamaClient(OLLAMA_HOST, OLLAMA_MODEL, num_predict=OLLAMA_NUM_PREDICT, temperature=OLLAMA_TEMPERATURE)
-OLLAMA_TOOLS = [SLUM_QUERY_TOOL]
+# Tool definitions for function-calling with Ollama
+GET_TIME_TOOL = {
+    "type": "function",
+    "function": {
+        "name": "get_current_time",
+        "description": "Get the current local and UTC time with epoch.",
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+    },
+}
+OLLAMA_TOOLS = [SLUM_QUERY_TOOL, GET_TIME_TOOL]
 
 def ollama_available() -> bool:
     return OLLAMA_ENABLED and ollama_client.available
@@ -288,7 +292,11 @@ def llm_chat(prompt: str, *, system: Optional[str], history: Optional[list[dict]
         if images:
             user_msg["images"] = images
         messages.append(user_msg)
-        data = ollama_client.chat_raw(messages, tools=OLLAMA_TOOLS, timeout=20.0)
+        data = ollama_client.chat_raw(
+            messages,
+            tools=(OLLAMA_TOOLS if OLLAMA_TOOLS_ENABLED else None),
+            timeout=20.0,
+        )
         msg = data.get("message") or {}
         tool_calls = msg.get("tool_calls") or []
         while tool_calls:
@@ -309,6 +317,11 @@ def llm_chat(prompt: str, *, system: Optional[str], history: Optional[list[dict]
                         result = asyncio.run(run_named_query(qname, qparams))
                     except Exception as e:
                         result = {"error": str(e)}
+                elif fname == "get_current_time":
+                    try:
+                        result = get_current_time()
+                    except Exception as e:
+                        result = {"ok": False, "error": str(e)}
                 else:
                     result = {"error": f"unknown function {fname}"}
                 messages.append({
@@ -317,7 +330,11 @@ def llm_chat(prompt: str, *, system: Optional[str], history: Optional[list[dict]
                     "tool_call_id": call.get("id"),
                     "content": json.dumps(result, default=str),
                 })
-            data = ollama_client.chat_raw(messages, tools=OLLAMA_TOOLS, timeout=20.0)
+            data = ollama_client.chat_raw(
+                messages,
+                tools=(OLLAMA_TOOLS if OLLAMA_TOOLS_ENABLED else None),
+                timeout=20.0,
+            )
             msg = data.get("message") or {}
             tool_calls = msg.get("tool_calls") or []
         return str(msg.get("content") or data.get("response") or "").strip()
@@ -374,7 +391,43 @@ def _is_rates_query(s: str) -> bool:
 
 def _is_time_query(text: str) -> bool:
     s = (text or "").lower()
-    return any(k in s for k in ("what time", "time is it", "current time", "time now"))
+    keys = (
+        "what time",
+        "time is it",
+        "current time",
+        "time now",
+        "what day",
+        "what date",
+        "current date",
+        "today's date",
+        "today is",
+        "day is it",
+        "date is it",
+        "time in english",
+    )
+    return any(k in s for k in keys)
+
+def sanitize_llm_output(text: str) -> str:
+    """Strip roleplay/stage directions and quotes; keep concise factual content."""
+    if not isinstance(text, str):
+        return str(text)
+    s = text.strip()
+    # Trim wrapping quotes
+    if (s.startswith(("\"", "'", "“", "‘")) and s.endswith(("\"", "'", "”", "’")) and len(s) > 1):
+        s = s[1:-1].strip()
+    # Remove leading stage-direction style lines in parentheses or 'Processing...'
+    out_lines = []
+    for line in s.splitlines():
+        ls = line.lstrip()
+        if (ls.startswith("(") and ls.endswith(")") and len(ls) <= 160):
+            continue
+        if ls.lower().startswith(("processing", "thinking", "pondering")):
+            continue
+        out_lines.append(line)
+    s = "\n".join(out_lines).strip()
+    # Collapse excessive whitespace
+    s = re.sub(r"\s+", " ", s)
+    return s
 
 class RegisterModal(Modal, title="Create Game Account"):
     username: TextInput = TextInput(label="Username", placeholder="3–16 chars: A–Z a–z 0–9 _ -", min_length=3, max_length=16)
@@ -812,9 +865,17 @@ class Bot(discord.Client):
         return None
 
     def _get_system_prompt(self, guild_id: Optional[int]) -> str:
-        if guild_id and guild_id in self._system_prompt_override:
-            return self._system_prompt_override[guild_id]
-        return OLLAMA_SYSTEM_PROMPT
+        base = (
+            self._system_prompt_override[guild_id]
+            if (guild_id and guild_id in self._system_prompt_override)
+            else OLLAMA_SYSTEM_PROMPT
+        )
+        guard = (
+            "Stay factual and concise. Do not roleplay or use stage directions. "
+            "Only engage in roleplay if the user explicitly requests it or accepts an offer to roleplay. "
+            "Prefer tools and live data for facts; if unsure, say 'not sure'."
+        )
+        return base + "\n\n" + guard
 
     def _auto_reply_enabled(self, guild_id: Optional[int]) -> bool:
         if guild_id and guild_id in self._auto_reply_override:
@@ -930,6 +991,9 @@ class Bot(discord.Client):
         if not content and not has_image:
             return
         lc = content.lower()
+        # Ignore short/ack messages to avoid noise unless mentioned/role allowed
+        if not (mentioned or role_allowed) and (len(lc) < 3 or lc in {"ok","k","kk","no","yes","y","n","ty","thanks","thank you","np"}):
+            return
         # Quick intent-based answers before LLM
         if in_allowed_channel or mentioned:
             # Help/commands
@@ -982,6 +1046,32 @@ class Bot(discord.Client):
                 except Exception:
                     pass
                 return
+            # Time/date quick reply (deterministic, bypass LLM)
+            if _is_time_query(content):
+                try:
+                    t = get_current_time()
+                    if t.get("ok"):
+                        try:
+                            dt_local = datetime.fromtimestamp(int(t.get("epoch", 0))).astimezone()
+                        except Exception:
+                            dt_local = datetime.now().astimezone()
+                        s = (content or "").lower()
+                        tz = t.get("tz_local", "local time")
+                        if any(k in s for k in ("day", "date")):
+                            date_text = dt_local.strftime("%A, %B %d, %Y")
+                            await message.reply(
+                                f"Today is {date_text} ({tz}).",
+                                mention_author=False,
+                            )
+                            return
+                        time_text = dt_local.strftime("%I:%M %p").lstrip("0")
+                        await message.reply(
+                            f"🕒 {time_text} ({tz})",
+                            mention_author=False,
+                        )
+                        return
+                except Exception:
+                    pass
             # Optional: KB suggestion blurb (disabled by default)
             if KB_SUGGEST_IN_CHAT and len(content) >= 3 and getattr(self, "_rag", None) and self._rag.kb:
                 hits = [h for h in (e for e in self._rag.search_kb(content, limit=2))]
@@ -1092,19 +1182,23 @@ class Bot(discord.Client):
 
                 gid = message.guild.id if message.guild else None
                 sys_prompt = self._get_system_prompt(gid)
-                guard = "Never invent numbers—if a metric is unavailable, say so and suggest a command like /wowkpi."
+                guard = "Never invent numbers-if a metric is unavailable, say so and suggest a command like /wowkpi."
                 if _is_realm_health_query(prompt):
                     facts = kpi.kpi_summary_text()
                     sys_prompt = sys_prompt + "\n\n" + guard + "\nFACTS (live):\n" + facts
                 elif self._rag_enabled(gid):
                     sys_prompt = self._build_rag_system(prompt, gid)
                 text = await asyncio.to_thread(llm_chat, prompt.strip(), system=sys_prompt, history=hist)
-            if not text:
-                return
-            await send_long_reply(message, text)
-            # Update history
-            self._append_history(message.channel.id, "user", prompt)
-            self._append_history(message.channel.id, "assistant", text)
+                try:
+                    text = sanitize_llm_output(text)
+                except Exception:
+                    pass
+                if not text:
+                    return
+                await send_long_reply(message, text)
+                # Update history
+                self._append_history(message.channel.id, "user", prompt)
+                self._append_history(message.channel.id, "assistant", text)
         except Exception as e:
             # Best-effort friendly error; avoid spamming
             try:
@@ -1215,12 +1309,6 @@ async def wowhelp(interaction: discord.Interaction, topic: Optional[str] = None)
         return await interaction.response.send_message("Use `/wowchangepass` to change/reset your password (private modal).", ephemeral=True)
     # Default overview
     await interaction.response.send_message(get_help_overview(), ephemeral=True)
-
-@bot.tree.command(name="health", description="Bot health ping")
-async def health(interaction: discord.Interaction):
-    if not require_allowed(interaction):
-        return
-    await interaction.response.send_message("ok", ephemeral=True)
 
 @bot.tree.command(name="wowrates", description="Show server rates context")
 async def wowrates(interaction: discord.Interaction):
@@ -1489,17 +1577,31 @@ async def wowask(interaction: discord.Interaction, prompt: str):
                 if name == "gold_per_hour":
                     return await interaction.followup.send("I don’t track gold per hour. Try /wowgold_top or /wowah_hot.", ephemeral=True)
                 if name == "bots_count":
-                    return await interaction.followup.send("Bot count isn’t exposed. Use /wowbots if configured, or ask an admin.", ephemeral=True)
+                    return await interaction.followup.send("Bot count isn't exposed. Use /wowbots if configured, or ask an admin.", ephemeral=True)
 
-        # Time queries via tool
+        # Time/date queries via tool (deterministic, bypass LLM)
         if _is_time_query(prompt):
             t = get_current_time()
             if t.get("ok"):
+                try:
+                    dt_local = datetime.fromtimestamp(int(t.get("epoch", 0))).astimezone()
+                except Exception:
+                    dt_local = datetime.now().astimezone()
+                s = (prompt or "").lower()
+                tz = t.get("tz_local", "local time")
+                if any(k in s for k in ("day", "date")):
+                    date_text = dt_local.strftime("%A, %B %d, %Y")
+                    return await interaction.followup.send(
+                        f"Today is {date_text} ({tz}).",
+                        ephemeral=True,
+                    )
+                time_text = dt_local.strftime("%I:%M %p").lstrip("0")
                 return await interaction.followup.send(
-                    f"🕒 Current time: {t['iso_local']} ({t['tz_local']})",
+                    f"It is currently {time_text} ({tz}).",
                     ephemeral=True,
                 )
             return await interaction.followup.send("⚠️ Could not determine current time.", ephemeral=True)
+
 
         # Facts injection for realm-health queries
         if _is_realm_health_query(user_prompt):
@@ -1518,6 +1620,10 @@ async def wowask(interaction: discord.Interaction, prompt: str):
             system=system,
             history=None,
         )
+        try:
+            text = sanitize_llm_output(text)
+        except Exception:
+            pass
         if not text:
             return await interaction.followup.send("⚠️ No response from model.", ephemeral=True)
         await send_long_ephemeral(interaction, text)
@@ -1797,3 +1903,4 @@ if __name__ == "__main__":
     if not TOKEN:
         raise SystemExit("Missing DISCORD_TOKEN")
     bot.run(TOKEN)
+

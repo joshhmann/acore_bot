@@ -86,6 +86,24 @@ class OllamaClient:
             code = resp.status_code if resp is not None else 'HTTP'
             if code == 404:
                 return f"Model or endpoint not found. Check OLLAMA_MODEL='{self.model}'."
+            # Include response details for 4xx to aid debugging (e.g., unknown 'tools' field)
+            if isinstance(code, int) and 400 <= code < 500:
+                detail = None
+                try:
+                    if resp is not None and resp.text:
+                        # Prefer JSON error field if present, else raw text
+                        try:
+                            j = resp.json()
+                            detail = j.get("error") or j.get("message") or resp.text
+                        except Exception:
+                            detail = resp.text
+                except Exception:
+                    detail = None
+                if detail:
+                    detail = str(detail).strip().replace("\n", " ")
+                    if len(detail) > 240:
+                        detail = detail[:240] + "…"
+                    return f"HTTP error {code} from Ollama: {detail}"
             if code >= 500:
                 return f"Ollama server error {code}. Check Ollama logs."
             return f"HTTP error {code} from Ollama."
