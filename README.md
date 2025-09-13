@@ -1,5 +1,9 @@
 acore-bot (Discord + SOAP)
 
+## Dual-Mode Assistant
+
+This bot now routes messages into **chat** or **authoritative** modes. Chat mode keeps banter light and under 60 words. Authoritative mode requires tool-backed answers for server facts (accounts, passwords, realm status, economy). Tools are dispatched via a registry with JSON schemas and responses are rendered server-side for Discord.
+
 Simple Discord bot for AzerothCore that uses SOAP to:
 
 - Create accounts via a private modal: `/wowregister`
@@ -272,3 +276,7 @@ Server info file (optional)
 
 - Reload at runtime with `/wowreloadinfo` (requires Manage Server permission).
 - Built-in replies (help/connect/status) prefer values from this file, falling back to env vars.
+
+## Testing
+
+Run `uv run pytest -q` to run the suite.
