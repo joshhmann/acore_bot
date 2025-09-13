@@ -17,7 +17,12 @@ from ollama import OllamaClient
 from rag_store import RagStore, sanitize_text
 from arliai import ArliaiClient
 from ac_db import DBConfig as ACDBConfig, get_online_count as db_get_online_count, get_totals as db_get_totals
-from bot.tools import get_current_time
+from bot.intent_router import route
+from bot.prompts import CHAT_SYSTEM, AUTHORITATIVE_SYSTEM
+from bot.tool_dispatch import dispatch as dispatch_tool
+from bot.llm_guard import require_tool_for_sensitive, UngroundedAnswer
+from bot.formatting import render_tool_result
+from bot.tools import get_current_time, tool_specs_for_llm
 
 load_dotenv()
 import ac_metrics as kpi
@@ -622,6 +627,8 @@ class Bot(discord.Client):
         self._rag_override: dict[int, bool] = {}
         # Auto-reply override per guild
         self._auto_reply_override: dict[int, bool] = {}
+        # Mode memory for dual-mode chat
+        self._mode_memory: dict[tuple[int | None, int | None, int], str] = {}
 
     async def setup_hook(self):
         # If you restrict to a single guild, register commands there for instant availability
@@ -1119,6 +1126,34 @@ class Bot(discord.Client):
                             return
             except Exception:
                 pass
+        # --- Dual-mode assistant routing ---
+        key = (message.guild.id if message.guild else None, message.channel.id if message.channel else None, message.author.id)
+        prior = self._mode_memory.get(key)
+        decision = route(content, prior)
+        self._mode_memory[key] = decision.mode
+        if decision.mode == "chat":
+            reply = await asyncio.to_thread(ollama_chat, content, 15.0, CHAT_SYSTEM)
+            if reply:
+                await message.reply(reply, mention_author=False)
+            return
+        raw = await asyncio.to_thread(ollama_chat, content, 15.0, AUTHORITATIVE_SYSTEM, None, None, tool_specs_for_llm())
+        try:
+            data = json.loads(raw)
+        except Exception:
+            raw = await asyncio.to_thread(ollama_chat, content, 15.0, AUTHORITATIVE_SYSTEM + "
+MUST return JSON", None, None, tool_specs_for_llm())
+            data = json.loads(raw)
+        try:
+            require_tool_for_sensitive(decision.intent, data)
+        except UngroundedAnswer:
+            data = {"type": "final", "text": "I need more information."}
+        if data.get("type") == "tool_call":
+            tr = dispatch_tool(data)
+            text = render_tool_result(tr)
+            await message.reply(text, mention_author=False)
+        else:
+            await message.reply(data.get("text", ""), mention_author=False)
+        return
         # Simple per-user rate limit
         if not ratelimit(message.author.id, message.channel.id if message.channel else None):
             return  # silent skip to reduce noise
@@ -1244,7 +1279,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
     except Exception:
         pass
 
-@bot.tree.command(name="registerwow", description="Create a game account privately (opens a modal)")
+@bot.tree.command(name="wowregister", description="Create a game account privately (opens a modal)")
 async def wowregister(interaction: discord.Interaction):
     # Allow anywhere in the guild (modal is private), but still enforce guild restriction
     if not guild_allowed(interaction):
