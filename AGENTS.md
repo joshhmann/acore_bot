@@ -23,7 +23,7 @@ Project Layout
 - `utils/`: Helpers for formatting, caching, intents, and tool logging.
 - `bot/tools/`: Lightweight tools exposed to LLMs (e.g., time, named queries registry).
 - `ac_db.py`, `ac_metrics.py`: DB config and realm metrics snapshot functions.
-- `soap.py`: SOAP client wrapper. `ollama.py`, `arliai.py`: LLM provider clients. `rag_store.py`: local KB/docs + retrieval.
+- `soap.py`: SOAP client wrapper. `ollama.py`: LLM client. `rag_store.py`: local KB/docs + retrieval.
 - `kb.json`, `server_info.json`: Optional local data used for FAQs/RAG.
 - `docs/`: Curated `.md`/`.txt` (and optional `.yaml`) docs for search/RAG.
 - `tests/`: Pytest suite for formatters, metrics, and slum queries.
@@ -79,4 +79,3 @@ Gotchas
 - Don’t leak secrets in logs or commits; `.env` is git‑ignored.
 - Guild/channel command restrictions are enforced; many commands are ephemeral by design.
 - Tests assume local imports; if moving files, update import paths and tests accordingly (only when explicitly requested).
-

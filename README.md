@@ -20,7 +20,7 @@ Simple Discord bot for AzerothCore that uses SOAP to:
   - RAG (optional): Answers use local KB + server info as context
   - Curated docs: Drop `.md`/`.txt` in `docs/`, search via `/wowdocs`
   - Metrics (DB): Realm KPIs via `/wowkpi`, `/wowlevels`, `/wowgold_top`, `/wowguilds`, `/wowactive_guilds`, `/wowah_hot`, `/wowarena`, `/wowprof`
-  - Images (provider-dependent): `/wowimage` (txt2img), `/wowupscale` (upscale)
+  - Images: `/wowaskimg` via Ollama vision (if enabled). Arliai-based `/wowimage` and `/wowupscale` were removed.
 
 Requirements
 
@@ -146,8 +146,7 @@ Slash Commands
  - /wowprof skill_id:<name|id> [min_value=225]: Profession counts
  - /wowfind_char [name] [limit]: Search for characters by name
  - /health: Bot health ping
- - /wowimage: Generate an image (if provider supports).
- - /wowupscale: Upscale an image (if provider supports).
+- (Removed) /wowimage and /wowupscale: Arliai provider was removed; use `/wowaskimg` with Ollama vision.
 
 Notes
 
@@ -217,20 +216,20 @@ DB-backed metrics
 
 - Choose one provider using env:
 
-  LLM_PROVIDER=ollama  # or arliai
+  LLM_PROVIDER=ollama
 
 - For Ollama, set `OLLAMA_*` values (host/model, etc.).
 - For Arliai, set:
 
   ARLIAI_ENABLED=true
   ARLIAI_API_KEY=your_api_key
-  ARLIAI_BASE_URL=https://api.arliai.com
+  # Arliai was removed; only Ollama is supported
   ARLIAI_TEXT_MODEL=TEXT_GENERATION_MODEL
   ARLIAI_IMAGE_MODEL=IMAGE_GENERATION_MODEL
 
 - Unified commands:
   - `/wowask` uses the configured provider for text.
-  - `/wowimage` and `/wowupscale` work when the provider supports them (Arliai). If unsupported, the bot replies with a helpful note.
+- Image generation/upscale via Arliai was removed; use `/wowaskimg` (vision) if your Ollama model supports it.
 
 Import Zygor Lua guides (optional)
 

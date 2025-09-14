@@ -15,9 +15,9 @@ from utils.intent import classify as classify_intent
 from soap import SoapClient
 from ollama import OllamaClient
 from rag_store import RagStore, sanitize_text
-from arliai import ArliaiClient
 from ac_db import DBConfig as ACDBConfig, get_online_count as db_get_online_count, get_totals as db_get_totals
 from bot.intent_router import route
+from bot.intent_router import Intent
 from bot.prompts import CHAT_SYSTEM, AUTHORITATIVE_SYSTEM
 from bot.tool_dispatch import dispatch as dispatch_tool
 from bot.llm_guard import require_tool_for_sensitive, UngroundedAnswer
@@ -27,6 +27,7 @@ from bot.tools import get_current_time, tool_specs_for_llm
 load_dotenv()
 import ac_metrics as kpi
 from commands.kpi import setup_kpi as setup_kpi_commands
+from commands.insights import setup_insights as setup_insights_commands
 from bot.tools import SLUM_QUERY_TOOL, run_named_query
 from commands.health import setup_health as setup_health_commands
 
@@ -69,6 +70,10 @@ except Exception:
 OLLAMA_TOOLS_ENABLED = os.getenv("OLLAMA_TOOLS_ENABLED", "true").lower() in {"1","true","yes","on"}
 OLLAMA_TOOLS_ROLE = os.getenv("OLLAMA_TOOLS_ROLE", "").strip()
 
+# Command visibility profile
+COMMANDS_PROFILE = os.getenv("COMMANDS_PROFILE", "full").lower()  # full|minimal
+COMMANDS_ALLOWLIST = {s.strip() for s in os.getenv("COMMANDS_ALLOWLIST", "").split(",") if s.strip()}
+
 # Optional: Retrieval-Augmented Generation (use local KB/server info as context)
 RAG_ENABLED = os.getenv("RAG_ENABLED", "true").lower() in {"1","true","yes","on"}
 RAG_TOPK = int(os.getenv("RAG_TOPK", "3"))
@@ -78,21 +83,12 @@ RAG_IN_AUTOREPLY = os.getenv("RAG_IN_AUTOREPLY", "false").lower() in {"1","true"
 KB_SUGGEST_IN_CHAT = os.getenv("KB_SUGGEST_IN_CHAT", "false").lower() in {"1","true","yes","on"}
 METRICS_STRICT = os.getenv("METRICS_STRICT", "true").lower() in {"1","true","yes","on"}
 
-# Arliai (optional)
-ARLIAI_ENABLED = os.getenv("ARLIAI_ENABLED", "false").lower() in {"1","true","yes","on"}
-ARLIAI_API_KEY = os.getenv("ARLIAI_API_KEY", "")
-ARLIAI_TEXT_API_KEY = os.getenv("ARLIAI_TEXT_API_KEY", "")
-ARLIAI_IMAGE_API_KEY = os.getenv("ARLIAI_IMAGE_API_KEY", "")
-ARLIAI_BASE_URL = os.getenv("ARLIAI_BASE_URL", "https://api.arliai.com")
-ARLIAI_TEXT_MODEL = os.getenv("ARLIAI_TEXT_MODEL", "TEXT_GENERATION_MODEL")
-ARLIAI_IMAGE_MODEL = os.getenv("ARLIAI_IMAGE_MODEL", "IMAGE_GENERATION_MODEL")
-
-# Provider-agnostic LLM settings (DRY)
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()  # ollama|arliai
-LLM_TEXT_MODEL = os.getenv("LLM_TEXT_MODEL", "") or (ARLIAI_TEXT_MODEL if LLM_PROVIDER == "arliai" else OLLAMA_MODEL)
-LLM_IMAGE_MODEL = os.getenv("LLM_IMAGE_MODEL", "") or (ARLIAI_IMAGE_MODEL if LLM_PROVIDER == "arliai" else "")
-LLM_HOST = os.getenv("LLM_HOST", "") or (ARLIAI_BASE_URL if LLM_PROVIDER == "arliai" else OLLAMA_HOST)
-LLM_API_KEY = os.getenv("LLM_API_KEY", "") or (ARLIAI_API_KEY if LLM_PROVIDER == "arliai" else "")
+# LLM settings (Ollama only)
+LLM_PROVIDER = "ollama"
+LLM_TEXT_MODEL = OLLAMA_MODEL
+LLM_IMAGE_MODEL = ""
+LLM_HOST = OLLAMA_HOST
+LLM_API_KEY = ""
 LLM_CONTEXT_TOKENS = int(os.getenv("LLM_CONTEXT_TOKENS", "0"))  # optional hint
 LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", str(OLLAMA_NUM_PREDICT)))
 
@@ -269,34 +265,61 @@ def ollama_chat(prompt: str, timeout: float = 15.0, system: Optional[str] = None
 def format_ollama_error(e: Exception) -> str:
     return ollama_client.format_error(e)
 
-arliai_client: Optional[ArliaiClient] = None
-if ARLIAI_ENABLED and (ARLIAI_API_KEY or ARLIAI_TEXT_API_KEY or ARLIAI_IMAGE_API_KEY):
-    try:
-        arliai_client = ArliaiClient(ARLIAI_API_KEY, base_url=ARLIAI_BASE_URL, text_api_key=(ARLIAI_TEXT_API_KEY or ARLIAI_API_KEY), image_api_key=(ARLIAI_IMAGE_API_KEY or ARLIAI_API_KEY))
-    except Exception:
-        arliai_client = None
-
 # Tool registry for LLM providers
 LLM_TOOLS = {"get_current_time": get_current_time}
 
 def llm_available() -> bool:
-    if LLM_PROVIDER == "ollama":
-        return OLLAMA_ENABLED and ollama_available()
-    if LLM_PROVIDER == "arliai":
-        return ARLIAI_ENABLED and bool(arliai_client)
-    return False
+    return OLLAMA_ENABLED and ollama_available()
 
 def llm_chat(prompt: str, *, system: Optional[str], history: Optional[list[dict]], images: Optional[list[bytes]] = None) -> str:
-    if LLM_PROVIDER == "ollama":
-        messages: list[dict] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        if history:
-            messages.extend(history)
-        user_msg: dict = {"role": "user", "content": prompt}
-        if images:
-            user_msg["images"] = images
-        messages.append(user_msg)
+    # Ollama-only tool-call loop
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    if history:
+        messages.extend(history)
+    user_msg: dict = {"role": "user", "content": prompt}
+    if images:
+        user_msg["images"] = images
+    messages.append(user_msg)
+    data = ollama_client.chat_raw(
+        messages,
+        tools=(OLLAMA_TOOLS if OLLAMA_TOOLS_ENABLED else None),
+        timeout=20.0,
+    )
+    msg = data.get("message") or {}
+    tool_calls = msg.get("tool_calls") or []
+    while tool_calls:
+        messages.append(msg)
+        for call in tool_calls:
+            fn = call.get("function", {})
+            fname = fn.get("name")
+            args_s = fn.get("arguments") or "{}"
+            try:
+                args = json.loads(args_s)
+            except Exception:
+                args = {}
+            result: Any
+            if fname == "slum_query":
+                qname = args.get("name")
+                qparams = args.get("params", {}) if isinstance(args.get("params"), dict) else {}
+                try:
+                    result = asyncio.run(run_named_query(qname, qparams))
+                except Exception as e:
+                    result = {"error": str(e)}
+            elif fname == "get_current_time":
+                try:
+                    result = get_current_time()
+                except Exception as e:
+                    result = {"ok": False, "error": str(e)}
+            else:
+                result = {"error": f"unknown function {fname}"}
+            messages.append({
+                "role": "tool",
+                "name": fname,
+                "tool_call_id": call.get("id"),
+                "content": json.dumps(result, default=str),
+            })
         data = ollama_client.chat_raw(
             messages,
             tools=(OLLAMA_TOOLS if OLLAMA_TOOLS_ENABLED else None),
@@ -304,73 +327,9 @@ def llm_chat(prompt: str, *, system: Optional[str], history: Optional[list[dict]
         )
         msg = data.get("message") or {}
         tool_calls = msg.get("tool_calls") or []
-        while tool_calls:
-            messages.append(msg)
-            for call in tool_calls:
-                fn = call.get("function", {})
-                fname = fn.get("name")
-                args_s = fn.get("arguments") or "{}"
-                try:
-                    args = json.loads(args_s)
-                except Exception:
-                    args = {}
-                result: Any
-                if fname == "slum_query":
-                    qname = args.get("name")
-                    qparams = args.get("params", {}) if isinstance(args.get("params"), dict) else {}
-                    try:
-                        result = asyncio.run(run_named_query(qname, qparams))
-                    except Exception as e:
-                        result = {"error": str(e)}
-                elif fname == "get_current_time":
-                    try:
-                        result = get_current_time()
-                    except Exception as e:
-                        result = {"ok": False, "error": str(e)}
-                else:
-                    result = {"error": f"unknown function {fname}"}
-                messages.append({
-                    "role": "tool",
-                    "name": fname,
-                    "tool_call_id": call.get("id"),
-                    "content": json.dumps(result, default=str),
-                })
-            data = ollama_client.chat_raw(
-                messages,
-                tools=(OLLAMA_TOOLS if OLLAMA_TOOLS_ENABLED else None),
-                timeout=20.0,
-            )
-            msg = data.get("message") or {}
-            tool_calls = msg.get("tool_calls") or []
-        return str(msg.get("content") or data.get("response") or "").strip()
-    if LLM_PROVIDER == "arliai":
-        if not arliai_client:
-            raise RuntimeError("Arliai client not available")
-        msgs = []
-        if system:
-            msgs.append({"role": "system", "content": system})
-        if history:
-            for m in history:
-                role = m.get("role")
-                content = m.get("content", "")
-                if role in {"user", "assistant", "system"} and content:
-                    msgs.append({"role": role, "content": content})
-        msgs.append({"role": "user", "content": prompt})
-        data = arliai_client.chat(LLM_TEXT_MODEL or ARLIAI_TEXT_MODEL, msgs, temperature=OLLAMA_TEMPERATURE, max_tokens=OLLAMA_NUM_PREDICT)
-        if isinstance(data, dict):
-            choices = data.get("choices") or []
-            if choices:
-                msg = choices[0].get("message") or {}
-                text = msg.get("content")
-                if text:
-                    return str(text)
-        return str(data)
-    raise RuntimeError(f"Unknown LLM provider: {LLM_PROVIDER}")
+    return str(msg.get("content") or data.get("response") or "").strip()
 
 def format_llm_error(e: Exception) -> str:
-    if LLM_PROVIDER == "arliai":
-        from arliai import ArliaiClient as _C
-        return _C.format_error(e)
     return format_ollama_error(e)
 
 
@@ -636,9 +595,9 @@ class Bot(discord.Client):
         try:
             if LLM_PROVIDER != "ollama" or not OLLAMA_VISION_ENABLED:
                 self.tree.remove_command("wowaskimg")
-            if LLM_PROVIDER != "arliai":
-                self.tree.remove_command("wowimage")
-                self.tree.remove_command("wowupscale")
+            # Remove Arliai-dependent commands (provider removed)
+            self.tree.remove_command("wowimage")
+            self.tree.remove_command("wowupscale")
             if not OLLAMA_TOOLS_ENABLED:
                 for name in (
                     "wowask",
@@ -661,12 +620,28 @@ class Bot(discord.Client):
         except Exception:
             pass
 
-        # Register KPI commands (DB-driven metrics) only if DB is enabled
+        # Register KPI and Insights commands (DB-driven metrics) only if DB is enabled
         if DB_ENABLED and DB_USER:
             setup_kpi_commands(self.tree)
+            setup_insights_commands(self.tree)
 
         # Health check command available always
         setup_health_commands(self.tree)
+
+        # Command pruning by profile/allowlist before syncing
+        try:
+            allowed: set[str] | None = None
+            if COMMANDS_ALLOWLIST:
+                allowed = set(COMMANDS_ALLOWLIST)
+            elif COMMANDS_PROFILE == "minimal":
+                # Keep a concise set by default (include account management)
+                allowed = {"health", "insights", "wowonline", "wowkpi", "wowregister", "wowchangepass"}
+            if allowed is not None:
+                for cmd in list(self.tree.get_commands()):
+                    if cmd.name not in allowed:
+                        self.tree.remove_command(cmd.name)
+        except Exception:
+            pass
 
         if ALLOWED_GUILD_ID:
             guild = discord.Object(id=ALLOWED_GUILD_ID)
@@ -1136,16 +1111,37 @@ class Bot(discord.Client):
             if reply:
                 await message.reply(reply, mention_author=False)
             return
-        raw = await asyncio.to_thread(ollama_chat, content, 15.0, AUTHORITATIVE_SYSTEM, None, None, tool_specs_for_llm())
-        try:
-            data = json.loads(raw)
-        except Exception:
-            raw = await asyncio.to_thread(ollama_chat, content, 15.0, AUTHORITATIVE_SYSTEM + "
-MUST return JSON", None, None, tool_specs_for_llm())
-            data = json.loads(raw)
+        # Authoritative mode: model must return strict JSON per system prompt
+        raw = await asyncio.to_thread(ollama_chat, content, 15.0, AUTHORITATIVE_SYSTEM)
+        sraw = (raw or "").strip()
+        if not sraw:
+            data = {"type": "final", "text": "I couldn't retrieve authoritative data right now."}
+        else:
+            try:
+                data = json.loads(sraw)
+            except Exception:
+            # Retry with a stricter system prompt requiring JSON
+                raw = await asyncio.to_thread(
+                ollama_chat,
+                content,
+                15.0,
+                AUTHORITATIVE_SYSTEM + "\nMUST return JSON",
+            )
+            sraw2 = (raw or "").strip()
+            try:
+                data = json.loads(sraw2)
+            except Exception:
+                # Final fallback: safe message when model didn't return JSON
+                data = {"type": "final", "text": "I couldn't retrieve authoritative data right now."}
         try:
             require_tool_for_sensitive(decision.intent, data)
         except UngroundedAnswer:
+            # Auto-fallback: if metrics/status intent without tool_call, dispatch insights
+            if decision.intent in {Intent.REALM_STATUS, Intent.ECONOMY_STATS}:
+                tr = dispatch_tool({"name": "realm_insights", "arguments": {}})
+                text = render_tool_result(tr)
+                await message.reply(text, mention_author=False)
+                return
             data = {"type": "final", "text": "I need more information."}
         if data.get("type") == "tool_call":
             tr = dispatch_tool(data)
@@ -1665,57 +1661,7 @@ async def wowask(interaction: discord.Interaction, prompt: str):
     except Exception as e:
         await interaction.followup.send(f"❌ {format_llm_error(e)}", ephemeral=True)
 
-@bot.tree.command(name="wowimage", description="Generate an image with the configured AI provider")
-@app_commands.describe(prompt="Describe the image", negative="Optional negatives", width="px", height="px")
-async def wowimage(interaction: discord.Interaction, prompt: str, negative: Optional[str] = None, width: int = 1024, height: int = 1024):
-    if not require_allowed(interaction):
-        return
-    if not prompt or not prompt.strip():
-        return await interaction.response.send_message("❌ Please provide a prompt.", ephemeral=True)
-    if not enforce_ratelimit_inter(interaction):
-        return
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    try:
-        if LLM_PROVIDER == "arliai" and arliai_client:
-            data = arliai_client.txt2img(LLM_IMAGE_MODEL or ARLIAI_IMAGE_MODEL, prompt.strip(), negative_prompt=(negative or ""), width=width, height=height)
-            imgs = data.get("images") or []
-            if not imgs:
-                return await interaction.followup.send("⚠️ No image returned.", ephemeral=True)
-            b = base64.b64decode(imgs[0])
-            file = discord.File(io.BytesIO(b), filename="ai_image.png")
-            await interaction.followup.send(content="Here you go:", file=file, ephemeral=True)
-        else:
-            await interaction.followup.send("🤖 The current provider does not support text-to-image.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ {format_llm_error(e)}", ephemeral=True)
-
-@bot.tree.command(name="wowupscale", description="Upscale an image with the configured AI provider")
-@app_commands.describe(image="Image to upscale", factor="Upscale factor (2-4)")
-async def wowupscale(interaction: discord.Interaction, image: discord.Attachment, factor: int = 2):
-    if not require_allowed(interaction):
-        return
-    if factor < 2:
-        factor = 2
-    if factor > 4:
-        factor = 4
-    if not enforce_ratelimit_inter(interaction):
-        return
-    await interaction.response.defer(ephemeral=True, thinking=True)
-    try:
-        if LLM_PROVIDER == "arliai" and arliai_client:
-            raw = await image.read()
-            b64 = base64.b64encode(raw).decode("ascii")
-            data = arliai_client.upscale(b64, upscaling_resize=factor)
-            out = data.get("image")
-            if not out:
-                return await interaction.followup.send("⚠️ No image returned.", ephemeral=True)
-            b = base64.b64decode(out)
-            file = discord.File(io.BytesIO(b), filename="ai_upscaled.png")
-            await interaction.followup.send(content=f"Upscaled x{factor}:", file=file, ephemeral=True)
-        else:
-            await interaction.followup.send("🤖 The current provider does not support upscaling.", ephemeral=True)
-    except Exception as e:
-        await interaction.followup.send(f"❌ {format_llm_error(e)}", ephemeral=True)
+# Removed Arliai-dependent commands (wowimage, wowupscale)
 
 @bot.tree.command(name="wowllminfo", description="Show configured LLM provider/model and token limits")
 async def wowllminfo(interaction: discord.Interaction):
@@ -1723,32 +1669,14 @@ async def wowllminfo(interaction: discord.Interaction):
         return
     parts = [
         f"Provider: {LLM_PROVIDER}",
-        f"Text model: {LLM_TEXT_MODEL or (ARLIAI_TEXT_MODEL if LLM_PROVIDER=='arliai' else OLLAMA_MODEL)}",
+        f"Text model: {LLM_TEXT_MODEL or OLLAMA_MODEL}",
     ]
     ctx = LLM_CONTEXT_TOKENS if LLM_CONTEXT_TOKENS > 0 else None
     max_out = LLM_MAX_TOKENS
-    if LLM_PROVIDER == 'ollama':
-        parts.append(f"Host: {OLLAMA_HOST}")
-        parts.append(f"Max output tokens (configured): {max_out}")
-        if ctx:
-            parts.append(f"Context tokens (hint): {ctx}")
-    elif LLM_PROVIDER == 'arliai':
-        parts.append(f"Host: {ARLIAI_BASE_URL}")
-        parts.append(f"Max output tokens (configured): {max_out}")
-        if ctx:
-            parts.append(f"Context tokens (hint): {ctx}")
-        # Best-effort fetch of model info
-        try:
-            if arliai_client:
-                info = arliai_client.model_info(LLM_TEXT_MODEL or ARLIAI_TEXT_MODEL)
-                if info:
-                    parts.append("Model info (from API):")
-                    # Common keys people care about
-                    for k in ("id", "context_length", "max_tokens", "max_context_tokens", "owner", "created"):
-                        if k in info:
-                            parts.append(f"- {k}: {info[k]}")
-        except Exception:
-            pass
+    parts.append(f"Host: {OLLAMA_HOST}")
+    parts.append(f"Max output tokens (configured): {max_out}")
+    if ctx:
+        parts.append(f"Context tokens (hint): {ctx}")
     await interaction.response.send_message("\n".join(parts), ephemeral=True)
 
 @bot.tree.command(name="wowaskimg", description="Ask about an image using Ollama (if enabled)")

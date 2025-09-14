@@ -25,11 +25,13 @@ try:
         get_realm_kpis as _get_realm_kpis,
         get_top_auctions as _get_top_auctions,
         get_gold_flow as _get_gold_flow,
+        get_insights as _get_insights,
     )
 except Exception:  # pragma: no cover - tests provide mocks
     _get_realm_kpis = None  # type: ignore
     _get_top_auctions = None  # type: ignore
     _get_gold_flow = None  # type: ignore
+    _get_insights = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +122,14 @@ TOOL_REGISTRY: Dict[str, Dict[str, Any]] = {
         },
         "handler": lambda args: register_account(**args),
         "redact": ["password"],
+    },
+    "realm_insights": {
+        "description": "Realm insights: population, concurrency, economy, auctions, stability",
+        "schema": {"type": "object", "properties": {}},
+        "handler": lambda args: (
+            {**(_get_insights() if _get_insights else {}), "ts": _now(), "ttl_s": 30}
+        ),
+        "redact": [],
     },
     "change_password": {
         "description": "Change an account password",
