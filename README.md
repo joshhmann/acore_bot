@@ -6,6 +6,25 @@ A clean, modern Discord bot featuring:
 - **RVC Voice Conversion** - Clone and apply custom voices
 - **Voice Channel Integration** - Play generated audio in Discord voice channels
 
+## Branch Structure
+
+This repository has two versions:
+
+- **`claude/restructure-discord-bot-011CUVECdFCxw69KbmGoyofa`** (this branch) - New clean Ollama + TTS/RVC bot
+- **`claude/legacy-acore-011CUVECdFCxw69KbmGoyofa`** - Original AzerothCore bot with SOAP, database, and game server features
+
+To switch to the legacy AzerothCore bot:
+```bash
+git checkout claude/legacy-acore-011CUVECdFCxw69KbmGoyofa
+python bot.py
+```
+
+To switch back to the new bot:
+```bash
+git checkout claude/restructure-discord-bot-011CUVECdFCxw69KbmGoyofa
+python main.py
+```
+
 ## Features
 
 ### 💬 AI Chat
