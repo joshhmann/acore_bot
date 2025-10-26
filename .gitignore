@@ -4,9 +4,19 @@ __pycache__/
 build/
 dist/
 wheels/
-docs/zygor
 *.egg-info
 
 # Virtual environments
 .venv
 .env
+
+# Bot data
+data/
+*.log
+bot.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+*~
