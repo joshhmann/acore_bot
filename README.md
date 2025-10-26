@@ -1,281 +1,283 @@
-acore-bot (Discord + SOAP)
+# Discord Ollama Bot with TTS & RVC
 
-## Dual-Mode Assistant
+A clean, modern Discord bot featuring:
+- **Ollama AI Chat** - Natural conversations with local LLM models
+- **Text-to-Speech** - High-quality voice synthesis with Edge TTS
+- **RVC Voice Conversion** - Clone and apply custom voices
+- **Voice Channel Integration** - Play generated audio in Discord voice channels
 
-This bot now routes messages into **chat** or **authoritative** modes. Chat mode keeps banter light and under 60 words. Authoritative mode requires tool-backed answers for server facts (accounts, passwords, realm status, economy). Tools are dispatched via a registry with JSON schemas and responses are rendered server-side for Discord.
+## Features
 
-Simple Discord bot for AzerothCore that uses SOAP to:
+### 💬 AI Chat
+- Chat with Ollama-powered AI using `/chat`
+- Conversation history per channel
+- Auto-reply when bot is mentioned
+- Support for multiple models (llama3.2, mistral, etc.)
+- One-off questions with `/ask`
 
-- Create accounts via a private modal: `/wowregister`
-- Show server status with an embed: `/wowstatus`
-- Change account password via a private modal: `/wowchangepass`
-- Show online player count: `/wowonline`
-- Bot presence shows Online/Offline with player count
-- Sends a message when the server goes offline/online
- - Unified chat command: `/wowask` (uses configured LLM provider)
-- Optional auto-replies: Respond to chatter in a channel using Ollama
-  - Built-in helpful replies: server status, how to connect, register, reset password
-  - Vision (optional): Ask about images via `/wowaskimg` or by posting an image (auto-reply)
-  - Knowledge base: Search 3.3.5a cheatsheet via `/wowkb` and `/wowkb_show`
-  - RAG (optional): Answers use local KB + server info as context
-  - Curated docs: Drop `.md`/`.txt` in `docs/`, search via `/wowdocs`
-  - Metrics (DB): Realm KPIs via `/wowkpi`, `/wowlevels`, `/wowgold_top`, `/wowguilds`, `/wowactive_guilds`, `/wowah_hot`, `/wowarena`, `/wowprof`
-  - Images: `/wowaskimg` via Ollama vision (if enabled). Arliai-based `/wowimage` and `/wowupscale` were removed.
+### 🎙️ Text-to-Speech
+- Generate natural-sounding speech with Edge TTS
+- Multiple voices and languages available
+- Play audio in voice channels with `/speak`
+- Customize voice, rate, and volume
 
-Requirements
+### 🎤 Voice Conversion (RVC)
+- Apply voice conversion to TTS output
+- Use custom voice models
+- `/speak_as` command for specific voices
+- Support for .pth RVC models
 
-- Python 3.10+
-- A Discord application/bot token
-- AzerothCore worldserver with SOAP enabled and reachable from where this bot runs
+## Requirements
 
-Setup
+- **Python 3.10+**
+- **Discord Bot Token** - [Create a bot](https://discord.com/developers/applications)
+- **Ollama** - [Install Ollama](https://ollama.ai)
+- **FFmpeg** - Required for voice playback
 
-1) Create a Discord Bot and invite it to your guild with the applications.commands scope.
-2) Ensure worldserver SOAP is enabled and credentials are configured. Verify with curl:
+### Optional
+- **RVC Models** - For voice conversion (.pth files)
 
-   curl -v \
-     -H "Content-Type: text/xml" \
-     -H "Authorization: Basic BASE64_SOAPUSER:SOAPPASS" \
-     --data '<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/"><SOAP-ENV:Body><ns1:executeCommand xmlns:ns1="urn:AC"><command>.server info</command></ns1:executeCommand></SOAP-ENV:Body></SOAP-ENV:Envelope>' \
-     http://HOST:7878/
+## Installation
 
-   You should receive an XML response containing the command output.
+### 1. Clone and Setup
 
-3) Create a `.env` file (do not commit secrets):
+```bash
+cd /path/to/acore_bot
+pip install -r requirements.txt
+```
 
-   DISCORD_TOKEN=your_discord_bot_token
-   SOAP_HOST=127.0.0.1
-   SOAP_PORT=7878
-   SOAP_USER=soap_username
-   SOAP_PASS=soap_password
-   # Optional: restrict the bot to a guild/channel
-   ALLOWED_GUILD_ID=0
-   ALLOWED_CHANNEL_ID=0
-   # Optional: poll interval for status presence/notifications
-   STATUS_POLL_SECONDS=30
-   # Optional: load public info/FAQs from a file
-   SERVER_INFO_FILE=server_info.json
-   KB_FILE=kb.json
-   # Curated documents directory (markdown/text)
-   DOCS_DIR=docs
-   # Optional: Retrieval-Augmented Generation (context for better answers)
-   RAG_ENABLED=true
-   RAG_TOPK=3
-   RAG_MAX_CHARS=3000
-   RAG_MIN_SCORE=10
-   RAG_IN_AUTOREPLY=true
-   # Optional: enable Ollama chat
-   OLLAMA_ENABLED=true
-   OLLAMA_HOST=http://127.0.0.1:11434
-   OLLAMA_MODEL=llama3
-   # Optional: respond to chatter in a text channel (requires Message Content intent in Discord Dev Portal)
-   OLLAMA_AUTO_REPLY=true
-   # Optional: default persona and memory
-   OLLAMA_SYSTEM_PROMPT=You are WowSlumsBot, a concise, friendly assistant focused on AzerothCore and WoW.
-   OLLAMA_HISTORY_TURNS=4
-   # Optional: persist chat memory and personas across restarts
-   CHAT_HISTORY_FILE=chat_history.json
-   # Optional: helpful links for FAQ replies
-   REALMLIST_HOST=set realmlist logon.yourserver.com
-   WEBSITE_URL=https://yourserver.com
-   DOWNLOAD_URL=https://yourserver.com/download
-   SUPPORT_URL=https://discord.gg/yourserver
-   # Optional: vision support (use a vision-capable model like llava)
-   OLLAMA_VISION_ENABLED=true
-   # Optional: enable tool-based server insights
-   OLLAMA_TOOLS_ENABLED=true
-   # Optional: per-user QPS limit for tool queries
-   INSIGHTS_QPS=5
+Or using a virtual environment:
 
-Ollama
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-- Install Ollama and run the server: `ollama serve`
-- Pull a model, e.g.: `ollama pull llama3`
-- Ensure `OLLAMA_ENABLED=true` and the host/model match your setup.
-- Use `/wowask prompt: "..."` to chat. Replies are ephemeral to reduce noise.
- - Vision: Use a vision-capable model (e.g., `llava:13b`). Enable `OLLAMA_VISION_ENABLED=true` and then use `/wowaskimg` or post an image in the allowed channel. The bot attaches images to the model request.
+### 2. Install Ollama
 
-Auto-reply to chatter
+```bash
+# Linux/macOS
+curl -fsSL https://ollama.ai/install.sh | sh
 
-- Enable `OLLAMA_AUTO_REPLY=true` to make the bot respond to messages.
-- If `ALLOWED_CHANNEL_ID` is set, bot replies to all messages in that channel.
-- If not set, bot only replies when it is mentioned to avoid spam.
-- You must enable the “Message Content Intent” for your bot in the Discord Developer Portal and re-invite if needed.
- - If vision is enabled, posting an image in the allowed channel will make the bot describe it (or answer your caption).
+# Start Ollama
+ollama serve
 
-Persona and memory
+# Pull a model (in another terminal)
+ollama pull llama3.2
+```
 
-- Default persona is set with `OLLAMA_SYSTEM_PROMPT`.
-- Adjust per-server at runtime: `/wowpersona_set "Speak like a goblin engineer."`
-- Show current persona: `/wowpersona_show`
-- The bot keeps the last `OLLAMA_HISTORY_TURNS` exchanges per channel to maintain context.
-- Memory and per-server persona persist to `CHAT_HISTORY_FILE`.
-- Clear history for a channel: `/wowclearhistory`
+### 3. Install FFmpeg
 
-Install & Run
+```bash
+# Ubuntu/Debian
+sudo apt install ffmpeg
 
-- Using venv + pip:
+# macOS
+brew install ffmpeg
 
-  python -m venv .venv
-  .venv/bin/pip install -U pip
-  .venv/bin/pip install -r <(python - <<'PY'\nimport tomllib,sys;d=tomllib.load(open('pyproject.toml','rb'));print('\n'.join(d['project']['dependencies']))\nPY)
-  .venv/bin/python bot.py
+# Windows
+# Download from https://ffmpeg.org/download.html
+```
 
-  On Windows PowerShell, adapt paths: `.venv\\Scripts\\python.exe bot.py`.
+### 4. Configure Bot
 
-Slash Commands
+Copy `.env.example` to `.env` and fill in your settings:
 
-- /wowregister: Opens a private modal to create a game account.
-- /wowstatus: Shows an embed with uptime, build, online counts, and update diffs.
-- /wowchangepass: Opens a private modal to change a game account password.
-- /wowonline: Quick online player count.
-- /wowhelp: Helpful info (commands, connect, reset password).
-- /wowdownload: Returns the configured client download link.
- - /wowkb: Search the local knowledge base for WoW 3.3.5a tips.
- - /wowkb_show: Show a specific KB entry by id.
- - /wowkb_reload: Reload KB from JSON or YAML.
- - /wowdocs_reload: Reload curated docs from the docs directory.
- - /wowautoreply_on|off|show: Toggle/show auto-replies per server.
- - /wowkpi: Realm snapshot (online, totals, arena buckets, top gold)
- - /wowlevels: Level distribution
- - /wowgold_top [limit]: Richest characters
- - /wowguilds [days] [limit]: Active guilds
- - /wowactive_guilds [days] [limit]: Active guilds with cached delta
- - /wowah_hot [limit]: Auction hot items with totals and 24h delta
- - /wowarena [top]: Arena rating distribution
- - /wowprof skill_id:<name|id> [min_value=225]: Profession counts
- - /wowfind_char [name] [limit]: Search for characters by name
- - /health: Bot health ping
-- (Removed) /wowimage and /wowupscale: Arliai provider was removed; use `/wowaskimg` with Ollama vision.
+```bash
+cp .env.example .env
+```
 
-Notes
+Edit `.env`:
 
-- The bot syncs slash commands to a single guild instantly if `ALLOWED_GUILD_ID` is set; otherwise global commands are synced (may take up to an hour to propagate).
-- The bot enforces a simple per-user rate limit to avoid SOAP spam.
-- Keep `.env` out of source control; rotate tokens if they were exposed.
+```env
+# Required
+DISCORD_TOKEN=your_discord_bot_token_here
 
-Knowledge base
+# Ollama (defaults are usually fine)
+OLLAMA_HOST=http://localhost:11434
+OLLAMA_MODEL=llama3.2
 
-- Populate `kb.json` with entries of the form: { id, title, tags[], text }.
-- Search with `/wowkb query:"addons"` or `/wowkb query:"realmlist"`.
-- Show full content with `/wowkb_show id:<id>`.
-- Hot-reload with `/wowkbreload` (Manage Server required).
+# Optional: Enable auto-reply
+AUTO_REPLY_ENABLED=true
+AUTO_REPLY_CHANNELS=123456789,987654321  # Channel IDs
+```
 
-RAG (local retrieval)
+### 5. Create Discord Bot
 
-- When `RAG_ENABLED=true`, the bot augments Ollama with snippets from `kb.json` and `server_info.json`.
-- It selects top `RAG_TOPK` entries that match the user’s query and adds them to the system prompt (up to `RAG_MAX_CHARS`).
-- This improves accuracy for 3.3.5a questions without needing internet access.
+1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
+2. Create a new application
+3. Go to **Bot** tab and create a bot
+4. Copy the **token** and put it in `.env` as `DISCORD_TOKEN`
+5. Enable these **Privileged Gateway Intents**:
+   - Message Content Intent
+   - Server Members Intent (optional)
+6. Go to **OAuth2 > URL Generator**
+7. Select scopes: `bot`, `applications.commands`
+8. Select permissions:
+   - Send Messages
+   - Read Message History
+   - Connect (for voice)
+   - Speak (for voice)
+   - Use Voice Activity
+9. Copy the URL and invite the bot to your server
 
-Curated documents
+## Usage
 
-- Put `.md` or `.txt` files into the `docs/` directory. They are loaded at startup and chunked for search.
-- PDFs are supported if `PyPDF2` is installed; add it to `pyproject.toml` or install manually.
-- YAML docs are supported with `PyYAML`. A simple structure is:
+### Start the Bot
 
-  title: Dalaran Portals
-  sections:
-    - "Alliance portals are at the Silver Enclave..."
-    - "Horde portals are at Sunreaver's Sanctuary..."
-- Search: `/wowdocs query:"..."` shows top passages with ids; `/wowdocs_show id:<id>` shows the full passage.
-- Reload docs without restart: `/wowdocs_reload` (Manage Server required).
-- RAG: Top `RAG_TOPK` passages are automatically included as additional context when generating answers.
+```bash
+python main.py
+```
 
-Server Insights
----------------
+Or with virtual environment:
 
-- Enable named queries such as realm KPIs or guild activity with `OLLAMA_TOOLS_ENABLED=true`.
-- Results are cached for `METRICS_TTL_SECONDS` (default 8s) to avoid hammering the DB.
-- A simple per-user rate limiter enforces `INSIGHTS_QPS` queries per second.
-- RAG settings (`RAG_*`, e.g. `RAG_IN_AUTOREPLY`) control how KB snippets are injected.
+```bash
+.venv/bin/python main.py
+```
 
-DB-backed metrics
------------------
+### Commands
 
-- Enable DB access in `.env`:
+#### Chat Commands
 
-  DB_ENABLED=true
-  DB_HOST=127.0.0.1
-  DB_PORT=3306
-  DB_USER=acbot_ro
-  DB_PASS=CHANGE_ME
-  DB_AUTH_DB=auth
-  DB_CHAR_DB=characters
-  DB_WORLD_DB=world
+- `/chat <message>` - Chat with the AI
+- `/ask <question>` - One-off question (no history)
+- `/clear_history` - Clear conversation history for current channel
+- `/set_model <model>` - Change Ollama model
+- `/models` - List available models
+- `/status` - Check AI status
 
-  - Create a read-only user (adjust DB names/host): see `sql/create_readonly_grants.sql`.
-  - Verify the grants are read-only with:
+#### Voice Commands
 
-    ```
-    python scripts/verify_readonly_grants.py
-    ```
+- `/join` - Join your voice channel
+- `/leave` - Leave voice channel
+- `/speak <text>` - Generate and play TTS audio
+- `/speak_as <voice_model> <text>` - Speak with specific RVC voice
+- `/voices` - List available voices
+- `/set_voice <voice>` - Change default TTS voice
+- `/list_tts_voices [language]` - List all available TTS voices
 
-  - See `docs/metrics.md` for schema notes and profession skill IDs.
+### Auto-Reply
 
- LLM provider selection
+When `AUTO_REPLY_ENABLED=true`:
+- Mention the bot to chat: `@BotName hello!`
+- Or restrict to specific channels with `AUTO_REPLY_CHANNELS`
 
-- Choose one provider using env:
+## RVC Setup (Optional)
 
-  LLM_PROVIDER=ollama
+To use voice conversion:
 
-- For Ollama, set `OLLAMA_*` values (host/model, etc.).
-- For Arliai, set:
+1. **Download or train RVC models** (.pth files)
+   - Get pre-trained models or train your own
+   - See [RVC-Project](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI)
 
-  ARLIAI_ENABLED=true
-  ARLIAI_API_KEY=your_api_key
-  # Arliai was removed; only Ollama is supported
-  ARLIAI_TEXT_MODEL=TEXT_GENERATION_MODEL
-  ARLIAI_IMAGE_MODEL=IMAGE_GENERATION_MODEL
+2. **Place models in `data/voice_models/`**
+   ```bash
+   mkdir -p data/voice_models
+   cp your_model.pth data/voice_models/
+   ```
 
-- Unified commands:
-  - `/wowask` uses the configured provider for text.
-- Image generation/upscale via Arliai was removed; use `/wowaskimg` (vision) if your Ollama model supports it.
+3. **Enable RVC in `.env`**
+   ```env
+   RVC_ENABLED=true
+   DEFAULT_RVC_MODEL=your_model
+   ```
 
-Import Zygor Lua guides (optional)
+4. **Use with `/speak_as`**
+   ```
+   /speak_as voice_model:your_model text:Hello world!
+   ```
 
-- Use `zygor_import.py` to convert Zygor `.lua` guides into markdown files under `docs/zygor`.
-- Examples:
+**Note**: The RVC implementation is currently a placeholder. For full functionality, you'll need to integrate the actual RVC inference pipeline (see `services/rvc.py` for details).
 
-  # Chunked markdown files (multiple files per guide)
-  python zygor_import.py --src "/path/to/ZygorGuidesViewer" --mode md --out docs/zygor --tag Zygor --chunk 800
+## Configuration
 
-  # One file per guide (RagStore will chunk internally)
-  python zygor_import.py --src "/path/to/ZygorGuidesViewer" --mode md-single --out docs/zygor --tag Zygor
+### Environment Variables
 
-  # Single KB YAML file (no docs files; point KB_FILE to this)
-  python zygor_import.py --src "/path/to/ZygorGuidesViewer" --mode kb --out kb-zygor.yaml --tag Zygor --chunk 800
+See `.env.example` for all available options:
 
-- After importing, run `/wowdocs_reload` and the bot will index these guides for search and RAG.
-- Licensing: Ensure you have rights to use the guides. Do not commit proprietary content to a public repo.
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DISCORD_TOKEN` | Discord bot token | *Required* |
+| `OLLAMA_HOST` | Ollama server URL | `http://localhost:11434` |
+| `OLLAMA_MODEL` | Default model | `llama3.2` |
+| `OLLAMA_TEMPERATURE` | Response randomness (0-1) | `0.7` |
+| `CHAT_HISTORY_ENABLED` | Enable conversation history | `true` |
+| `CHAT_HISTORY_MAX_MESSAGES` | Max messages to remember | `20` |
+| `AUTO_REPLY_ENABLED` | Auto-reply when mentioned | `false` |
+| `DEFAULT_TTS_VOICE` | TTS voice | `en-US-AriaNeural` |
+| `RVC_ENABLED` | Enable voice conversion | `true` |
 
-YAML examples
+### Data Directories
 
-- KB example: `kb-example.yaml` (use via `KB_FILE=kb-example.yaml`).
-- Doc example: `docs/example.yaml`.
+- `data/chat_history/` - Conversation history per channel (JSON)
+- `data/voice_models/` - RVC voice models (.pth)
+- `data/temp/` - Temporary audio files (auto-cleaned)
 
-Web search (optional)
+## Troubleshooting
 
-- If you want internet answers (Google/SerpAPI/DuckDuckGo), we can add a `/webask` command that fetches results and summarizes with citations. This requires API keys and enabling outbound HTTP on your host.
+### "Cannot connect to Ollama"
+- Make sure Ollama is running: `ollama serve`
+- Check `OLLAMA_HOST` in `.env`
+- Test with: `curl http://localhost:11434/api/tags`
 
-Server info file (optional)
+### "Invalid Discord token"
+- Verify `DISCORD_TOKEN` in `.env`
+- Generate a new token in Discord Developer Portal
 
-- Set `SERVER_INFO_FILE=server_info.json` to load public data and FAQs.
-- Example `server_info.json`:
+### Voice commands not working
+- Install FFmpeg
+- Grant bot "Connect" and "Speak" permissions
+- Join a voice channel before using `/speak`
 
-  {
-    "realmlist": "set realmlist logon.yourserver.com",
-    "website": "https://yourserver.com",
-    "download": "https://yourserver.com/download",
-    "support": "https://discord.gg/yourserver",
-    "faq": {
-      "how do i connect": "Follow these steps to connect...",
-      "reset password": "Use /wowchangepass to change or reset your game password."
-    }
-  }
+### Bot not responding
+- Check bot has "Send Messages" permission
+- For auto-reply: enable "Message Content Intent" in Discord Developer Portal
 
-- Reload at runtime with `/wowreloadinfo` (requires Manage Server permission).
-- Built-in replies (help/connect/status) prefer values from this file, falling back to env vars.
+### RVC not working
+- RVC requires additional setup (see RVC Setup section)
+- Current implementation is a placeholder
+- Audio will pass through unchanged without proper RVC integration
 
-## Testing
+## Development
 
-Run `uv run pytest -q` to run the suite.
+### Project Structure
+
+```
+.
+├── main.py              # Bot entry point
+├── config.py            # Configuration management
+├── cogs/
+│   ├── chat.py         # Chat commands
+│   └── voice.py        # Voice commands
+├── services/
+│   ├── ollama.py       # Ollama LLM client
+│   ├── tts.py          # TTS service
+│   └── rvc.py          # RVC service (placeholder)
+├── utils/
+│   └── helpers.py      # Utilities & chat history
+└── data/               # Runtime data
+```
+
+### Adding Features
+
+The bot uses Discord.py cogs for organization. To add new features:
+
+1. Create a new cog in `cogs/`
+2. Register it in `main.py` with `await bot.add_cog(YourCog(...))`
+3. Sync commands with `await bot.tree.sync()`
+
+## License
+
+This is a fork/restructure of [acore_bot](https://github.com/joshhmann/acore_bot).
+
+## Credits
+
+- [Ollama](https://ollama.ai) - Local LLM inference
+- [Edge TTS](https://github.com/rany2/edge-tts) - Text-to-Speech
+- [discord.py](https://github.com/Rapptz/discord.py) - Discord API wrapper
+- [RVC Project](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) - Voice conversion
+
+---
+
+**Need help?** Open an issue or check the [Discord.py documentation](https://discordpy.readthedocs.io/).
