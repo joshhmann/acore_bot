@@ -10,7 +10,7 @@ import uuid
 
 from config import Config
 from services.tts import TTSService
-from services.rvc import RVCService
+from services.rvc_unified import UnifiedRVCService
 from utils.helpers import format_error, format_success, format_info
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 class VoiceCog(commands.Cog):
     """Cog for voice commands (TTS and RVC)."""
 
-    def __init__(self, bot: commands.Bot, tts: TTSService, rvc: Optional[RVCService] = None):
+    def __init__(self, bot: commands.Bot, tts: TTSService, rvc: Optional[UnifiedRVCService] = None):
         """Initialize voice cog.
 
         Args:

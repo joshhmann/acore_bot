@@ -19,8 +19,8 @@ class KokoroTTSService:
 
     def __init__(
         self,
-        model_path: str = "kokoro-v1.0.onnx",
-        voices_path: str = "voices-v1.0.bin",
+        model_path: str = "models/kokoro-v1.0.onnx",
+        voices_path: str = "models/voices-v1.0.bin",
         default_voice: str = "am_adam",
         speed: float = 1.0,
     ):
