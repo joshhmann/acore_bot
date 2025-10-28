@@ -4,6 +4,8 @@ from pathlib import Path
 from typing import Optional
 import numpy as np
 import wave
+import urllib.request
+import os
 
 try:
     from kokoro_onnx import Kokoro
@@ -13,9 +15,40 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Model download URLs
+KOKORO_MODEL_URL = "https://github.com/nazdridoy/kokoro-tts/releases/download/v1.0.0/kokoro-v1.0.onnx"
+VOICES_BIN_URL = "https://github.com/nazdridoy/kokoro-tts/releases/download/v1.0.0/voices-v1.0.bin"
+
 
 class KokoroTTSService:
     """Service for text-to-speech using Kokoro (local, high-quality)."""
+
+    def _download_models(self) -> bool:
+        """Download Kokoro model files if missing.
+
+        Returns:
+            True if models exist or were downloaded successfully
+        """
+        try:
+            # Create models directory
+            self.model_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Download model file if missing
+            if not self.model_path.exists():
+                logger.info(f"Downloading Kokoro model (~311MB) to {self.model_path}...")
+                urllib.request.urlretrieve(KOKORO_MODEL_URL, self.model_path)
+                logger.info("Model downloaded successfully")
+
+            # Download voices file if missing
+            if not self.voices_path.exists():
+                logger.info(f"Downloading Kokoro voices (~25MB) to {self.voices_path}...")
+                urllib.request.urlretrieve(VOICES_BIN_URL, self.voices_path)
+                logger.info("Voices downloaded successfully")
+
+            return True
+        except Exception as e:
+            logger.error(f"Failed to download Kokoro models: {e}")
+            return False
 
     def __init__(
         self,
@@ -42,16 +75,12 @@ class KokoroTTSService:
             logger.warning("Kokoro TTS not available. Install with: pip install kokoro-onnx")
             return
 
-        # Check if model files exist
-        if not self.model_path.exists():
-            logger.error(f"Kokoro model not found: {self.model_path}")
-            logger.info("Download from: https://github.com/nazdridoy/kokoro-tts/releases")
-            return
-
-        if not self.voices_path.exists():
-            logger.error(f"Kokoro voices file not found: {self.voices_path}")
-            logger.info("Download from: https://github.com/nazdridoy/kokoro-tts/releases")
-            return
+        # Check if model files exist, download if missing
+        if not self.model_path.exists() or not self.voices_path.exists():
+            logger.info("Kokoro model files not found, attempting to download...")
+            if not self._download_models():
+                logger.error("Failed to download Kokoro models")
+                return
 
         # Initialize Kokoro
         try:

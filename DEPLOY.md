@@ -88,8 +88,12 @@ You should see:
 ```
 2025-10-27 20:00:00 | INFO | Bot logged in as YourBotName
 2025-10-27 20:00:00 | INFO | Connected to Ollama at http://localhost:11434
-2025-10-27 20:00:00 | INFO | Kokoro TTS initialized
+2025-10-27 20:00:00 | INFO | Downloading Kokoro model (~311MB)...
+2025-10-27 20:00:00 | INFO | Downloading Kokoro voices (~25MB)...
+2025-10-27 20:00:01 | INFO | Kokoro TTS initialized
 ```
+
+**Note:** Kokoro TTS models (~336MB) will auto-download on first run. This may take a few minutes depending on your internet speed.
 
 ## Step 5: Test in Discord
 

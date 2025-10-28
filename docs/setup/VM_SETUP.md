@@ -88,9 +88,9 @@ Add your Discord token:
 DISCORD_TOKEN=your_discord_bot_token_here
 ```
 
-### 7. Download TTS Models
+### 7. TTS Models (Auto-Download)
 
-Models will auto-download on first run, or download manually:
+Kokoro TTS models (~336MB) will automatically download on first run. If you want to download them manually:
 
 ```bash
 # Create models directory
@@ -98,10 +98,12 @@ mkdir -p models
 
 # Download Kokoro TTS models
 cd models
-wget https://github.com/nazdridoy/kokoro-tts/releases/download/v1.0/kokoro-v1.0.onnx
-wget https://github.com/nazdridoy/kokoro-tts/releases/download/v1.0/voices-v1.0.bin
+wget https://github.com/nazdridoy/kokoro-tts/releases/download/v1.0.0/kokoro-v1.0.onnx
+wget https://github.com/nazdridoy/kokoro-tts/releases/download/v1.0.0/voices-v1.0.bin
 cd ..
 ```
+
+**Note:** The bot will fall back to Edge TTS if Kokoro download fails.
 
 ### 8. Run Bot
 
