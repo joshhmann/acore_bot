@@ -119,7 +119,33 @@ python main.py
 
 To keep the bot running after you disconnect:
 
-### Option 1: Screen (Simple)
+### Option 1: Auto-Install Script (Easiest)
+
+Use the included installation script:
+
+```bash
+# Make script executable
+chmod +x install_service.sh
+
+# Install service
+sudo ./install_service.sh
+
+# Start the bot
+sudo systemctl start discordbot
+
+# Check status
+sudo systemctl status discordbot
+
+# View logs
+sudo journalctl -u discordbot -f
+```
+
+To uninstall:
+```bash
+sudo ./uninstall_service.sh
+```
+
+### Option 2: Screen (Simple)
 
 ```bash
 # Install screen
@@ -135,28 +161,35 @@ python main.py
 # Reattach: screen -r discordbot
 ```
 
-### Option 2: systemd (Recommended)
+### Option 3: Manual systemd Setup
 
-Create a systemd service:
+If you prefer to manually create the service file:
 
 ```bash
 sudo nano /etc/systemd/system/discordbot.service
 ```
 
-Add this content:
+Add this content (update paths for your system):
 ```ini
 [Unit]
-Description=Discord AI Bot
-After=network.target
+Description=Discord AI Bot with Ollama
+After=network.target ollama.service
+Wants=ollama.service
 
 [Service]
 Type=simple
 User=your_username
 WorkingDirectory=/path/to/acore_bot
-Environment="PATH=/path/to/acore_bot/.venv311/bin"
+Environment="PATH=/path/to/acore_bot/.venv311/bin:/usr/local/bin:/usr/bin:/bin"
 ExecStart=/path/to/acore_bot/.venv311/bin/python main.py
 Restart=on-failure
 RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target
@@ -181,6 +214,16 @@ sudo journalctl -u discordbot -f
 ```
 
 ## Troubleshooting
+
+### ONNX Runtime Thread Warnings (Harmless)
+
+You may see warnings like:
+```
+[E:onnxruntime:Default, env.cc:226 ThreadMain] pthread_setaffinity_np failed for thread: 12750
+error code: 22 error msg: Invalid argument
+```
+
+**This is normal and harmless.** ONNX Runtime tries to optimize CPU thread affinity, but this isn't fully supported in some VM environments. The bot will work perfectly fine - these are just warnings, not errors.
 
 ### FFmpeg Not Found
 

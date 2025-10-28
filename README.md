@@ -110,6 +110,14 @@ OLLAMA_MODEL=l3-8b-stheno-v3.2
 python main.py
 ```
 
+**For Linux VMs:** Install as a systemd service to run automatically:
+```bash
+chmod +x install_service.sh
+sudo ./install_service.sh
+sudo systemctl start discordbot
+```
+See [Service Scripts Guide](docs/setup/SERVICE_SCRIPTS.md) for details.
+
 ## 📖 Commands
 
 ### Chat Commands
@@ -213,13 +221,18 @@ MCP_SERVER_PATH=/path/to/mcp/server
 
 ## 📚 Documentation
 
-- [Quick Start](docs/setup/QUICK_START.md)
-- [RVC Integration Complete](docs/setup/RVC_INTEGRATION_COMPLETE.md)
-- [RVC WebUI Setup](docs/setup/RVC_WEBUI_SETUP.md)
-- [Affection System](docs/features/AFFECTION_SYSTEM.md)
-- [User Profile Auto-Learning](docs/features/USER_PROFILE_AUTO_LEARNING.md)
-- [Voice Features](docs/features/VOICE_FEATURES.md)
-- [Persona Switching](docs/features/PERSONA_SWITCHING.md)
+### Setup Guides
+- [Quick Start](docs/setup/QUICK_START.md) - 5-minute setup guide
+- [VM Setup](docs/setup/VM_SETUP.md) - Complete Linux VM deployment
+- [Service Scripts](docs/setup/SERVICE_SCRIPTS.md) - systemd service installation
+- [RVC WebUI Setup](docs/setup/RVC_WEBUI_SETUP.md) - Voice conversion setup
+
+### Features
+- [Affection System](docs/features/AFFECTION_SYSTEM.md) - Relationship tracking
+- [User Profile Auto-Learning](docs/features/USER_PROFILE_AUTO_LEARNING.md) - AI memory
+- [Voice Features](docs/features/VOICE_FEATURES.md) - TTS and RVC pipeline
+- [Kokoro Auto-Download](docs/features/KOKORO_AUTO_DOWNLOAD.md) - Automatic model setup
+- [Persona Switching](docs/features/PERSONA_SWITCHING.md) - Multiple personalities
 
 ## 🐛 Troubleshooting
 
