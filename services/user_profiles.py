@@ -628,7 +628,7 @@ JSON:"""
                 temperature=0.3
             )
 
-            # Parse response
+            # Parse response - clean up markdown and extra text
             response = response.strip()
             if response.startswith("```json"):
                 response = response[7:]
@@ -638,7 +638,32 @@ JSON:"""
                 response = response[:-3]
             response = response.strip()
 
-            sentiment_data = json.loads(response)
+            # Try to extract JSON if there's extra text
+            if not response.startswith("{"):
+                # Find first { and last }
+                start = response.find("{")
+                end = response.rfind("}")
+                if start >= 0 and end > start:
+                    response = response[start:end+1]
+
+            # Remove any comments or trailing commas
+            import re
+            response = re.sub(r'//.*$', '', response, flags=re.MULTILINE)  # Remove comments
+            response = re.sub(r',\s*}', '}', response)  # Remove trailing commas
+            response = re.sub(r',\s*]', ']', response)  # Remove trailing commas in arrays
+
+            try:
+                sentiment_data = json.loads(response)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse affection JSON: {e}")
+                logger.error(f"Raw response: {response[:200]}")
+                # Return neutral sentiment as fallback
+                sentiment_data = {
+                    "sentiment": "neutral",
+                    "is_funny": False,
+                    "is_interesting": False,
+                    "affection_change": 0
+                }
 
             # Update affection
             affection_change = sentiment_data.get("affection_change", 0)
