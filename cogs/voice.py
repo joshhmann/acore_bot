@@ -223,15 +223,22 @@ class VoiceCog(commands.Cog):
 
             # Current TTS voice
             tts_info = self.tts.get_voice_info()
+
+            # Build voice info string based on engine
+            if tts_info.get('engine') == 'kokoro':
+                voice_details = f"**{tts_info['voice']}**\nEngine: Kokoro\nSpeed: {tts_info.get('speed', 1.0)}x"
+            else:
+                voice_details = f"**{tts_info['voice']}**\nEngine: Edge TTS\nRate: {tts_info.get('rate', '+0%')}, Volume: {tts_info.get('volume', '+0%')}"
+
             embed.add_field(
                 name="Current TTS Voice",
-                value=f"**{tts_info['voice']}**\nRate: {tts_info['rate']}, Volume: {tts_info['volume']}",
+                value=voice_details,
                 inline=False,
             )
 
             # RVC models
             if self.rvc and self.rvc.is_enabled():
-                models = self.rvc.list_models()
+                models = await self.rvc.list_models()
                 if models:
                     model_list = "\n".join([f"• {m}" for m in models])
                     embed.add_field(
@@ -259,7 +266,7 @@ class VoiceCog(commands.Cog):
             await interaction.followup.send(format_error(e), ephemeral=True)
 
     @app_commands.command(name="set_voice", description="Change the default TTS voice")
-    @app_commands.describe(voice="Voice name (e.g., en-US-AriaNeural)")
+    @app_commands.describe(voice="Voice name (e.g., am_adam for Kokoro, en-US-AriaNeural for Edge)")
     async def set_voice(self, interaction: discord.Interaction, voice: str):
         """Change the default TTS voice.
 
@@ -268,11 +275,16 @@ class VoiceCog(commands.Cog):
             voice: Voice name to use
         """
         try:
-            # Update the default voice
-            self.tts.default_voice = voice
+            # Update the voice based on current TTS engine
+            if Config.TTS_ENGINE == "kokoro":
+                self.tts.kokoro_voice = voice
+                engine_name = "Kokoro"
+            else:
+                self.tts.default_voice = voice
+                engine_name = "Edge TTS"
 
             await interaction.response.send_message(
-                format_success(f"Default TTS voice changed to: **{voice}**"),
+                format_success(f"Default {engine_name} voice changed to: **{voice}**"),
                 ephemeral=True,
             )
 

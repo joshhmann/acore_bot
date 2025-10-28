@@ -8,15 +8,49 @@ wheels/
 
 # Virtual environments
 .venv
+.venv*/
 .env
+venv*/
 
 # Bot data
 data/
 *.log
 bot.log
 
+# Test files and outputs
+test_*.py
+test_*.wav
+test_*.txt
+test_profiles/
+check_*.py
+nul
+
+# RVC/TTS model files (large binaries)
+*.pt
+*.pth
+*.onnx
+*.bin
+*.index
+models/*
+!models/README.md
+
+# Project lock files
+uv.lock
+poetry.lock
+
 # Temporary files
 *.tmp
 *.swp
 *.swo
 *~
+.env copy
+
+# IDE
+.vscode/
+.idea/
+*.code-workspace
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db

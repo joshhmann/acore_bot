@@ -1,302 +1,310 @@
-# Discord Ollama Bot with TTS & RVC
+# Discord AI Bot with Personality, Voice & Memory
 
-A clean, modern Discord bot featuring:
-- **Ollama AI Chat** - Natural conversations with local LLM models
-- **Text-to-Speech** - High-quality voice synthesis with Edge TTS
-- **RVC Voice Conversion** - Clone and apply custom voices
-- **Voice Channel Integration** - Play generated audio in Discord voice channels
+A sophisticated Discord bot featuring AI personality, high-quality voice synthesis, voice conversion, user memory, and relationship building.
 
-## Branch Structure
+## 🌟 Features
 
-This repository has two versions:
+### 🧠 AI Personality System
+- **Ollama-powered chat** with L3-8B-Stheno-v3.2 model optimized for roleplay
+- **Multiple personas** - Switch between personalities (Chief, Arbiter, Pirate, etc.)
+- **Dynamic personality** based on user relationships
+- **Context-aware** with real-time date/time
+- **Conversation sessions** with automatic memory management
 
-- **`claude/restructure-discord-bot-011CUVECdFCxw69KbmGoyofa`** (this branch) - New clean Ollama + TTS/RVC bot
-- **`claude/legacy-acore-011CUVECdFCxw69KbmGoyofa`** - Original AzerothCore bot with SOAP, database, and game server features
+### 💖 User Relationship System
+- **Affection tracking** (0-100 scale) with 5 relationship stages
+- **Auto-learning** - Bot learns about users from conversations
+- **Profile system** - Tracks traits, interests, preferences, memorable quotes
+- **Sentiment analysis** - Conversations affect relationship level
+- **Personalized responses** based on relationship stage
 
-To switch to the legacy AzerothCore bot:
-```bash
-git checkout claude/legacy-acore-011CUVECdFCxw69KbmGoyofa
-python bot.py
-```
+### 🎙️ Voice Pipeline
+- **Kokoro TTS** - High-quality local text-to-speech with 50+ voices
+- **RVC Voice Conversion** - Apply custom character voices (GOTHMOMMY, etc.)
+- **Discord voice integration** - Speaks responses in voice channels
+- **Auto-TTS** - Bot speaks when mentioned in voice channel
 
-To switch back to the new bot:
-```bash
-git checkout claude/restructure-discord-bot-011CUVECdFCxw69KbmGoyofa
-python main.py
-```
+### 🔍 Advanced Features
+- **Web search** (optional) - DuckDuckGo integration
+- **MCP personality RAG** (optional) - Retrieval-augmented generation for personalities
+- **Per-persona voices** - Each personality has its own voice
+- **Session management** - Automatic conversation cleanup
 
-## Features
+## 📋 Requirements
 
-### 💬 AI Chat
-- Chat with Ollama-powered AI using `/chat`
-- Conversation history per channel
-- Auto-reply when bot is mentioned
-- Support for multiple models (llama3.2, mistral, etc.)
-- One-off questions with `/ask`
-
-### 🎙️ Text-to-Speech
-- Generate natural-sounding speech with Edge TTS
-- Multiple voices and languages available
-- Play audio in voice channels with `/speak`
-- Customize voice, rate, and volume
-
-### 🎤 Voice Conversion (RVC)
-- Apply voice conversion to TTS output
-- Use custom voice models
-- `/speak_as` command for specific voices
-- Support for .pth RVC models
-
-## Requirements
-
-- **Python 3.10+**
+### Core
+- **Python 3.11+**
 - **Discord Bot Token** - [Create a bot](https://discord.com/developers/applications)
-- **Ollama** - [Install Ollama](https://ollama.ai)
+- **Ollama** - [Install Ollama](https://ollama.ai) with L3-8B-Stheno-v3.2 model
 - **FFmpeg** - Required for voice playback
 
-### Optional
-- **RVC Models** - For voice conversion (.pth files)
+### Voice Features
+- **Kokoro TTS** models (auto-downloaded on first use)
+- **RVC-WebUI** (optional) - For voice conversion
+  - [RVC-WebUI Setup Guide](docs/setup/RVC_WEBUI_SETUP.md)
 
-## Installation
+## 🚀 Quick Start
 
-### 1. Clone and Setup
+### 1. Install Dependencies
 
 ```bash
-cd /path/to/acore_bot
+# Clone repository
+git clone https://github.com/joshhmann/acore_bot.git
+cd acore_bot
+
+# Create virtual environment
+python -m venv .venv311
+.venv311/Scripts/activate  # Windows
+# or
+source .venv311/bin/activate  # Linux/Mac
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-Or using a virtual environment:
+### 2. Install Ollama & Model
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 2. Install Ollama
-
-```bash
-# Linux/macOS
-curl -fsSL https://ollama.ai/install.sh | sh
+# Install Ollama
+curl -fsSL https://ollama.ai/install.sh | sh  # Linux/Mac
+# or download from https://ollama.ai for Windows
 
 # Start Ollama
 ollama serve
 
-# Pull a model (in another terminal)
-ollama pull llama3.2
+# Pull the Stheno model (in another terminal)
+ollama pull l3-8b-stheno-v3.2
 ```
 
-### 3. Install FFmpeg
+### 3. Configure Bot
 
 ```bash
-# Ubuntu/Debian
-sudo apt install ffmpeg
-
-# macOS
-brew install ffmpeg
-
-# Windows
-# Download from https://ffmpeg.org/download.html
-```
-
-### 4. Configure Bot
-
-Copy `.env.example` to `.env` and fill in your settings:
-
-```bash
+# Copy example config
 cp .env.example .env
+
+# Edit .env with your settings
+nano .env
 ```
 
-Edit `.env`:
-
+Minimum required settings:
 ```env
-# Required
 DISCORD_TOKEN=your_discord_bot_token_here
-
-# Ollama (defaults are usually fine)
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-
-# Optional: Enable auto-reply
-AUTO_REPLY_ENABLED=true
-AUTO_REPLY_CHANNELS=123456789,987654321  # Channel IDs
+OLLAMA_MODEL=l3-8b-stheno-v3.2
 ```
 
-### 5. Create Discord Bot
+### 4. Create Discord Bot
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
-2. Create a new application
-3. Go to **Bot** tab and create a bot
-4. Copy the **token** and put it in `.env` as `DISCORD_TOKEN`
-5. Enable these **Privileged Gateway Intents**:
-   - Message Content Intent
-   - Server Members Intent (optional)
-6. Go to **OAuth2 > URL Generator**
-7. Select scopes: `bot`, `applications.commands`
-8. Select permissions:
-   - Send Messages
-   - Read Message History
-   - Connect (for voice)
-   - Speak (for voice)
-   - Use Voice Activity
-9. Copy the URL and invite the bot to your server
+2. Create application → Bot → Copy token
+3. Enable **Privileged Gateway Intents**:
+   - Message Content Intent ✅
+   - Server Members Intent ✅
+4. OAuth2 → URL Generator:
+   - Scopes: `bot`, `applications.commands`
+   - Permissions: Send Messages, Read History, Connect, Speak, Use Voice Activity
+5. Invite bot to your server
 
-## Usage
-
-### Start the Bot
+### 5. Run Bot
 
 ```bash
 python main.py
 ```
 
-Or with virtual environment:
+## 📖 Commands
 
-```bash
-.venv/bin/python main.py
-```
-
-### Commands
-
-#### Chat Commands
-
-- `/chat <message>` - Chat with the AI
+### Chat Commands
+- `/chat <message>` - Chat with AI (with personality & memory)
 - `/ask <question>` - One-off question (no history)
-- `/clear_history` - Clear conversation history for current channel
-- `/set_model <model>` - Change Ollama model
-- `/models` - List available models
-- `/status` - Check AI status
+- `/clear_history` - Clear conversation history
+- `/set_persona <persona>` - Change bot personality
+- `/personas` - List available personas
+- `/my_profile` - View your profile & relationship status
+- `/relationship` - Check your relationship with the bot
 
-#### Voice Commands
-
+### Voice Commands
 - `/join` - Join your voice channel
 - `/leave` - Leave voice channel
-- `/speak <text>` - Generate and play TTS audio
-- `/speak_as <voice_model> <text>` - Speak with specific RVC voice
-- `/voices` - List available voices
-- `/set_voice <voice>` - Change default TTS voice
-- `/list_tts_voices [language]` - List all available TTS voices
+- `/speak <text>` - Generate and play TTS
+- `/set_voice <voice>` - Change TTS voice
+- `/list_voices` - List available Kokoro voices
 
-### Auto-Reply
+### Status Commands
+- `/status` - Check bot and service status
+- `/models` - List available Ollama models
 
-When `AUTO_REPLY_ENABLED=true`:
-- Mention the bot to chat: `@BotName hello!`
-- Or restrict to specific channels with `AUTO_REPLY_CHANNELS`
+## 🗂️ Project Structure
 
-## RVC Setup (Optional)
+```
+acore_bot/
+├── main.py                 # Bot entry point
+├── config.py              # Configuration management
+├── cogs/
+│   ├── chat.py           # Chat & AI commands
+│   └── voice.py          # Voice & TTS commands
+├── services/
+│   ├── ollama.py         # Ollama LLM client
+│   ├── kokoro_tts.py     # Kokoro TTS service
+│   ├── rvc_http.py       # RVC voice conversion (HTTP)
+│   ├── rvc_unified.py    # Unified RVC interface
+│   ├── user_profiles.py  # User memory & affection system
+│   ├── web_search.py     # DuckDuckGo search (optional)
+│   ├── mcp.py            # MCP personality RAG (optional)
+│   └── deprecated/       # Old implementations
+├── utils/
+│   ├── helpers.py        # Conversation history utilities
+│   ├── persona_loader.py # Persona management
+│   └── system_context.py # Date/time context injection
+├── prompts/
+│   └── *.txt            # Persona prompt files
+├── tests/               # Test scripts
+├── docs/
+│   ├── setup/          # Setup guides
+│   └── features/       # Feature documentation
+└── data/               # Runtime data (not in git)
+    ├── chat_history/   # Conversation history per channel
+    ├── user_profiles/  # User profiles & affection data
+    └── temp/          # Temporary audio files
+```
 
-To use voice conversion:
+## 🎭 Available Personas
 
-1. **Download or train RVC models** (.pth files)
-   - Get pre-trained models or train your own
-   - See [RVC-Project](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI)
+Located in `prompts/` directory:
+- **chief** - Master Chief from Halo (default)
+- **arbiter** - Arbiter from Halo
+- **pirate** - Pirate character
+- **cortana** - Cortana AI
+- **johnson** - Sergeant Johnson
+- ...and more!
 
-2. **Place models in `data/voice_models/`**
-   ```bash
-   mkdir -p data/voice_models
-   cp your_model.pth data/voice_models/
-   ```
+Add your own by creating `prompts/your_persona.txt`
 
-3. **Enable RVC in `.env`**
+## 🔧 Advanced Setup
+
+### RVC Voice Conversion
+
+For character voices like GOTHMOMMY:
+
+1. **Install RVC-WebUI** (separate repo)
+2. **Place model files** in RVC-WebUI's `assets/weights/`
+3. **Start RVC-WebUI**: `python infer-web.py`
+4. **Load model** through web interface (http://localhost:7865)
+5. **Enable in bot**:
    ```env
    RVC_ENABLED=true
-   DEFAULT_RVC_MODEL=your_model
+   RVC_MODE=webui
+   RVC_WEBUI_URL=http://localhost:7865
+   RVC_DEFAULT_MODEL=GOTHMOMMY
    ```
 
-4. **Use with `/speak_as`**
-   ```
-   /speak_as voice_model:your_model text:Hello world!
-   ```
+See [RVC Setup Guide](docs/setup/RVC_INTEGRATION_COMPLETE.md) for details.
 
-**Note**: The RVC implementation is currently a placeholder. For full functionality, you'll need to integrate the actual RVC inference pipeline (see `services/rvc.py` for details).
+### Optional Features
 
-## Configuration
+**Web Search:**
+```env
+WEB_SEARCH_ENABLED=true
+```
 
-### Environment Variables
+**MCP Personality RAG:**
+```env
+MCP_PERSONALITY_RAG_ENABLED=true
+MCP_SERVER_PATH=/path/to/mcp/server
+```
 
-See `.env.example` for all available options:
+## 📚 Documentation
+
+- [Quick Start](docs/setup/QUICK_START.md)
+- [RVC Integration Complete](docs/setup/RVC_INTEGRATION_COMPLETE.md)
+- [RVC WebUI Setup](docs/setup/RVC_WEBUI_SETUP.md)
+- [Affection System](docs/features/AFFECTION_SYSTEM.md)
+- [User Profile Auto-Learning](docs/features/USER_PROFILE_AUTO_LEARNING.md)
+- [Voice Features](docs/features/VOICE_FEATURES.md)
+- [Persona Switching](docs/features/PERSONA_SWITCHING.md)
+
+## 🐛 Troubleshooting
+
+### "Cannot connect to Ollama"
+```bash
+# Start Ollama
+ollama serve
+
+# Verify it's running
+curl http://localhost:11434/api/tags
+```
+
+### Voice not working
+- Install FFmpeg
+- Check bot has Connect/Speak permissions
+- Join voice channel before using `/speak`
+
+### RVC returns errors
+- Ensure RVC-WebUI is running
+- Model must be selected in web UI
+- Check RVC-WebUI console for errors
+
+### Profile learning not working
+```env
+USER_PROFILES_ENABLED=true
+USER_PROFILES_AUTO_LEARN=true
+```
+
+## 🔐 Environment Variables
+
+Key settings in `.env`:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `DISCORD_TOKEN` | Discord bot token | *Required* |
-| `OLLAMA_HOST` | Ollama server URL | `http://localhost:11434` |
-| `OLLAMA_MODEL` | Default model | `llama3.2` |
-| `OLLAMA_TEMPERATURE` | Response randomness (0-1) | `0.7` |
-| `CHAT_HISTORY_ENABLED` | Enable conversation history | `true` |
-| `CHAT_HISTORY_MAX_MESSAGES` | Max messages to remember | `20` |
-| `AUTO_REPLY_ENABLED` | Auto-reply when mentioned | `false` |
-| `DEFAULT_TTS_VOICE` | TTS voice | `en-US-AriaNeural` |
+| `OLLAMA_MODEL` | AI model | `l3-8b-stheno-v3.2` |
+| `TTS_ENGINE` | TTS engine | `kokoro` |
+| `DEFAULT_PERSONA` | Bot personality | `chief` |
+| `USER_PROFILES_ENABLED` | Enable user memory | `true` |
+| `USER_AFFECTION_ENABLED` | Enable affection system | `true` |
 | `RVC_ENABLED` | Enable voice conversion | `true` |
+| `RVC_MODE` | RVC mode | `webui` |
 
-### Data Directories
+See `.env.example` for complete list.
 
-- `data/chat_history/` - Conversation history per channel (JSON)
-- `data/voice_models/` - RVC voice models (.pth)
-- `data/temp/` - Temporary audio files (auto-cleaned)
+## 🎯 How It Works
 
-## Troubleshooting
+### Complete Pipeline
 
-### "Cannot connect to Ollama"
-- Make sure Ollama is running: `ollama serve`
-- Check `OLLAMA_HOST` in `.env`
-- Test with: `curl http://localhost:11434/api/tags`
+1. **User mentions bot** in text channel
+2. **Ollama generates response** with personality & user context
+3. **Kokoro TTS** converts text to speech
+4. **RVC converts voice** to character (GOTHMOMMY)
+5. **Bot plays audio** in Discord voice channel
+6. **Profile system** learns from interaction & updates affection
 
-### "Invalid Discord token"
-- Verify `DISCORD_TOKEN` in `.env`
-- Generate a new token in Discord Developer Portal
-
-### Voice commands not working
-- Install FFmpeg
-- Grant bot "Connect" and "Speak" permissions
-- Join a voice channel before using `/speak`
-
-### Bot not responding
-- Check bot has "Send Messages" permission
-- For auto-reply: enable "Message Content Intent" in Discord Developer Portal
-
-### RVC not working
-- RVC requires additional setup (see RVC Setup section)
-- Current implementation is a placeholder
-- Audio will pass through unchanged without proper RVC integration
-
-## Development
-
-### Project Structure
+### User Learning Example
 
 ```
-.
-├── main.py              # Bot entry point
-├── config.py            # Configuration management
-├── cogs/
-│   ├── chat.py         # Chat commands
-│   └── voice.py        # Voice commands
-├── services/
-│   ├── ollama.py       # Ollama LLM client
-│   ├── tts.py          # TTS service
-│   └── rvc.py          # RVC service (placeholder)
-├── utils/
-│   └── helpers.py      # Utilities & chat history
-└── data/               # Runtime data
+User: "I love pizza!"
+Bot: *extracts & stores* → traits: ["enthusiastic"], interests: ["pizza", "food"]
+
+User: "I'm a developer"
+Bot: *extracts & stores* → facts: ["occupation: developer"]
+
+Next conversation:
+Bot: *uses context* → "Hey developer friend! How's the coding going?"
 ```
 
-### Adding Features
+## 🤝 Contributing
 
-The bot uses Discord.py cogs for organization. To add new features:
+Issues and pull requests welcome!
 
-1. Create a new cog in `cogs/`
-2. Register it in `main.py` with `await bot.add_cog(YourCog(...))`
-3. Sync commands with `await bot.tree.sync()`
+## 📄 License
 
-## License
+MIT License - See LICENSE file
 
-This is a fork/restructure of [acore_bot](https://github.com/joshhmann/acore_bot).
-
-## Credits
+## 🙏 Credits
 
 - [Ollama](https://ollama.ai) - Local LLM inference
-- [Edge TTS](https://github.com/rany2/edge-tts) - Text-to-Speech
-- [discord.py](https://github.com/Rapptz/discord.py) - Discord API wrapper
-- [RVC Project](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) - Voice conversion
+- [Kokoro TTS](https://github.com/nazdridoy/kokoro-tts) - High-quality TTS
+- [RVC-WebUI](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI) - Voice conversion
+- [discord.py](https://github.com/Rapptz/discord.py) - Discord API
+- [L3-8B-Stheno](https://huggingface.co/Sao10K/L3-8B-Stheno-v3.2) - Roleplay-optimized model
 
 ---
 
-**Need help?** Open an issue or check the [Discord.py documentation](https://discordpy.readthedocs.io/).
+**Need help?** Check the [docs](docs/) or open an issue!

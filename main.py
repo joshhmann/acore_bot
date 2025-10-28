@@ -16,7 +16,8 @@ from pathlib import Path
 from config import Config
 from services.ollama import OllamaService
 from services.tts import TTSService
-from services.rvc import RVCService
+from services.rvc_unified import UnifiedRVCService
+from services.user_profiles import UserProfileService
 from utils.helpers import ChatHistoryManager
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
@@ -54,25 +55,43 @@ class OllamaBot(commands.Bot):
             model=Config.OLLAMA_MODEL,
             temperature=Config.OLLAMA_TEMPERATURE,
             max_tokens=Config.OLLAMA_MAX_TOKENS,
+            min_p=Config.OLLAMA_MIN_P,
+            top_k=Config.OLLAMA_TOP_K,
+            repeat_penalty=Config.OLLAMA_REPEAT_PENALTY,
         )
 
         self.tts = TTSService(
+            engine=Config.TTS_ENGINE,
             default_voice=Config.DEFAULT_TTS_VOICE,
             rate=Config.TTS_RATE,
             volume=Config.TTS_VOLUME,
+            kokoro_voice=Config.KOKORO_VOICE,
+            kokoro_speed=Config.KOKORO_SPEED,
         )
 
         self.rvc = None
         if Config.RVC_ENABLED:
-            self.rvc = RVCService(
+            self.rvc = UnifiedRVCService(
+                mode=Config.RVC_MODE,
                 model_path=Config.RVC_MODEL_PATH,
                 default_model=Config.DEFAULT_RVC_MODEL,
+                device=Config.RVC_DEVICE,
+                webui_url=Config.RVC_WEBUI_URL,
             )
 
         self.history_manager = ChatHistoryManager(
             history_dir=Config.CHAT_HISTORY_DIR,
             max_messages=Config.CHAT_HISTORY_MAX_MESSAGES,
         )
+
+        # Initialize user profiles if enabled
+        self.user_profiles = None
+        if Config.USER_PROFILES_ENABLED:
+            self.user_profiles = UserProfileService(
+                profiles_dir=Config.USER_PROFILES_PATH,
+                ollama_service=self.ollama  # Pass ollama for AI-powered learning
+            )
+            logger.info("User profiles enabled")
 
     async def setup_hook(self):
         """Setup hook called when bot is starting."""
@@ -91,7 +110,7 @@ class OllamaBot(commands.Bot):
             logger.info(f"Connected to Ollama - Model: {Config.OLLAMA_MODEL}")
 
         # Load cogs
-        await self.add_cog(ChatCog(self, self.ollama, self.history_manager))
+        await self.add_cog(ChatCog(self, self.ollama, self.history_manager, self.user_profiles))
         logger.info("Loaded ChatCog")
 
         await self.add_cog(VoiceCog(self, self.tts, self.rvc))

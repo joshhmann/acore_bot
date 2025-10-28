@@ -9,19 +9,34 @@ logger = logging.getLogger(__name__)
 class OllamaService:
     """Service for interacting with Ollama LLM."""
 
-    def __init__(self, host: str, model: str, temperature: float = 0.7, max_tokens: int = 500):
+    def __init__(
+        self,
+        host: str,
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 500,
+        min_p: float = 0.075,
+        top_k: int = 50,
+        repeat_penalty: float = 1.1,
+    ):
         """Initialize Ollama service.
 
         Args:
             host: Ollama server URL (e.g., http://localhost:11434)
             model: Model name (e.g., llama3.2, mistral, etc.)
-            temperature: Temperature for response generation (0.0-1.0)
+            temperature: Temperature for response generation (0.0-2.0, recommended 1.12-1.22 for roleplay)
             max_tokens: Maximum tokens in response
+            min_p: Min-P sampling (0.0-1.0, recommended 0.075 for roleplay)
+            top_k: Top-K sampling (recommended 50 for roleplay)
+            repeat_penalty: Repetition penalty (recommended 1.1 for roleplay)
         """
         self.host = host.rstrip("/")
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
+        self.min_p = min_p
+        self.top_k = top_k
+        self.repeat_penalty = repeat_penalty
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def initialize(self):
@@ -68,6 +83,9 @@ class OllamaService:
             "options": {
                 "temperature": temperature or self.temperature,
                 "num_predict": self.max_tokens,
+                "min_p": self.min_p,
+                "top_k": self.top_k,
+                "repeat_penalty": self.repeat_penalty,
             },
         }
 

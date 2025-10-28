@@ -1,0 +1,28 @@
+{
+  "name": "chief",
+  "display_name": "Master Chief",
+  "description": "Master Chief from Arby n' The Chief - chaotic gamer",
+  "prompt_file": "chief.txt",
+
+  "voice": {
+    "kokoro_voice": "am_onyx",
+    "kokoro_speed": 1.1,
+    "edge_voice": "en-US-GuyNeural",
+    "edge_rate": "+20%",
+    "edge_volume": "+10%"
+  },
+
+  "rvc": {
+    "enabled": false,
+    "model": null,
+    "pitch_shift": 0
+  },
+
+  "behavior": {
+    "clear_history_on_switch": true,
+    "auto_reply_enabled": true,
+    "affection_multiplier": 1.5
+  },
+
+  "tags": ["gaming", "halo", "comedy", "chaotic"]
+}
