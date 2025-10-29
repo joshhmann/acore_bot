@@ -117,6 +117,10 @@ class Config:
     WHISPER_SILENCE_THRESHOLD: float = float(os.getenv("WHISPER_SILENCE_THRESHOLD", "2.0"))
     MAX_RECORDING_DURATION: int = int(os.getenv("MAX_RECORDING_DURATION", "30"))
 
+    # Enhanced Voice Listener Settings
+    VOICE_ENERGY_THRESHOLD: int = int(os.getenv("VOICE_ENERGY_THRESHOLD", "500"))  # Audio energy threshold for VAD
+    VOICE_BOT_TRIGGER_WORDS: str = os.getenv("VOICE_BOT_TRIGGER_WORDS", "bot,assistant,hey,help,question")  # Comma-separated
+
     @classmethod
     def validate(cls) -> bool:
         """Validate required configuration."""

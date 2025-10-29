@@ -11,6 +11,7 @@ import uuid
 from config import Config
 from services.tts import TTSService
 from services.rvc_unified import UnifiedRVCService
+from services.enhanced_voice_listener import EnhancedVoiceListener
 from utils.helpers import format_error, format_success, format_info
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,7 @@ class VoiceCog(commands.Cog):
         tts: TTSService,
         rvc: Optional[UnifiedRVCService] = None,
         voice_activity_detector=None,
+        enhanced_voice_listener: Optional[EnhancedVoiceListener] = None,
     ):
         """Initialize voice cog.
 
@@ -32,12 +34,14 @@ class VoiceCog(commands.Cog):
             bot: Discord bot instance
             tts: TTS service instance
             rvc: Optional RVC service instance
-            voice_activity_detector: Optional voice activity detector
+            voice_activity_detector: Optional voice activity detector (legacy)
+            enhanced_voice_listener: Optional enhanced voice listener (smart)
         """
         self.bot = bot
         self.tts = tts
         self.rvc = rvc
         self.voice_activity_detector = voice_activity_detector
+        self.enhanced_listener = enhanced_voice_listener
         self.voice_clients = {}  # guild_id -> voice_client
 
     @app_commands.command(name="join", description="Join your voice channel")
@@ -446,9 +450,9 @@ class VoiceCog(commands.Cog):
             logger.error(f"List_kokoro_voices command failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="listen", description="Start listening to voice channel (Whisper STT)")
+    @app_commands.command(name="listen", description="Start smart listening with automatic speech detection")
     async def listen(self, interaction: discord.Interaction):
-        """Start listening to voice channel and transcribe speech.
+        """Start smart listening to voice channel with automatic transcription.
 
         Args:
             interaction: Discord interaction
@@ -456,12 +460,12 @@ class VoiceCog(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            # Check if Whisper is available
-            if not self.voice_activity_detector:
+            # Check if enhanced listener is available
+            if not self.enhanced_listener:
                 await interaction.followup.send(
                     "❌ Voice activity detection is not available.\n"
                     "Enable it with `WHISPER_ENABLED=true` in .env\n"
-                    "Install with: `pip install openai-whisper`",
+                    "Install with: `pip install faster-whisper`",
                     ephemeral=True,
                 )
                 return
@@ -476,7 +480,7 @@ class VoiceCog(commands.Cog):
                 return
 
             # Check if already listening
-            if self.voice_activity_detector.is_recording(guild_id):
+            if self.enhanced_listener.is_listening(guild_id):
                 await interaction.followup.send(
                     "⚠️ Already listening in this server!",
                     ephemeral=True,
@@ -484,27 +488,67 @@ class VoiceCog(commands.Cog):
                 return
 
             voice_client = self.voice_clients[guild_id]
+            channel = interaction.channel
 
-            # Start recording
-            success = await self.voice_activity_detector.start_recording(
+            # Define callbacks
+            async def on_transcription(text: str, language: str):
+                """Called when transcription is complete."""
+                try:
+                    embed = discord.Embed(
+                        title="🎤 Voice Transcription",
+                        description=text,
+                        color=discord.Color.blue(),
+                    )
+                    embed.add_field(name="Language", value=language, inline=True)
+                    await channel.send(embed=embed)
+                except Exception as e:
+                    logger.error(f"Failed to send transcription: {e}")
+
+            async def on_bot_response_needed(text: str):
+                """Called when bot should respond to the transcription."""
+                try:
+                    # Get the chat cog to generate a response
+                    chat_cog = self.bot.get_cog("ChatCog")
+                    if not chat_cog:
+                        logger.warning("ChatCog not found - cannot generate response")
+                        return
+
+                    # Generate response using chat functionality
+                    await channel.send(f"🤖 Responding to: \"{text[:100]}...\"")
+
+                    # TODO: Integrate with chat history and generate proper response
+                    # For now, just acknowledge that a response is needed
+                    logger.info(f"Bot response needed for: {text}")
+
+                except Exception as e:
+                    logger.error(f"Failed to generate bot response: {e}")
+
+            # Start smart listening
+            success = await self.enhanced_listener.start_smart_listen(
                 guild_id=guild_id,
                 user_id=interaction.user.id,
                 voice_client=voice_client,
+                temp_dir=Config.TEMP_DIR,
+                on_transcription=on_transcription,
+                on_bot_response_needed=on_bot_response_needed,
             )
 
             if success:
                 await interaction.followup.send(
                     format_success(
-                        f"🎤 Now listening to voice channel!\n"
-                        f"Speak naturally - I'll transcribe after {Config.WHISPER_SILENCE_THRESHOLD}s of silence.\n"
+                        f"🎤 Now listening with smart detection!\n\n"
+                        f"**Features:**\n"
+                        f"• Auto-transcription after {Config.WHISPER_SILENCE_THRESHOLD}s silence\n"
+                        f"• Smart response triggers (questions, bot mentions, commands)\n"
+                        f"• Transcriptions shown in chat\n\n"
                         f"Use `/stop_listening` to stop."
                     ),
                     ephemeral=True,
                 )
-                logger.info(f"Started listening in guild {guild_id}")
+                logger.info(f"Started smart listening in guild {guild_id}")
             else:
                 await interaction.followup.send(
-                    format_error("Failed to start voice activity detection"),
+                    format_error("Failed to start smart voice detection"),
                     ephemeral=True,
                 )
 
@@ -514,7 +558,7 @@ class VoiceCog(commands.Cog):
 
     @app_commands.command(name="stop_listening", description="Stop listening to voice channel")
     async def stop_listening(self, interaction: discord.Interaction):
-        """Stop listening and transcribe recorded audio.
+        """Stop listening and transcribe any remaining audio.
 
         Args:
             interaction: Discord interaction
@@ -522,7 +566,7 @@ class VoiceCog(commands.Cog):
         await interaction.response.defer(ephemeral=True, thinking=True)
 
         try:
-            if not self.voice_activity_detector:
+            if not self.enhanced_listener:
                 await interaction.followup.send(
                     "❌ Voice activity detection is not available.",
                     ephemeral=True,
@@ -531,49 +575,52 @@ class VoiceCog(commands.Cog):
 
             guild_id = interaction.guild.id
 
-            # Check if recording
-            if not self.voice_activity_detector.is_recording(guild_id):
+            # Check if listening
+            if not self.enhanced_listener.is_listening(guild_id):
                 await interaction.followup.send(
                     "❌ Not currently listening in this server!",
                     ephemeral=True,
                 )
                 return
 
+            # Get session duration
+            duration = self.enhanced_listener.get_session_duration(guild_id)
+
             await interaction.followup.send(
-                "🔄 Stopping and transcribing audio...",
+                "🔄 Stopping smart listener...",
                 ephemeral=True,
             )
 
-            # Stop recording and transcribe
-            result = await self.voice_activity_detector.stop_recording(guild_id)
+            # Stop listening and transcribe any remaining audio
+            result = await self.enhanced_listener.stop_listen(guild_id)
 
             if result and result.get("text"):
                 transcription = result["text"]
                 language = result.get("language", "unknown")
 
-                # Send transcription result
+                # Send final transcription
                 embed = discord.Embed(
-                    title="🎤 Voice Transcription",
+                    title="🎤 Final Voice Transcription",
                     description=transcription,
-                    color=discord.Color.blue(),
+                    color=discord.Color.green(),
                 )
                 embed.add_field(name="Language", value=language, inline=True)
                 embed.add_field(
-                    name="Detected by",
-                    value=f"{interaction.user.name}",
+                    name="Session Duration",
+                    value=f"{duration:.1f}s",
                     inline=True,
                 )
 
                 await interaction.channel.send(embed=embed)
                 await interaction.followup.send(
-                    format_success("✅ Transcription complete!"),
+                    format_success(f"✅ Stopped listening (session: {duration:.1f}s)"),
                     ephemeral=True,
                 )
 
-                logger.info(f"Transcribed: {transcription[:100]}...")
+                logger.info(f"Stopped listening - final transcription: {transcription[:100]}...")
             else:
                 await interaction.followup.send(
-                    "⚠️ No audio was recorded or transcription failed.",
+                    format_success(f"✅ Stopped listening (session: {duration:.1f}s)\nNo final audio to transcribe."),
                     ephemeral=True,
                 )
 
@@ -589,21 +636,21 @@ class VoiceCog(commands.Cog):
             interaction: Discord interaction
         """
         try:
-            if not self.voice_activity_detector:
+            if not self.enhanced_listener:
                 await interaction.response.send_message(
                     "❌ **Whisper STT:** Not available\n\n"
                     "To enable:\n"
                     "1. Set `WHISPER_ENABLED=true` in .env\n"
-                    "2. Install: `pip install openai-whisper`\n"
+                    "2. Install: `pip install faster-whisper`\n"
                     "3. Restart the bot",
                     ephemeral=True,
                 )
                 return
 
-            whisper = self.voice_activity_detector.whisper
+            whisper = self.enhanced_listener.whisper
 
             embed = discord.Embed(
-                title="🎤 Speech-to-Text Status",
+                title="🎤 Smart Speech-to-Text Status",
                 color=discord.Color.green(),
             )
 
@@ -628,12 +675,19 @@ class VoiceCog(commands.Cog):
                 inline=True,
             )
 
-            # Check if currently recording
+            # Check if currently listening
             guild_id = interaction.guild.id
-            is_listening = self.voice_activity_detector.is_recording(guild_id)
+            is_listening = self.enhanced_listener.is_listening(guild_id)
             embed.add_field(
                 name="Currently Listening",
                 value="🎙️ Yes" if is_listening else "⏸️ No",
+                inline=True,
+            )
+
+            # Silence threshold
+            embed.add_field(
+                name="Silence Threshold",
+                value=f"{self.enhanced_listener.silence_threshold}s",
                 inline=True,
             )
 
@@ -642,8 +696,23 @@ class VoiceCog(commands.Cog):
             embed.add_field(
                 name="Memory Usage",
                 value=f"RAM: ~{memory_info['ram']} MB\nVRAM: ~{memory_info['vram']} MB",
-                inline=True,
+                inline=False,
             )
+
+            # Smart detection features
+            embed.add_field(
+                name="Smart Features",
+                value="• Auto-silence detection\n"
+                      "• Smart response triggers\n"
+                      "• Question detection\n"
+                      "• Bot mention detection",
+                inline=False,
+            )
+
+            # Session info if listening
+            if is_listening:
+                duration = self.enhanced_listener.get_session_duration(guild_id)
+                embed.set_footer(text=f"Current session duration: {duration:.1f}s")
 
             await interaction.response.send_message(embed=embed, ephemeral=True)
 

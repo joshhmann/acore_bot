@@ -27,6 +27,7 @@ from services.memory_manager import MemoryManager
 from services.conversation_summarizer import ConversationSummarizer
 from services.rag import RAGService
 from services.whisper_stt import WhisperSTTService, VoiceActivityDetector
+from services.enhanced_voice_listener import EnhancedVoiceListener
 from utils.helpers import ChatHistoryManager
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
@@ -136,6 +137,7 @@ class OllamaBot(commands.Bot):
         # Initialize Whisper STT if enabled
         self.whisper = None
         self.voice_activity_detector = None
+        self.enhanced_voice_listener = None
         if Config.WHISPER_ENABLED:
             self.whisper = WhisperSTTService(
                 model_size=Config.WHISPER_MODEL_SIZE,
@@ -143,15 +145,26 @@ class OllamaBot(commands.Bot):
                 language=Config.WHISPER_LANGUAGE,
             )
             if self.whisper.is_available():
+                # Legacy voice activity detector (for backwards compatibility)
                 self.voice_activity_detector = VoiceActivityDetector(
                     whisper_stt=self.whisper,
                     temp_dir=Config.TEMP_DIR,
                     silence_threshold=Config.WHISPER_SILENCE_THRESHOLD,
                     max_recording_duration=Config.MAX_RECORDING_DURATION,
                 )
-                logger.info(f"Whisper STT initialized (model: {Config.WHISPER_MODEL_SIZE})")
+
+                # Enhanced voice listener with smart detection
+                trigger_words = [w.strip() for w in Config.VOICE_BOT_TRIGGER_WORDS.split(",")]
+                self.enhanced_voice_listener = EnhancedVoiceListener(
+                    whisper_stt=self.whisper,
+                    silence_threshold=Config.WHISPER_SILENCE_THRESHOLD,
+                    energy_threshold=Config.VOICE_ENERGY_THRESHOLD,
+                    bot_trigger_words=trigger_words,
+                )
+
+                logger.info(f"Whisper STT initialized with enhanced voice listener (model: {Config.WHISPER_MODEL_SIZE})")
             else:
-                logger.warning("Whisper STT not available - install with: pip install openai-whisper")
+                logger.warning("Whisper STT not available - install with: pip install faster-whisper")
 
     async def setup_hook(self):
         """Setup hook called when bot is starting."""
@@ -187,6 +200,7 @@ class OllamaBot(commands.Bot):
                 self.tts,
                 self.rvc,
                 self.voice_activity_detector,
+                self.enhanced_voice_listener,
             )
         )
         logger.info("Loaded VoiceCog")
