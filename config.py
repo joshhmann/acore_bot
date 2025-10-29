@@ -92,6 +92,30 @@ class Config:
     CHAT_HISTORY_DIR: Path = DATA_DIR / "chat_history"
     VOICE_MODELS_DIR: Path = DATA_DIR / "voice_models"
     TEMP_DIR: Path = DATA_DIR / "temp"
+    SUMMARY_DIR: Path = DATA_DIR / "conversation_summaries"
+
+    # Memory Management
+    MEMORY_CLEANUP_ENABLED: bool = os.getenv("MEMORY_CLEANUP_ENABLED", "true").lower() == "true"
+    MEMORY_CLEANUP_INTERVAL_HOURS: int = int(os.getenv("MEMORY_CLEANUP_INTERVAL_HOURS", "6"))
+    MAX_TEMP_FILE_AGE_HOURS: int = int(os.getenv("MAX_TEMP_FILE_AGE_HOURS", "24"))
+    MAX_HISTORY_AGE_DAYS: int = int(os.getenv("MAX_HISTORY_AGE_DAYS", "30"))
+
+    # Response Streaming
+    RESPONSE_STREAMING_ENABLED: bool = os.getenv("RESPONSE_STREAMING_ENABLED", "true").lower() == "true"
+    STREAM_UPDATE_INTERVAL: float = float(os.getenv("STREAM_UPDATE_INTERVAL", "1.0"))  # Seconds between updates
+
+    # Conversation Summarization
+    CONVERSATION_SUMMARIZATION_ENABLED: bool = os.getenv("CONVERSATION_SUMMARIZATION_ENABLED", "true").lower() == "true"
+    AUTO_SUMMARIZE_THRESHOLD: int = int(os.getenv("AUTO_SUMMARIZE_THRESHOLD", "30"))  # Messages before auto-summarize
+    STORE_SUMMARIES_IN_RAG: bool = os.getenv("STORE_SUMMARIES_IN_RAG", "true").lower() == "true"
+
+    # Voice Activity Detection (Whisper STT)
+    WHISPER_ENABLED: bool = os.getenv("WHISPER_ENABLED", "false").lower() == "true"
+    WHISPER_MODEL_SIZE: str = os.getenv("WHISPER_MODEL_SIZE", "base")  # tiny, base, small, medium, large
+    WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "auto")  # auto, cpu, cuda
+    WHISPER_LANGUAGE: str = os.getenv("WHISPER_LANGUAGE", "en")
+    WHISPER_SILENCE_THRESHOLD: float = float(os.getenv("WHISPER_SILENCE_THRESHOLD", "2.0"))
+    MAX_RECORDING_DURATION: int = int(os.getenv("MAX_RECORDING_DURATION", "30"))
 
     @classmethod
     def validate(cls) -> bool:
@@ -104,6 +128,7 @@ class Config:
         cls.CHAT_HISTORY_DIR.mkdir(exist_ok=True)
         cls.VOICE_MODELS_DIR.mkdir(exist_ok=True)
         cls.TEMP_DIR.mkdir(exist_ok=True)
+        cls.SUMMARY_DIR.mkdir(exist_ok=True)
 
         return True
 
