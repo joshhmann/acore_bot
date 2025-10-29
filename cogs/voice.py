@@ -350,6 +350,94 @@ class VoiceCog(commands.Cog):
             logger.error(f"List_tts_voices command failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
 
+    @app_commands.command(name="list_kokoro_voices", description="List all available Kokoro TTS voices")
+    async def list_kokoro_voices(self, interaction: discord.Interaction):
+        """List all available Kokoro voices with descriptions.
+
+        Args:
+            interaction: Discord interaction
+        """
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            # Check if Kokoro is available
+            if not hasattr(self.tts, 'kokoro') or not self.tts.kokoro:
+                await interaction.followup.send(
+                    "❌ Kokoro TTS is not available. The bot is configured to use Edge TTS.",
+                    ephemeral=True,
+                )
+                return
+
+            # Get available voices
+            voices = self.tts.kokoro.get_voices()
+
+            if not voices:
+                await interaction.followup.send(
+                    "❌ No Kokoro voices found.",
+                    ephemeral=True,
+                )
+                return
+
+            # Voice descriptions by type
+            voice_descriptions = {
+                "am_adam": "Adult Male - Clear, neutral",
+                "am_michael": "Adult Male - Warm, professional",
+                "am_onyx": "Adult Male - Deep, commanding",
+                "af_bella": "Adult Female - Soft, friendly",
+                "af_sarah": "Adult Female - Clear, professional",
+                "af_nicole": "Adult Female - Warm, expressive",
+                "af_sky": "Adult Female - Bright, energetic",
+                "bm_george": "British Male - Distinguished, proper",
+                "bm_lewis": "British Male - Casual, approachable",
+                "bf_emma": "British Female - Elegant, refined",
+                "bf_isabella": "British Female - Warm, charming",
+            }
+
+            # Group voices by gender/region
+            male_voices = [v for v in voices if v.startswith(("am_", "bm_"))]
+            female_voices = [v for v in voices if v.startswith(("af_", "bf_"))]
+
+            # Create embed
+            embed = discord.Embed(
+                title="🎙️ Kokoro TTS Voices",
+                description="Use `/set_voice <voice>` to change your default voice",
+                color=discord.Color.purple(),
+            )
+
+            # Add male voices
+            if male_voices:
+                male_text = "\n".join([
+                    f"**{v}**\n{voice_descriptions.get(v, 'No description')}"
+                    for v in sorted(male_voices)[:8]
+                ])
+                embed.add_field(
+                    name="🎤 Male Voices",
+                    value=male_text,
+                    inline=False,
+                )
+
+            # Add female voices
+            if female_voices:
+                female_text = "\n".join([
+                    f"**{v}**\n{voice_descriptions.get(v, 'No description')}"
+                    for v in sorted(female_voices)[:8]
+                ])
+                embed.add_field(
+                    name="🎤 Female Voices",
+                    value=female_text,
+                    inline=False,
+                )
+
+            # Show current voice
+            current_voice = getattr(self.tts, 'kokoro_voice', 'Unknown')
+            embed.set_footer(text=f"Current voice: {current_voice} | Total voices: {len(voices)}")
+
+            await interaction.followup.send(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"List_kokoro_voices command failed: {e}")
+            await interaction.followup.send(format_error(e), ephemeral=True)
+
     async def _cleanup_audio(self, audio_file: Path, error):
         """Clean up audio file after playback.
 

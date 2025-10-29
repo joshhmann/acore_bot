@@ -7,6 +7,8 @@ from typing import Optional, Dict
 from pathlib import Path
 import uuid
 import time
+import json
+import re
 
 from config import Config
 from services.ollama import OllamaService
@@ -525,6 +527,203 @@ class ChatCog(commands.Cog):
         except Exception as e:
             logger.error(f"List personas failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)
+
+    @app_commands.command(name="add_persona", description="Create a new bot persona")
+    @app_commands.describe(
+        name="Persona name (lowercase, no spaces)",
+        display_name="Display name for the persona",
+        description="Short description of the persona",
+        prompt="The personality/system prompt for the persona",
+        kokoro_voice="Kokoro voice to use (e.g., am_adam, af_bella)",
+    )
+    async def add_persona(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        display_name: str,
+        description: str,
+        prompt: str,
+        kokoro_voice: Optional[str] = "am_adam",
+    ):
+        """Create a new persona with configuration.
+
+        Args:
+            interaction: Discord interaction
+            name: Persona identifier (lowercase, no spaces)
+            display_name: Human-readable name
+            description: Short description
+            prompt: System prompt for the persona
+            kokoro_voice: Kokoro voice to use
+        """
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            # Validate name (lowercase, alphanumeric + underscores only)
+            if not re.match(r'^[a-z0-9_]+$', name):
+                await interaction.followup.send(
+                    "❌ Persona name must be lowercase alphanumeric with underscores only (e.g., 'my_persona')",
+                    ephemeral=True,
+                )
+                return
+
+            prompts_dir = Path("prompts")
+            prompts_dir.mkdir(parents=True, exist_ok=True)
+
+            # Check if persona already exists
+            json_file = prompts_dir / f"{name}.json"
+            txt_file = prompts_dir / f"{name}.txt"
+
+            if json_file.exists() or txt_file.exists():
+                await interaction.followup.send(
+                    f"❌ Persona '{name}' already exists. Use `/edit_persona` to modify it.",
+                    ephemeral=True,
+                )
+                return
+
+            # Create persona JSON configuration
+            persona_config = {
+                "name": name,
+                "display_name": display_name,
+                "description": description,
+                "prompt_file": f"{name}.txt",
+                "voice": {
+                    "kokoro_voice": kokoro_voice,
+                    "kokoro_speed": 1.0,
+                    "edge_voice": "en-US-AriaNeural",
+                    "edge_rate": "+0%",
+                    "edge_volume": "+0%"
+                },
+                "rvc": {
+                    "enabled": False,
+                    "model": None,
+                    "pitch_shift": 0
+                },
+                "behavior": {
+                    "clear_history_on_switch": True,
+                    "auto_reply_enabled": True,
+                    "affection_multiplier": 1.0
+                },
+                "tags": []
+            }
+
+            # Write JSON config
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(persona_config, f, indent=2)
+
+            # Write prompt text file
+            with open(txt_file, 'w', encoding='utf-8') as f:
+                f.write(prompt)
+
+            # Reload persona loader to include new persona
+            self.persona_loader = PersonaLoader()
+
+            await interaction.followup.send(
+                f"✅ Persona **{display_name}** created successfully!\n\n"
+                f"**Name:** {name}\n"
+                f"**Description:** {description}\n"
+                f"**Voice:** {kokoro_voice}\n\n"
+                f"Use `/set_persona {name}` to activate it.\n"
+                f"Use `/edit_persona {name}` to modify settings.",
+                ephemeral=True,
+            )
+
+            logger.info(f"Created new persona: {name} ({display_name})")
+
+        except Exception as e:
+            logger.error(f"Add persona failed: {e}")
+            await interaction.followup.send(format_error(e), ephemeral=True)
+
+    @app_commands.command(name="edit_persona", description="Edit an existing persona's settings")
+    @app_commands.describe(
+        name="Persona name to edit",
+        display_name="New display name (optional)",
+        description="New description (optional)",
+        kokoro_voice="New Kokoro voice (optional)",
+        kokoro_speed="Voice speed multiplier (optional, e.g., 1.0, 1.2)",
+    )
+    async def edit_persona(
+        self,
+        interaction: discord.Interaction,
+        name: str,
+        display_name: Optional[str] = None,
+        description: Optional[str] = None,
+        kokoro_voice: Optional[str] = None,
+        kokoro_speed: Optional[float] = None,
+    ):
+        """Edit an existing persona's configuration.
+
+        Args:
+            interaction: Discord interaction
+            name: Persona name to edit
+            display_name: New display name
+            description: New description
+            kokoro_voice: New Kokoro voice
+            kokoro_speed: New voice speed
+        """
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            prompts_dir = Path("prompts")
+            json_file = prompts_dir / f"{name}.json"
+
+            if not json_file.exists():
+                await interaction.followup.send(
+                    f"❌ Persona '{name}' not found. Use `/add_persona` to create it.",
+                    ephemeral=True,
+                )
+                return
+
+            # Load existing config
+            with open(json_file, 'r', encoding='utf-8') as f:
+                persona_config = json.load(f)
+
+            # Track what was changed
+            changes = []
+
+            # Update fields if provided
+            if display_name:
+                persona_config["display_name"] = display_name
+                changes.append(f"Display name → {display_name}")
+
+            if description:
+                persona_config["description"] = description
+                changes.append(f"Description → {description}")
+
+            if kokoro_voice:
+                persona_config["voice"]["kokoro_voice"] = kokoro_voice
+                changes.append(f"Kokoro voice → {kokoro_voice}")
+
+            if kokoro_speed is not None:
+                persona_config["voice"]["kokoro_speed"] = kokoro_speed
+                changes.append(f"Voice speed → {kokoro_speed}x")
+
+            if not changes:
+                await interaction.followup.send(
+                    "❌ No changes specified. Provide at least one parameter to update.",
+                    ephemeral=True,
+                )
+                return
+
+            # Save updated config
+            with open(json_file, 'w', encoding='utf-8') as f:
+                json.dump(persona_config, f, indent=2)
+
+            # Reload persona loader
+            self.persona_loader = PersonaLoader()
+
+            changes_text = "\n".join([f"• {c}" for c in changes])
+            await interaction.followup.send(
+                f"✅ Persona **{name}** updated successfully!\n\n"
+                f"**Changes:**\n{changes_text}\n\n"
+                f"Use `/set_persona {name}` to apply the changes.",
+                ephemeral=True,
+            )
+
+            logger.info(f"Updated persona: {name} - {len(changes)} changes")
+
+        except Exception as e:
+            logger.error(f"Edit persona failed: {e}")
+            await interaction.followup.send(format_error(e), ephemeral=True)
 
     @app_commands.command(name="my_profile", description="View your user profile and affection level")
     async def my_profile(self, interaction: discord.Interaction):
