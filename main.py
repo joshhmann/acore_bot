@@ -3,14 +3,19 @@
 
 A simple, clean Discord bot that:
 - Uses Ollama for AI-powered conversations
-- Generates speech with TTS (Edge TTS)
+- Generates speech with TTS (Edge TTS or Kokoro)
 - Applies voice conversion with RVC
 - Plays audio in Discord voice channels
+- Manages memory and storage automatically
+- Summarizes conversations for long-term memory
+- Supports voice activity detection (Whisper STT)
+- Streams responses in real-time
 """
 import discord
 from discord.ext import commands
 import logging
 import sys
+import asyncio
 from pathlib import Path
 
 from config import Config
@@ -18,6 +23,10 @@ from services.ollama import OllamaService
 from services.tts import TTSService
 from services.rvc_unified import UnifiedRVCService
 from services.user_profiles import UserProfileService
+from services.memory_manager import MemoryManager
+from services.conversation_summarizer import ConversationSummarizer
+from services.rag import RAGService
+from services.whisper_stt import WhisperSTTService, VoiceActivityDetector
 from utils.helpers import ChatHistoryManager
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
@@ -93,6 +102,57 @@ class OllamaBot(commands.Bot):
             )
             logger.info("User profiles enabled")
 
+        # Initialize RAG service if enabled
+        self.rag = None
+        if Config.RAG_ENABLED:
+            self.rag = RAGService(
+                documents_path=Config.RAG_DOCUMENTS_PATH,
+                vector_store_path=Config.RAG_VECTOR_STORE,
+                top_k=Config.RAG_TOP_K,
+            )
+            logger.info("RAG service initialized")
+
+        # Initialize memory manager
+        self.memory_manager = None
+        if Config.MEMORY_CLEANUP_ENABLED:
+            self.memory_manager = MemoryManager(
+                temp_dir=Config.TEMP_DIR,
+                chat_history_dir=Config.CHAT_HISTORY_DIR,
+                max_temp_file_age_hours=Config.MAX_TEMP_FILE_AGE_HOURS,
+                max_history_age_days=Config.MAX_HISTORY_AGE_DAYS,
+            )
+            logger.info("Memory manager initialized")
+
+        # Initialize conversation summarizer if enabled
+        self.summarizer = None
+        if Config.CONVERSATION_SUMMARIZATION_ENABLED and self.rag:
+            self.summarizer = ConversationSummarizer(
+                ollama=self.ollama,
+                rag=self.rag,
+                summary_dir=Config.SUMMARY_DIR,
+            )
+            logger.info("Conversation summarizer initialized")
+
+        # Initialize Whisper STT if enabled
+        self.whisper = None
+        self.voice_activity_detector = None
+        if Config.WHISPER_ENABLED:
+            self.whisper = WhisperSTTService(
+                model_size=Config.WHISPER_MODEL_SIZE,
+                device=Config.WHISPER_DEVICE,
+                language=Config.WHISPER_LANGUAGE,
+            )
+            if self.whisper.is_available():
+                self.voice_activity_detector = VoiceActivityDetector(
+                    whisper_stt=self.whisper,
+                    temp_dir=Config.TEMP_DIR,
+                    silence_threshold=Config.WHISPER_SILENCE_THRESHOLD,
+                    max_recording_duration=Config.MAX_RECORDING_DURATION,
+                )
+                logger.info(f"Whisper STT initialized (model: {Config.WHISPER_MODEL_SIZE})")
+            else:
+                logger.warning("Whisper STT not available - install with: pip install openai-whisper")
+
     async def setup_hook(self):
         """Setup hook called when bot is starting."""
         logger.info("Setting up bot...")
@@ -110,15 +170,39 @@ class OllamaBot(commands.Bot):
             logger.info(f"Connected to Ollama - Model: {Config.OLLAMA_MODEL}")
 
         # Load cogs
-        await self.add_cog(ChatCog(self, self.ollama, self.history_manager, self.user_profiles))
+        await self.add_cog(
+            ChatCog(
+                self,
+                self.ollama,
+                self.history_manager,
+                self.user_profiles,
+                self.summarizer,
+            )
+        )
         logger.info("Loaded ChatCog")
 
-        await self.add_cog(VoiceCog(self, self.tts, self.rvc))
+        await self.add_cog(
+            VoiceCog(
+                self,
+                self.tts,
+                self.rvc,
+                self.voice_activity_detector,
+            )
+        )
         logger.info("Loaded VoiceCog")
 
         # Sync commands (for slash commands)
         await self.tree.sync()
         logger.info("Synced command tree")
+
+        # Start background tasks
+        if self.memory_manager:
+            asyncio.create_task(
+                self.memory_manager.start_background_cleanup(
+                    interval_hours=Config.MEMORY_CLEANUP_INTERVAL_HOURS
+                )
+            )
+            logger.info("Started background memory cleanup task")
 
     async def on_ready(self):
         """Called when bot is ready."""

@@ -22,7 +22,14 @@ logger = logging.getLogger(__name__)
 class ChatCog(commands.Cog):
     """Cog for chat commands using Ollama."""
 
-    def __init__(self, bot: commands.Bot, ollama: OllamaService, history_manager: ChatHistoryManager, user_profiles=None):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        ollama: OllamaService,
+        history_manager: ChatHistoryManager,
+        user_profiles=None,
+        summarizer=None,
+    ):
         """Initialize chat cog.
 
         Args:
@@ -30,11 +37,13 @@ class ChatCog(commands.Cog):
             ollama: Ollama service instance
             history_manager: Chat history manager
             user_profiles: User profile service (optional)
+            summarizer: Conversation summarizer service (optional)
         """
         self.bot = bot
         self.ollama = ollama
         self.history = history_manager
         self.user_profiles = user_profiles
+        self.summarizer = summarizer
 
         # Load persona configurations
         self.persona_loader = PersonaLoader()
@@ -162,6 +171,11 @@ class ChatCog(commands.Cog):
             # Build system prompt with context
             context_parts = [SystemContextProvider.get_compact_context()]
 
+            # Add multi-user context
+            multi_user_context = self.history.build_multi_user_context(history)
+            if multi_user_context:
+                context_parts.append(f"\n[Context: {multi_user_context}]")
+
             # Add user profile context if enabled
             if self.user_profiles and Config.USER_CONTEXT_IN_CHAT:
                 user_context = await self.user_profiles.get_user_context(user_id)
@@ -174,14 +188,50 @@ class ChatCog(commands.Cog):
                     if affection_context:
                         context_parts.append(f"\n[Relationship: {affection_context}]")
 
+            # Add memory recall from past conversations
+            if self.summarizer:
+                memory_context = await self.summarizer.build_memory_context(message)
+                if memory_context:
+                    context_parts.append(f"\n{memory_context}")
+
             # Add response style guidance
             context_parts.append("\n[Style: Match the conversation's energy. Keep responses natural and conversational - typically 1-2 sentences for simple questions/comments, longer only when genuinely needed for complex topics or storytelling.]")
 
             # Inject all context into system prompt
             context_injected_prompt = f"{''.join(context_parts)}\n\n{self.system_prompt}"
 
-            # Get AI response
-            response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
+            # Get AI response with streaming if enabled
+            if Config.RESPONSE_STREAMING_ENABLED:
+                response = ""
+                response_message = None
+                last_update = time.time()
+
+                async for chunk in self.ollama.chat_stream(history, system_prompt=context_injected_prompt):
+                    response += chunk
+
+                    # Update message periodically to avoid rate limits
+                    current_time = time.time()
+                    if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
+                        if not response_message:
+                            response_message = await interaction.followup.send(response[:2000])
+                        else:
+                            try:
+                                await response_message.edit(content=response[:2000])
+                            except discord.HTTPException:
+                                pass  # Rate limit hit, skip this update
+                        last_update = current_time
+
+                # Send final update if needed
+                if response_message:
+                    try:
+                        await response_message.edit(content=response[:2000])
+                    except discord.HTTPException:
+                        pass
+                else:
+                    await interaction.followup.send(response[:2000])
+            else:
+                # Non-streaming fallback
+                response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
 
             # Update user profile - increment interaction count and learn from conversation
             if self.user_profiles:
@@ -214,21 +264,39 @@ class ChatCog(commands.Cog):
                     except Exception as e:
                         logger.error(f"Affection update failed: {e}")
 
-            # Save to history
+            # Save to history with user attribution
             if Config.CHAT_HISTORY_ENABLED:
-                await self.history.add_message(channel_id, "user", message)
+                await self.history.add_message(
+                    channel_id, "user", message,
+                    username=str(interaction.user.name),
+                    user_id=interaction.user.id
+                )
                 await self.history.add_message(channel_id, "assistant", response)
 
             # Start a conversation session
             self._start_session(channel_id, interaction.user.id)
 
-            # Send response (handle long messages)
-            chunks = await chunk_message(response)
-            for i, chunk in enumerate(chunks):
-                if i == 0:
-                    await interaction.followup.send(chunk)
-                else:
-                    await interaction.channel.send(chunk)
+            # Send response (handle long messages) - only if not streaming
+            if not Config.RESPONSE_STREAMING_ENABLED:
+                chunks = await chunk_message(response)
+                for i, chunk in enumerate(chunks):
+                    if i == 0:
+                        await interaction.followup.send(chunk)
+                    else:
+                        await interaction.channel.send(chunk)
+
+            # Check if we should auto-summarize
+            if self.summarizer and len(history) >= Config.AUTO_SUMMARIZE_THRESHOLD:
+                # Summarize in background (don't block)
+                participants = self.history.get_conversation_participants(history)
+                asyncio.create_task(
+                    self.summarizer.summarize_and_store(
+                        messages=history,
+                        channel_id=channel_id,
+                        participants=[p["username"] for p in participants],
+                        store_in_rag=Config.STORE_SUMMARIES_IN_RAG,
+                    )
+                )
 
             # Also speak in voice channel if bot is connected and feature is enabled
             if Config.AUTO_REPLY_WITH_VOICE:

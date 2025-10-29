@@ -19,17 +19,25 @@ logger = logging.getLogger(__name__)
 class VoiceCog(commands.Cog):
     """Cog for voice commands (TTS and RVC)."""
 
-    def __init__(self, bot: commands.Bot, tts: TTSService, rvc: Optional[UnifiedRVCService] = None):
+    def __init__(
+        self,
+        bot: commands.Bot,
+        tts: TTSService,
+        rvc: Optional[UnifiedRVCService] = None,
+        voice_activity_detector=None,
+    ):
         """Initialize voice cog.
 
         Args:
             bot: Discord bot instance
             tts: TTS service instance
             rvc: Optional RVC service instance
+            voice_activity_detector: Optional voice activity detector
         """
         self.bot = bot
         self.tts = tts
         self.rvc = rvc
+        self.voice_activity_detector = voice_activity_detector
         self.voice_clients = {}  # guild_id -> voice_client
 
     @app_commands.command(name="join", description="Join your voice channel")
@@ -437,6 +445,211 @@ class VoiceCog(commands.Cog):
         except Exception as e:
             logger.error(f"List_kokoro_voices command failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
+
+    @app_commands.command(name="listen", description="Start listening to voice channel (Whisper STT)")
+    async def listen(self, interaction: discord.Interaction):
+        """Start listening to voice channel and transcribe speech.
+
+        Args:
+            interaction: Discord interaction
+        """
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            # Check if Whisper is available
+            if not self.voice_activity_detector:
+                await interaction.followup.send(
+                    "❌ Voice activity detection is not available.\n"
+                    "Enable it with `WHISPER_ENABLED=true` in .env\n"
+                    "Install with: `pip install openai-whisper`",
+                    ephemeral=True,
+                )
+                return
+
+            # Check if bot is in voice channel
+            guild_id = interaction.guild.id
+            if guild_id not in self.voice_clients:
+                await interaction.followup.send(
+                    "❌ Bot is not in a voice channel! Use `/join` first.",
+                    ephemeral=True,
+                )
+                return
+
+            # Check if already listening
+            if self.voice_activity_detector.is_recording(guild_id):
+                await interaction.followup.send(
+                    "⚠️ Already listening in this server!",
+                    ephemeral=True,
+                )
+                return
+
+            voice_client = self.voice_clients[guild_id]
+
+            # Start recording
+            success = await self.voice_activity_detector.start_recording(
+                guild_id=guild_id,
+                user_id=interaction.user.id,
+                voice_client=voice_client,
+            )
+
+            if success:
+                await interaction.followup.send(
+                    format_success(
+                        f"🎤 Now listening to voice channel!\n"
+                        f"Speak naturally - I'll transcribe after {Config.WHISPER_SILENCE_THRESHOLD}s of silence.\n"
+                        f"Use `/stop_listening` to stop."
+                    ),
+                    ephemeral=True,
+                )
+                logger.info(f"Started listening in guild {guild_id}")
+            else:
+                await interaction.followup.send(
+                    format_error("Failed to start voice activity detection"),
+                    ephemeral=True,
+                )
+
+        except Exception as e:
+            logger.error(f"Listen command failed: {e}")
+            await interaction.followup.send(format_error(e), ephemeral=True)
+
+    @app_commands.command(name="stop_listening", description="Stop listening to voice channel")
+    async def stop_listening(self, interaction: discord.Interaction):
+        """Stop listening and transcribe recorded audio.
+
+        Args:
+            interaction: Discord interaction
+        """
+        await interaction.response.defer(ephemeral=True, thinking=True)
+
+        try:
+            if not self.voice_activity_detector:
+                await interaction.followup.send(
+                    "❌ Voice activity detection is not available.",
+                    ephemeral=True,
+                )
+                return
+
+            guild_id = interaction.guild.id
+
+            # Check if recording
+            if not self.voice_activity_detector.is_recording(guild_id):
+                await interaction.followup.send(
+                    "❌ Not currently listening in this server!",
+                    ephemeral=True,
+                )
+                return
+
+            await interaction.followup.send(
+                "🔄 Stopping and transcribing audio...",
+                ephemeral=True,
+            )
+
+            # Stop recording and transcribe
+            result = await self.voice_activity_detector.stop_recording(guild_id)
+
+            if result and result.get("text"):
+                transcription = result["text"]
+                language = result.get("language", "unknown")
+
+                # Send transcription result
+                embed = discord.Embed(
+                    title="🎤 Voice Transcription",
+                    description=transcription,
+                    color=discord.Color.blue(),
+                )
+                embed.add_field(name="Language", value=language, inline=True)
+                embed.add_field(
+                    name="Detected by",
+                    value=f"{interaction.user.name}",
+                    inline=True,
+                )
+
+                await interaction.channel.send(embed=embed)
+                await interaction.followup.send(
+                    format_success("✅ Transcription complete!"),
+                    ephemeral=True,
+                )
+
+                logger.info(f"Transcribed: {transcription[:100]}...")
+            else:
+                await interaction.followup.send(
+                    "⚠️ No audio was recorded or transcription failed.",
+                    ephemeral=True,
+                )
+
+        except Exception as e:
+            logger.error(f"Stop listening command failed: {e}")
+            await interaction.followup.send(format_error(e), ephemeral=True)
+
+    @app_commands.command(name="stt_status", description="Check speech-to-text status")
+    async def stt_status(self, interaction: discord.Interaction):
+        """Check Whisper STT service status.
+
+        Args:
+            interaction: Discord interaction
+        """
+        try:
+            if not self.voice_activity_detector:
+                await interaction.response.send_message(
+                    "❌ **Whisper STT:** Not available\n\n"
+                    "To enable:\n"
+                    "1. Set `WHISPER_ENABLED=true` in .env\n"
+                    "2. Install: `pip install openai-whisper`\n"
+                    "3. Restart the bot",
+                    ephemeral=True,
+                )
+                return
+
+            whisper = self.voice_activity_detector.whisper
+
+            embed = discord.Embed(
+                title="🎤 Speech-to-Text Status",
+                color=discord.Color.green(),
+            )
+
+            embed.add_field(
+                name="Status",
+                value="✅ Available" if whisper.is_available() else "❌ Not Available",
+                inline=True,
+            )
+            embed.add_field(
+                name="Model",
+                value=whisper.model_size.capitalize(),
+                inline=True,
+            )
+            embed.add_field(
+                name="Device",
+                value=whisper.device.upper(),
+                inline=True,
+            )
+            embed.add_field(
+                name="Language",
+                value=whisper.language or "Auto-detect",
+                inline=True,
+            )
+
+            # Check if currently recording
+            guild_id = interaction.guild.id
+            is_listening = self.voice_activity_detector.is_recording(guild_id)
+            embed.add_field(
+                name="Currently Listening",
+                value="🎙️ Yes" if is_listening else "⏸️ No",
+                inline=True,
+            )
+
+            # Memory estimate
+            memory_info = whisper.estimate_model_memory()
+            embed.add_field(
+                name="Memory Usage",
+                value=f"RAM: ~{memory_info['ram']} MB\nVRAM: ~{memory_info['vram']} MB",
+                inline=True,
+            )
+
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        except Exception as e:
+            logger.error(f"STT status command failed: {e}")
+            await interaction.response.send_message(format_error(e), ephemeral=True)
 
     async def _cleanup_audio(self, audio_file: Path, error):
         """Clean up audio file after playback.
