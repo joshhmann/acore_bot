@@ -33,3 +33,15 @@ duckduckgo-search>=3.9.0
 # Gradio client for RVC-WebUI
 gradio-client>=0.7.0
 requests>=2.31.0
+
+# Whisper STT (Speech-to-Text) - Optional
+# faster-whisper is 4x faster than openai-whisper with lower memory usage
+# Install with: pip install faster-whisper
+# For GPU support (CUDA 11 or 12), it works out of the box
+# Alternative: openai-whisper (original, slower but more features)
+# pip install openai-whisper
+faster-whisper>=1.0.0
+
+# For whisper.cpp integration (even faster, C++ implementation):
+# Note: Requires additional setup, see: https://github.com/ggerganov/whisper.cpp
+# pip install pywhispercpp

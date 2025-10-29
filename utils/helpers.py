@@ -76,17 +76,112 @@ class ChatHistoryManager:
         except Exception as e:
             logger.error(f"Failed to save history for channel {channel_id}: {e}")
 
-    async def add_message(self, channel_id: int, role: str, content: str) -> None:
-        """Add a message to channel history.
+    async def add_message(
+        self,
+        channel_id: int,
+        role: str,
+        content: str,
+        username: Optional[str] = None,
+        user_id: Optional[int] = None,
+    ) -> None:
+        """Add a message to channel history with user attribution.
 
         Args:
             channel_id: Discord channel ID
             role: Message role ('user' or 'assistant')
             content: Message content
+            username: Username of the speaker (for multi-user tracking)
+            user_id: User ID (for multi-user tracking)
         """
         history = await self.load_history(channel_id)
-        history.append({"role": role, "content": content})
+
+        message = {"role": role, "content": content}
+
+        # Add user attribution for multi-user conversations
+        if username:
+            message["username"] = username
+        if user_id:
+            message["user_id"] = user_id
+
+        history.append(message)
         await self.save_history(channel_id, history)
+
+    def format_history_for_display(
+        self, messages: List[Dict[str, str]], include_usernames: bool = True
+    ) -> str:
+        """Format chat history for display with user attribution.
+
+        Args:
+            messages: List of message dicts
+            include_usernames: Whether to include usernames
+
+        Returns:
+            Formatted history string
+        """
+        formatted = []
+
+        for msg in messages:
+            role = msg.get("role", "unknown")
+            content = msg.get("content", "")
+            username = msg.get("username", "User")
+
+            if role == "user" and include_usernames:
+                formatted.append(f"{username}: {content}")
+            elif role == "assistant":
+                formatted.append(f"Assistant: {content}")
+            else:
+                formatted.append(content)
+
+        return "\n".join(formatted)
+
+    def get_conversation_participants(
+        self, messages: List[Dict[str, str]]
+    ) -> List[Dict[str, any]]:
+        """Get list of unique participants in a conversation.
+
+        Args:
+            messages: List of message dicts
+
+        Returns:
+            List of participant info dicts
+        """
+        participants = {}
+
+        for msg in messages:
+            if msg.get("role") == "user":
+                user_id = msg.get("user_id")
+                username = msg.get("username", "Unknown User")
+
+                if user_id and user_id not in participants:
+                    participants[user_id] = {
+                        "user_id": user_id,
+                        "username": username,
+                        "message_count": 0,
+                    }
+
+                if user_id:
+                    participants[user_id]["message_count"] += 1
+
+        return list(participants.values())
+
+    def build_multi_user_context(self, messages: List[Dict[str, str]]) -> str:
+        """Build context string for multi-user conversations.
+
+        Args:
+            messages: List of message dicts
+
+        Returns:
+            Context string describing participants
+        """
+        participants = self.get_conversation_participants(messages)
+
+        if len(participants) == 0:
+            return ""
+        elif len(participants) == 1:
+            return f"Talking with {participants[0]['username']}"
+        else:
+            names = [p["username"] for p in participants]
+            return f"Group conversation with: {', '.join(names)}"
 
     async def clear_history(self, channel_id: int) -> None:
         """Clear chat history for a channel.

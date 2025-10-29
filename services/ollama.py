@@ -1,7 +1,8 @@
 """Ollama LLM client service."""
 import aiohttp
 import logging
-from typing import List, Dict, Optional
+import json
+from typing import List, Dict, Optional, AsyncGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +106,71 @@ class OllamaService:
         except KeyError as e:
             logger.error(f"Unexpected Ollama response format: {e}")
             raise Exception("Invalid response from Ollama")
+
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, str]],
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+    ) -> AsyncGenerator[str, None]:
+        """Stream chat responses from Ollama token by token.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'
+            system_prompt: Optional system prompt to prepend
+            temperature: Override default temperature
+
+        Yields:
+            Chunks of response text as they arrive
+
+        Raises:
+            Exception: If request fails
+        """
+        if not self.session:
+            await self.initialize()
+
+        # Prepend system message if provided
+        if system_prompt:
+            messages = [{"role": "system", "content": system_prompt}] + messages
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,  # Enable streaming
+            "options": {
+                "temperature": temperature or self.temperature,
+                "num_predict": self.max_tokens,
+                "min_p": self.min_p,
+                "top_k": self.top_k,
+                "repeat_penalty": self.repeat_penalty,
+            },
+        }
+
+        try:
+            url = f"{self.host}/api/chat"
+            async with self.session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=120)
+            ) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"Ollama API error ({resp.status}): {error_text}")
+
+                # Stream response chunks
+                async for line in resp.content:
+                    if line:
+                        try:
+                            chunk = json.loads(line)
+                            if "message" in chunk and "content" in chunk["message"]:
+                                content = chunk["message"]["content"]
+                                if content:
+                                    yield content
+                        except json.JSONDecodeError:
+                            # Skip invalid JSON lines
+                            continue
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Ollama streaming request failed: {e}")
+            raise Exception(f"Failed to connect to Ollama: {e}")
 
     async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
         """Generate a response from a single prompt.
