@@ -1016,6 +1016,10 @@ class ChatCog(commands.Cog):
         if message.author.bot:
             return
 
+        # Ignore messages with #ignore tag
+        if "#ignore" in message.content.lower():
+            return
+
         # Check if auto-reply is enabled for this channel
         if not Config.AUTO_REPLY_ENABLED:
             return
