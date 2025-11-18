@@ -8,13 +8,13 @@ import io
 
 logger = logging.getLogger(__name__)
 
-# Try importing whisper
+# Try importing faster-whisper
 try:
-    import whisper
+    from faster_whisper import WhisperModel
     WHISPER_AVAILABLE = True
 except ImportError:
     WHISPER_AVAILABLE = False
-    logger.warning("Whisper not available. Install with: pip install openai-whisper")
+    logger.warning("Whisper not available. Install with: pip install faster-whisper")
 
 # Try importing torch for model optimization
 try:
@@ -25,7 +25,7 @@ except ImportError:
 
 
 class WhisperSTTService:
-    """Service for speech-to-text using OpenAI Whisper."""
+    """Service for speech-to-text using faster-whisper."""
 
     def __init__(
         self,
@@ -57,14 +57,24 @@ class WhisperSTTService:
         else:
             self.device = device
 
-        logger.info(f"Initializing Whisper STT with model: {model_size} on {self.device}")
+        # Determine compute type based on device
+        if self.device == "cuda":
+            compute_type = "float16"
+        else:
+            compute_type = "int8"
+
+        logger.info(f"Initializing faster-whisper STT with model: {model_size} on {self.device} (compute_type: {compute_type})")
 
         try:
-            # Load model
-            self.model = whisper.load_model(model_size, device=self.device)
-            logger.info(f"Whisper model loaded successfully")
+            # Load model with faster-whisper
+            self.model = WhisperModel(
+                model_size,
+                device=self.device,
+                compute_type=compute_type
+            )
+            logger.info(f"faster-whisper model loaded successfully")
         except Exception as e:
-            logger.error(f"Failed to load Whisper model: {e}")
+            logger.error(f"Failed to load faster-whisper model: {e}")
             self.model = None
 
     def is_available(self) -> bool:
@@ -124,17 +134,28 @@ class WhisperSTTService:
         Returns:
             Transcription result dict
         """
-        result = self.model.transcribe(
+        # faster-whisper returns segments generator and info tuple
+        segments, info = self.model.transcribe(
             audio_path,
             language=language,
             task=task,
-            fp16=(self.device == "cuda"),  # Use FP16 on CUDA for speed
         )
 
+        # Convert generator to list and build text
+        segments_list = list(segments)
+        text = " ".join([segment.text for segment in segments_list])
+
         return {
-            "text": result["text"].strip(),
-            "language": result.get("language", "unknown"),
-            "segments": result.get("segments", []),
+            "text": text.strip(),
+            "language": info.language if hasattr(info, 'language') else "unknown",
+            "segments": [
+                {
+                    "text": seg.text,
+                    "start": seg.start,
+                    "end": seg.end,
+                }
+                for seg in segments_list
+            ],
         }
 
     async def transcribe_audio_data(
