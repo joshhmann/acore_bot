@@ -22,6 +22,62 @@ if ! command -v uv &> /dev/null; then
 fi
 UV_PATH="$(which uv)"
 
+# Check and install system dependencies
+echo "Checking system dependencies..."
+echo ""
+
+MISSING_DEPS=()
+
+# Check for espeak-ng (required for Kokoro TTS)
+if ! command -v espeak-ng &> /dev/null; then
+    MISSING_DEPS+=("espeak-ng")
+fi
+
+# Check for ffmpeg (required for audio processing)
+if ! command -v ffmpeg &> /dev/null; then
+    MISSING_DEPS+=("ffmpeg")
+fi
+
+# Check for git (required for some dependencies)
+if ! command -v git &> /dev/null; then
+    MISSING_DEPS+=("git")
+fi
+
+if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+    echo "Missing system dependencies:"
+    for dep in "${MISSING_DEPS[@]}"; do
+        echo "  - $dep"
+    done
+    echo ""
+
+    # Detect package manager and install
+    if command -v apt-get &> /dev/null; then
+        echo "Installing with apt..."
+        apt-get update
+        apt-get install -y "${MISSING_DEPS[@]}"
+    elif command -v dnf &> /dev/null; then
+        echo "Installing with dnf..."
+        dnf install -y "${MISSING_DEPS[@]}"
+    elif command -v yum &> /dev/null; then
+        echo "Installing with yum..."
+        yum install -y "${MISSING_DEPS[@]}"
+    elif command -v pacman &> /dev/null; then
+        echo "Installing with pacman..."
+        pacman -S --noconfirm "${MISSING_DEPS[@]}"
+    else
+        echo "ERROR: Could not detect package manager."
+        echo "Please install manually: ${MISSING_DEPS[*]}"
+        exit 1
+    fi
+
+    echo ""
+    echo "System dependencies installed."
+    echo ""
+else
+    echo "All system dependencies satisfied."
+    echo ""
+fi
+
 # Check for old installations and offer cleanup
 OLD_VENVS=()
 for old_venv in ".venv311" ".venv312" "venv"; do
