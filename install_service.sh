@@ -10,10 +10,76 @@ echo ""
 
 # Get the current directory (where the bot is)
 BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PATH="$BOT_DIR/.venv311"
-PYTHON_PATH="$VENV_PATH/bin/python"
+VENV_PATH="$BOT_DIR/.venv"
 SERVICE_NAME="discordbot"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+
+# Check for uv
+if ! command -v uv &> /dev/null; then
+    echo "ERROR: uv is not installed"
+    echo "Install with: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    exit 1
+fi
+UV_PATH="$(which uv)"
+
+# Check for old installations and offer cleanup
+OLD_VENVS=()
+for old_venv in ".venv311" ".venv312" "venv"; do
+    if [ -d "$BOT_DIR/$old_venv" ]; then
+        OLD_VENVS+=("$old_venv")
+    fi
+done
+
+if [ ${#OLD_VENVS[@]} -gt 0 ]; then
+    echo "=========================================="
+    echo "Old Installation Detected"
+    echo "=========================================="
+    echo ""
+    echo "Found old virtual environment(s):"
+    for venv in "${OLD_VENVS[@]}"; do
+        echo "  - $venv"
+    done
+    echo ""
+    echo "This project now uses 'uv' for dependency management."
+    echo "Old virtual environments are no longer needed."
+    echo ""
+    read -p "Remove old virtual environments? (y/n) " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        for venv in "${OLD_VENVS[@]}"; do
+            echo "Removing $venv..."
+            rm -rf "$BOT_DIR/$venv"
+        done
+        echo "Old environments removed."
+    fi
+    echo ""
+fi
+
+# Check for old requirements.txt based installs
+if [ -f "$BOT_DIR/requirements.txt" ]; then
+    echo "Note: Found requirements.txt - this project now uses pyproject.toml with uv."
+    echo "You can safely remove requirements.txt if you're fully migrated to uv."
+    echo ""
+fi
+
+# Check if existing service uses old setup
+if [ -f "$SERVICE_FILE" ]; then
+    if grep -q "venv311\|venv312" "$SERVICE_FILE"; then
+        echo "=========================================="
+        echo "Existing Service Upgrade"
+        echo "=========================================="
+        echo ""
+        echo "Existing service uses old venv setup."
+        echo "This installer will upgrade it to use uv."
+        echo ""
+        read -p "Continue with upgrade? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+        echo ""
+    fi
+fi
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
@@ -30,15 +96,23 @@ else
 fi
 
 echo "Bot directory: $BOT_DIR"
-echo "Python path: $PYTHON_PATH"
+echo "uv path: $UV_PATH"
 echo "Service user: $ACTUAL_USER"
 echo ""
 
-# Check if virtual environment exists
-if [ ! -f "$PYTHON_PATH" ]; then
-    echo "ERROR: Virtual environment not found at $VENV_PATH"
-    echo "Please run: python3 -m venv .venv311"
-    exit 1
+# Check if virtual environment exists (created by uv sync)
+if [ ! -d "$VENV_PATH" ]; then
+    echo "Virtual environment not found. Running 'uv sync' to create it..."
+    echo ""
+    cd "$BOT_DIR"
+    sudo -u "$ACTUAL_USER" uv sync
+    if [ $? -ne 0 ]; then
+        echo "ERROR: Failed to create virtual environment with uv sync"
+        exit 1
+    fi
+    echo ""
+    echo "Dependencies installed successfully."
+    echo ""
 fi
 
 # Check if .env file exists
@@ -64,8 +138,8 @@ Wants=ollama.service
 Type=simple
 User=$ACTUAL_USER
 WorkingDirectory=$BOT_DIR
-Environment="PATH=$VENV_PATH/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=$PYTHON_PATH main.py
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+ExecStart=$UV_PATH run python main.py
 Restart=on-failure
 RestartSec=10
 StandardOutput=journal

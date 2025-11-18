@@ -45,21 +45,22 @@ A sophisticated Discord bot featuring AI personality, high-quality voice synthes
 
 ## 🚀 Quick Start
 
-### 1. Install Dependencies
+### 1. Install uv & Dependencies
 
 ```bash
+# Install uv (fast Python package manager)
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# Linux/macOS
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # Clone repository
 git clone https://github.com/joshhmann/acore_bot.git
 cd acore_bot
 
-# Create virtual environment
-python -m venv .venv311
-.venv311/Scripts/activate  # Windows
-# or
-source .venv311/bin/activate  # Linux/Mac
-
-# Install dependencies
-pip install -r requirements.txt
+# Install dependencies (creates .venv automatically)
+uv sync
 ```
 
 ### 2. Install Ollama & Model
@@ -107,7 +108,7 @@ OLLAMA_MODEL=l3-8b-stheno-v3.2
 ### 5. Run Bot
 
 ```bash
-python main.py
+uv run python main.py
 ```
 
 **For Linux VMs:** Install as a systemd service to run automatically:
