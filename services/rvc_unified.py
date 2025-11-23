@@ -47,7 +47,7 @@ class UnifiedRVCService:
         model_name: Optional[str] = None,
         pitch_shift: int = 0,
         index_rate: float = 0.75,
-        f0_method: str = "crepe",
+        f0_method: str = "rmvpe",  # Use RMVPE instead of CREPE to save VRAM
         protect: float = 0.33,
     ) -> Path:
         """Convert voice using configured backend.

@@ -82,6 +82,9 @@ class Config:
     DEFAULT_RVC_MODEL: str = os.getenv("DEFAULT_RVC_MODEL", "GOTHMOMMY")
     RVC_DEVICE: str = os.getenv("RVC_DEVICE", "cpu")
     RVC_WEBUI_URL: str = os.getenv("RVC_WEBUI_URL", "http://localhost:7865")
+    RVC_PITCH_SHIFT: int = int(os.getenv("RVC_PITCH_SHIFT", "0"))
+    RVC_PROTECT: float = float(os.getenv("RVC_PROTECT", "0.33"))
+    RVC_INDEX_RATE: float = float(os.getenv("RVC_INDEX_RATE", "0.75"))
 
     # Audio
     AUDIO_BITRATE: int = int(os.getenv("AUDIO_BITRATE", "96"))
@@ -114,12 +117,64 @@ class Config:
     WHISPER_MODEL_SIZE: str = os.getenv("WHISPER_MODEL_SIZE", "base")  # tiny, base, small, medium, large
     WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "auto")  # auto, cpu, cuda
     WHISPER_LANGUAGE: str = os.getenv("WHISPER_LANGUAGE", "en")
-    WHISPER_SILENCE_THRESHOLD: float = float(os.getenv("WHISPER_SILENCE_THRESHOLD", "2.0"))
+    WHISPER_SILENCE_THRESHOLD: float = float(os.getenv("WHISPER_SILENCE_THRESHOLD", "1.0"))
     MAX_RECORDING_DURATION: int = int(os.getenv("MAX_RECORDING_DURATION", "30"))
 
     # Enhanced Voice Listener Settings
     VOICE_ENERGY_THRESHOLD: int = int(os.getenv("VOICE_ENERGY_THRESHOLD", "500"))  # Audio energy threshold for VAD
     VOICE_BOT_TRIGGER_WORDS: str = os.getenv("VOICE_BOT_TRIGGER_WORDS", "bot,assistant,hey,help,question")  # Comma-separated
+
+    # Ambient Mode Settings
+    AMBIENT_MODE_ENABLED: bool = os.getenv("AMBIENT_MODE_ENABLED", "true").lower() == "true"
+    AMBIENT_CHANNELS: List[int] = [
+        int(x.strip()) for x in os.getenv("AMBIENT_CHANNELS", "").split(",") if x.strip()
+    ]  # Channel IDs for ambient messages (empty = all channels)
+    AMBIENT_IGNORE_USERS: List[int] = [
+        int(x.strip()) for x in os.getenv("AMBIENT_IGNORE_USERS", "").split(",") if x.strip()
+    ]  # User IDs to ignore for ambient features (reactions, activity comments)
+    AMBIENT_LULL_TIMEOUT: int = int(os.getenv("AMBIENT_LULL_TIMEOUT", "300"))  # Seconds of silence before lull trigger
+    AMBIENT_MIN_INTERVAL: int = int(os.getenv("AMBIENT_MIN_INTERVAL", "600"))  # Min seconds between ambient messages
+    AMBIENT_CHANCE: float = float(os.getenv("AMBIENT_CHANCE", "0.3"))  # Chance to trigger on each check (0.0-1.0)
+
+    # Proactive Engagement Settings
+    PROACTIVE_ENGAGEMENT_ENABLED: bool = os.getenv("PROACTIVE_ENGAGEMENT_ENABLED", "true").lower() == "true"
+    PROACTIVE_MIN_MESSAGES: int = int(os.getenv("PROACTIVE_MIN_MESSAGES", "3"))  # Min messages before bot can jump in
+    PROACTIVE_COOLDOWN: int = int(os.getenv("PROACTIVE_COOLDOWN", "180"))  # Seconds between proactive engagements
+
+    # Naturalness Settings
+    NATURALNESS_ENABLED: bool = os.getenv("NATURALNESS_ENABLED", "true").lower() == "true"
+    REACTIONS_ENABLED: bool = os.getenv("REACTIONS_ENABLED", "true").lower() == "true"
+    REACTIONS_CHANCE_MULTIPLIER: float = float(os.getenv("REACTIONS_CHANCE_MULTIPLIER", "1.0"))  # Multiplier for reaction chances
+    ACTIVITY_AWARENESS_ENABLED: bool = os.getenv("ACTIVITY_AWARENESS_ENABLED", "true").lower() == "true"
+    ACTIVITY_COMMENT_CHANCE: float = float(os.getenv("ACTIVITY_COMMENT_CHANCE", "0.3"))  # Chance to comment on activity changes
+    ACTIVITY_COOLDOWN_SECONDS: int = int(os.getenv("ACTIVITY_COOLDOWN_SECONDS", "300"))  # Cooldown period (in seconds) before commenting on same activity type again
+
+    # Natural Timing Settings
+    NATURAL_TIMING_ENABLED: bool = os.getenv("NATURAL_TIMING_ENABLED", "true").lower() == "true"
+    NATURAL_TIMING_MIN_DELAY: float = float(os.getenv("NATURAL_TIMING_MIN_DELAY", "0.5"))  # Minimum delay in seconds
+    NATURAL_TIMING_MAX_DELAY: float = float(os.getenv("NATURAL_TIMING_MAX_DELAY", "2.0"))  # Maximum delay in seconds
+
+    # Mood System Settings
+    MOOD_SYSTEM_ENABLED: bool = os.getenv("MOOD_SYSTEM_ENABLED", "true").lower() == "true"
+    MOOD_UPDATE_FROM_INTERACTIONS: bool = os.getenv("MOOD_UPDATE_FROM_INTERACTIONS", "true").lower() == "true"  # Auto-update mood from user interactions
+    MOOD_TIME_BASED: bool = os.getenv("MOOD_TIME_BASED", "true").lower() == "true"  # Use time of day for mood
+
+    # Self-Awareness Settings
+    SELF_AWARENESS_ENABLED: bool = os.getenv("SELF_AWARENESS_ENABLED", "true").lower() == "true"
+    HESITATION_CHANCE: float = float(os.getenv("HESITATION_CHANCE", "0.15"))  # Chance to add hesitations (0.0-1.0)
+    META_COMMENT_CHANCE: float = float(os.getenv("META_COMMENT_CHANCE", "0.10"))  # Chance for self-aware comments (0.0-1.0)
+    SELF_CORRECTION_ENABLED: bool = os.getenv("SELF_CORRECTION_ENABLED", "true").lower() == "true"  # Allow bot to correct itself
+
+    # Reminders
+    REMINDERS_ENABLED: bool = os.getenv("REMINDERS_ENABLED", "true").lower() == "true"
+    MAX_REMINDERS_PER_USER: int = int(os.getenv("MAX_REMINDERS_PER_USER", "10"))
+
+    # Vision/Image Understanding
+    VISION_ENABLED: bool = os.getenv("VISION_ENABLED", "true").lower() == "true"
+    VISION_MODEL: str = os.getenv("VISION_MODEL", "llava")  # llava, llava-llama3, bakllava, etc.
+
+    # Trivia Games
+    TRIVIA_ENABLED: bool = os.getenv("TRIVIA_ENABLED", "true").lower() == "true"
 
     @classmethod
     def validate(cls) -> bool:

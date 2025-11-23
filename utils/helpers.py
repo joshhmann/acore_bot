@@ -2,9 +2,11 @@
 import json
 import logging
 import re
+import base64
 from pathlib import Path
 from typing import Dict, List, Optional
 import aiofiles
+import aiohttp
 
 logger = logging.getLogger(__name__)
 
@@ -337,3 +339,51 @@ def clean_text_for_tts(text: str) -> str:
     text = text.strip()
 
     return text
+
+
+async def download_attachment(url: str) -> bytes:
+    """Download a Discord attachment.
+
+    Args:
+        url: URL of the attachment
+
+    Returns:
+        Attachment content as bytes
+
+    Raises:
+        Exception: If download fails
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as resp:
+                if resp.status != 200:
+                    raise Exception(f"Failed to download attachment: HTTP {resp.status}")
+                return await resp.read()
+    except Exception as e:
+        logger.error(f"Failed to download attachment from {url}: {e}")
+        raise
+
+
+def image_to_base64(image_data: bytes) -> str:
+    """Convert image bytes to base64 string.
+
+    Args:
+        image_data: Image data as bytes
+
+    Returns:
+        Base64-encoded string
+    """
+    return base64.b64encode(image_data).decode('utf-8')
+
+
+def is_image_attachment(filename: str) -> bool:
+    """Check if a file is an image based on extension.
+
+    Args:
+        filename: Name of the file
+
+    Returns:
+        True if file is an image
+    """
+    image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+    return Path(filename).suffix.lower() in image_extensions

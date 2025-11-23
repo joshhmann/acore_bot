@@ -20,11 +20,18 @@ A sophisticated Discord bot featuring AI personality, high-quality voice synthes
 
 ### 🎙️ Voice Pipeline
 - **Kokoro TTS** - High-quality local text-to-speech with 50+ voices
-- **RVC Voice Conversion** - Apply custom character voices (GOTHMOMMY, etc.)
+- **RVC Voice Conversion** - Apply custom character voices (GOTHMOMMY, etc.) with support for long audio files
 - **Discord voice integration** - Speaks responses in voice channels
 - **Auto-TTS** - Bot speaks when mentioned in voice channel
 
 ### 🔍 Advanced Features
+- **Vision/Image Understanding** - Analyze images with Ollama vision models (llava, llava-llama3)
+  - Send images with text to get AI descriptions and analysis
+  - Works automatically when images are attached to messages
+- **Naturalness System** - Makes the bot feel more alive
+  - Emoji reactions to messages based on sentiment
+  - Activity awareness - Comments on gaming/Spotify (with smart cooldowns to prevent spam)
+  - Natural response timing delays
 - **Web search** (optional) - DuckDuckGo integration
 - **MCP personality RAG** (optional) - Retrieval-augmented generation for personalities
 - **Per-persona voices** - Each personality has its own voice
@@ -97,13 +104,43 @@ OLLAMA_MODEL=l3-8b-stheno-v3.2
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create application → Bot → Copy token
-3. Enable **Privileged Gateway Intents**:
-   - Message Content Intent ✅
-   - Server Members Intent ✅
+3. Enable **Privileged Gateway Intents** (Bot → Privileged Gateway Intents):
+   - ✅ **Presence Intent** - Required for activity awareness (game/streaming detection)
+   - ✅ **Server Members Intent** - Required for member tracking
+   - ✅ **Message Content Intent** - Required for reading messages
 4. OAuth2 → URL Generator:
    - Scopes: `bot`, `applications.commands`
-   - Permissions: Send Messages, Read History, Connect, Speak, Use Voice Activity
+   - Bot Permissions (see below)
 5. Invite bot to your server
+
+#### Required Bot Permissions
+
+| Permission | Reason |
+|------------|--------|
+| **Send Messages** | Send chat responses |
+| **Send Messages in Threads** | Respond in threads |
+| **Embed Links** | Rich embeds for status/queue |
+| **Attach Files** | Export chat history |
+| **Read Message History** | Context for conversations |
+| **Add Reactions** | React to messages (naturalness) |
+| **Use External Emojis** | Custom emoji reactions |
+| **Connect** | Join voice channels |
+| **Speak** | Play TTS/music audio |
+| **Use Voice Activity** | Voice activity detection |
+
+**Permission Integer:** `3271744`
+
+Or use these individual permissions in the OAuth2 URL generator:
+- Send Messages
+- Send Messages in Threads
+- Embed Links
+- Attach Files
+- Read Message History
+- Add Reactions
+- Use External Emojis
+- Connect
+- Speak
+- Use Voice Activity
 
 ### 5. Run Bot
 
@@ -124,6 +161,7 @@ See [Service Scripts Guide](docs/setup/SERVICE_SCRIPTS.md) for details.
 ### Chat Commands
 - `/chat <message>` - Chat with AI (with personality & memory)
 - `/ask <question>` - One-off question (no history)
+- **Image Analysis** - Attach images to messages mentioning the bot to analyze them (requires vision model)
 - `/clear_history` - Clear conversation history
 - `/set_persona <persona>` - Change bot personality
 - `/personas` - List available personas
@@ -208,6 +246,23 @@ For character voices like GOTHMOMMY:
 See [RVC Setup Guide](docs/setup/RVC_INTEGRATION_COMPLETE.md) for details.
 
 ### Optional Features
+
+**Vision/Image Understanding:**
+```bash
+# Pull a vision model
+ollama pull llava
+
+# Enable in .env
+VISION_ENABLED=true
+VISION_MODEL=llava  # or llava-llama3, bakllava, etc.
+```
+
+**Activity Awareness (Naturalness):**
+```env
+ACTIVITY_AWARENESS_ENABLED=true
+ACTIVITY_COMMENT_CHANCE=0.3  # 30% chance to comment
+ACTIVITY_COOLDOWN_SECONDS=300  # 5 minutes cooldown to prevent spam
+```
 
 **Web Search:**
 ```env

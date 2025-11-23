@@ -31,6 +31,15 @@ from services.enhanced_voice_listener import EnhancedVoiceListener
 from utils.helpers import ChatHistoryManager
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
+from cogs.music import MusicCog
+from services.web_dashboard import WebDashboard
+from services.ambient_mode import AmbientMode
+from services.naturalness import NaturalnessService
+from services.reminders import RemindersService
+from cogs.reminders import RemindersCog
+from services.web_search import WebSearchService
+from services.trivia import TriviaService
+from cogs.trivia import TriviaCog
 
 # Setup logging
 logging.basicConfig(
@@ -52,6 +61,8 @@ class OllamaBot(commands.Bot):
         intents = discord.Intents.default()
         intents.message_content = True  # Required for message events
         intents.voice_states = True  # Required for voice features
+        intents.presences = True  # Required for activity awareness
+        intents.members = True  # Required for member tracking
 
         super().__init__(
             command_prefix=Config.COMMAND_PREFIX,
@@ -166,9 +177,58 @@ class OllamaBot(commands.Bot):
             else:
                 logger.warning("Whisper STT not available - install with: pip install faster-whisper")
 
+        # Initialize Web Dashboard
+        self.web_dashboard = WebDashboard(self)
+
+        # Initialize Ambient Mode
+        self.ambient_mode = None
+        if Config.AMBIENT_MODE_ENABLED:
+            self.ambient_mode = AmbientMode(self, self.ollama)
+            logger.info("Ambient mode initialized")
+
+        # Initialize Naturalness Service
+        self.naturalness = None
+        if Config.NATURALNESS_ENABLED:
+            self.naturalness = NaturalnessService(self)
+            logger.info("Naturalness service initialized (reactions, activity awareness, natural timing)")
+
+        # Initialize Reminders Service
+        self.reminders_service = None
+        if Config.REMINDERS_ENABLED:
+            self.reminders_service = RemindersService(self)
+            logger.info("Reminders service initialized")
+
+        # Initialize Web Search Service
+        self.web_search = None
+        if Config.WEB_SEARCH_ENABLED:
+            self.web_search = WebSearchService(
+                engine=Config.WEB_SEARCH_ENGINE,
+                max_results=Config.WEB_SEARCH_MAX_RESULTS,
+            )
+            logger.info(f"Web search service created (engine: {Config.WEB_SEARCH_ENGINE})")
+
+        # Initialize Trivia Service
+        self.trivia_service = None
+        if Config.TRIVIA_ENABLED:
+            self.trivia_service = TriviaService(
+                data_dir=Config.DATA_DIR,
+                web_search=self.web_search,
+            )
+            logger.info("Trivia service initialized")
+
     async def setup_hook(self):
         """Setup hook called when bot is starting."""
         logger.info("Setting up bot...")
+
+        # Initialize Web Search if enabled
+        if self.web_search:
+            await self.web_search.initialize()
+            logger.info("Web search initialized")
+
+        # Initialize Trivia if enabled
+        if self.trivia_service:
+            await self.trivia_service.initialize()
+            logger.info("Trivia service initialized")
 
         # Initialize Ollama
         await self.ollama.initialize()
@@ -190,6 +250,8 @@ class OllamaBot(commands.Bot):
                 self.history_manager,
                 self.user_profiles,
                 self.summarizer,
+                self.web_search,
+                self.naturalness,
             )
         )
         logger.info("Loaded ChatCog")
@@ -205,6 +267,19 @@ class OllamaBot(commands.Bot):
         )
         logger.info("Loaded VoiceCog")
 
+        await self.add_cog(MusicCog(self))
+        logger.info("Loaded MusicCog")
+
+        # Load RemindersCog
+        if self.reminders_service:
+            await self.add_cog(RemindersCog(self, self.reminders_service))
+            logger.info("Loaded RemindersCog")
+
+        # Load TriviaCog
+        if self.trivia_service:
+            await self.add_cog(TriviaCog(self, self.trivia_service))
+            logger.info("Loaded TriviaCog")
+
         # Sync commands (for slash commands)
         await self.tree.sync()
         logger.info("Synced command tree")
@@ -216,7 +291,23 @@ class OllamaBot(commands.Bot):
                     interval_hours=Config.MEMORY_CLEANUP_INTERVAL_HOURS
                 )
             )
+
             logger.info("Started background memory cleanup task")
+
+        # Start background profile saver
+        if self.user_profiles:
+            await self.user_profiles.start_background_saver()
+
+        # Start Web Dashboard
+        await self.web_dashboard.start(port=8080)
+
+        # Start Ambient Mode
+        if self.ambient_mode:
+            await self.ambient_mode.start()
+
+        # Start Reminders background task
+        if self.reminders_service:
+            await self.reminders_service.start()
 
     async def on_ready(self):
         """Called when bot is ready."""
@@ -232,6 +323,75 @@ class OllamaBot(commands.Bot):
         )
 
         logger.info("Bot is ready!")
+
+    async def on_message(self, message):
+        """Handle messages for proactive engagement."""
+        # Process commands first
+        await self.process_commands(message)
+
+        # Don't respond to self
+        if message.author == self.user:
+            return
+
+        # Don't respond to other bots
+        if message.author.bot:
+            return
+
+        # Check for proactive engagement
+        if self.ambient_mode and Config.PROACTIVE_ENGAGEMENT_ENABLED:
+            # Get current mood if available
+            current_mood = None
+            if self.naturalness and self.naturalness.mood:
+                current_mood = self.naturalness.mood.current_mood.mood.value
+
+            # Check if bot should jump in
+            engagement = await self.ambient_mode.on_message(message, mood=current_mood)
+
+            if engagement:
+                # Bot wants to jump in!
+                try:
+                    await message.channel.send(engagement)
+                    logger.info(f"Proactively engaged in {message.channel.name}")
+
+                    # Update dashboard if available
+                    if self.web_dashboard:
+                        self.web_dashboard.set_status("Proactive", f"Engaged: {engagement[:30]}...")
+                except Exception as e:
+                    logger.error(f"Failed to send proactive engagement: {e}")
+
+    async def on_voice_state_update(self, member, before, after):
+        """Handle voice state updates for environmental awareness."""
+        if not self.naturalness:
+            return
+
+        # Get environmental comment
+        comment = await self.naturalness.on_voice_state_update(member, before, after)
+
+        if comment:
+            # Find a text channel to send the comment
+            # Try to find the channel the bot is configured for, or the guild's system channel
+            guild = member.guild
+            target_channel = None
+
+            # Try to find a configured ambient channel
+            if Config.AMBIENT_CHANNELS:
+                for channel_id in Config.AMBIENT_CHANNELS:
+                    channel = guild.get_channel(channel_id)
+                    if channel:
+                        target_channel = channel
+                        break
+
+            # Fallback to system channel
+            if not target_channel:
+                target_channel = guild.system_channel
+
+            # Send comment
+            if target_channel:
+                try:
+                    await target_channel.send(comment)
+                    logger.debug(f"Environmental comment: {comment}")
+                except Exception as e:
+                    logger.error(f"Failed to send environmental comment: {e}")
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         """Handle command errors."""
@@ -252,6 +412,15 @@ class OllamaBot(commands.Bot):
         logger.info("Shutting down bot...")
 
         # Cleanup services
+        if self.user_profiles:
+            await self.user_profiles.stop_background_saver()
+
+        if self.ambient_mode:
+            await self.ambient_mode.stop()
+
+        if self.web_dashboard:
+            await self.web_dashboard.stop()
+
         await self.ollama.close()
 
         await super().close()

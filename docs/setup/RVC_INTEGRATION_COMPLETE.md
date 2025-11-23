@@ -35,6 +35,14 @@ torch.serialization.add_safe_globals([Dictionary])
 **Problem:** Even with model files present, RVC returned HTTP 500 errors
 **Solution:** Manually select the .pth model file and .index file through RVC-WebUI interface before running conversions
 
+### 6. ❌ HTTP 500 Error (Long Audio)
+**Problem:** RVC conversion failed for audio files longer than ~30 seconds
+**Solution:** Implemented automatic audio chunking in `rvc_http.py` to split long audio into 20s segments, process them individually, and merge the results.
+
+### 7. ❌ HTTP 500 Error (Index Path)
+**Problem:** API rejected custom index paths when sent to the Dropdown component
+**Solution:** Updated API call to send index path to the Textbox component instead, and added a fallback to retry without index if it fails.
+
 ## Final Setup
 
 ### File Structure

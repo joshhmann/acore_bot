@@ -1,0 +1,113 @@
+{
+  "enabled": true,
+  "global_volume": 0.5,
+  "effects": [
+    {
+      "name": "Bruh",
+      "file": "bruh.mp3",
+      "triggers": [
+        "bruh",
+        "bro moment",
+        "bruh moment"
+      ],
+      "cooldown": 10,
+      "volume": 0.6
+    },
+    {
+      "name": "Vine Boom",
+      "file": "vine_boom.mp3",
+      "triggers": [
+        "boom",
+        "vine boom"
+      ],
+      "cooldown": 5,
+      "volume": 0.5
+    },
+    {
+      "name": "Pipes Falling",
+      "file": "pipes_falling.mp3",
+      "triggers": [
+        "whiff",
+        "whiffed",
+        "missed",
+        "fail",
+        "failed"
+      ],
+      "cooldown": 15,
+      "volume": 0.7
+    },
+    {
+      "name": "Perfect",
+      "file": "perfect.mp3",
+      "triggers": [
+        "perfect",
+        "nailed it",
+        "ace"
+      ],
+      "cooldown": 12,
+      "volume": 0.5
+    },
+    {
+      "name": "Gottem",
+      "file": "gottem.mp3",
+      "triggers": [
+        "got em",
+        "gottem",
+        "deez nuts"
+      ],
+      "cooldown": 20,
+      "volume": 0.6
+    },
+    {
+      "name": "Oh No",
+      "file": "oh_no.mp3",
+      "triggers": [
+        "oh no",
+        "uh oh"
+      ],
+      "cooldown": 8,
+      "volume": 0.5
+    },
+    {
+      "name": "Sad Trombone",
+      "file": "sad_trombone.mp3",
+      "triggers": [
+        "rip",
+        "sad",
+        "oof"
+      ],
+      "cooldown": 10,
+      "volume": 0.5
+    },
+    {
+      "name": "Airhorn",
+      "file": "airhorn.mp3",
+      "triggers": [
+        "airhorn",
+        "hype",
+        "lets go"
+      ],
+      "cooldown": 15,
+      "volume": 0.4
+    },
+    {
+      "name": "OHH YEAHHH",
+      "file": "oh_yeah_esU6L8c.mp3",
+      "triggers": [
+        "oh yeah",
+        "yeah"
+      ],
+      "cooldown": 10,
+      "volume": 0.5
+    },
+    {
+      "name": "grenade",
+      "file": "grenade-plonk-sound-effect-tarkov-louder.mp3",
+      "triggers": [
+        "grenade"
+      ],
+      "cooldown": 10,
+      "volume": 0.5
+    }
+  ]
+}

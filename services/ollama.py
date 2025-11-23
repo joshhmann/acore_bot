@@ -4,6 +4,8 @@ import logging
 import json
 from typing import List, Dict, Optional, AsyncGenerator
 
+from config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -184,6 +186,71 @@ class OllamaService:
         """
         messages = [{"role": "user", "content": prompt}]
         return await self.chat(messages, system_prompt=system_prompt)
+
+    async def chat_with_vision(
+        self,
+        prompt: str,
+        images: List[str],
+        model: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """Send a chat request with images to a vision model.
+
+        Args:
+            prompt: User prompt/question about the image
+            images: List of base64-encoded image strings
+            model: Vision model to use (defaults to config VISION_MODEL)
+            system_prompt: Optional system prompt
+
+        Returns:
+            Assistant's response describing/analyzing the image
+
+        Raises:
+            Exception: If request fails
+        """
+        if not self.session:
+            await self.initialize()
+
+        # Build message with images
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+
+        messages.append({
+            "role": "user",
+            "content": prompt,
+            "images": images
+        })
+
+        # Use vision model
+        vision_model = model or Config.VISION_MODEL
+
+        payload = {
+            "model": vision_model,
+            "messages": messages,
+            "stream": False,
+            "options": {
+                "temperature": self.temperature,
+                "num_predict": self.max_tokens,
+            },
+        }
+
+        try:
+            url = f"{self.host}/api/chat"
+            async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(f"Ollama Vision API error ({resp.status}): {error_text}")
+
+                data = await resp.json()
+                return data["message"]["content"]
+
+        except aiohttp.ClientError as e:
+            logger.error(f"Ollama vision request failed: {e}")
+            raise Exception(f"Failed to connect to Ollama: {e}")
+        except KeyError as e:
+            logger.error(f"Unexpected Ollama response format: {e}")
+            raise Exception("Invalid response from Ollama")
 
     async def check_health(self) -> bool:
         """Check if Ollama server is reachable.

@@ -7,8 +7,98 @@ from typing import Optional, Callable
 import wave
 import io
 import time
+import struct
+
+import discord
+from discord.ext import voice_recv
+from services.transcription_fixer import get_transcription_fixer
+from services.sound_effects import get_sound_effects_service
 
 logger = logging.getLogger(__name__)
+
+
+class TranscriptionSink(voice_recv.AudioSink):
+    """Audio sink that captures voice and feeds it to the transcription system."""
+
+    def __init__(self, listener: 'EnhancedVoiceListener', guild_id: int):
+        """Initialize the transcription sink.
+
+        Args:
+            listener: EnhancedVoiceListener instance
+            guild_id: Discord guild ID for this session
+        """
+        super().__init__()
+        self.listener = listener
+        self.guild_id = guild_id
+        self.user_buffers = {}  # user_id -> list of audio frames
+        self.sample_rate = 48000  # Discord sends 48kHz audio
+        self.channels = 2  # Stereo
+        self.sample_width = 2  # 16-bit
+
+    def wants_opus(self) -> bool:
+        """We want decoded PCM audio, not opus."""
+        return False
+
+    def write(self, user, data):
+        """Called when audio data is received from a user.
+
+        Args:
+            user: Discord user or member
+            data: VoiceData containing the audio
+        """
+        if user is None:
+            return
+
+        try:
+            user_id = user.id if hasattr(user, 'id') else user
+            pcm_data = data.pcm
+
+            if not pcm_data:
+                return
+
+            # Initialize buffer for new users
+            if user_id not in self.user_buffers:
+                self.user_buffers[user_id] = []
+
+            # Add to user's buffer
+            self.user_buffers[user_id].append(pcm_data)
+
+            # Feed to enhanced listener for speech detection
+            self.listener.add_audio_chunk(self.guild_id, pcm_data)
+
+        except Exception as e:
+            logger.error(f"Error in TranscriptionSink.write: {e}")
+
+    def get_all_audio(self) -> bytes:
+        """Get combined audio from all users.
+
+        Returns:
+            Combined PCM audio data
+        """
+        all_audio = []
+        for user_id, chunks in self.user_buffers.items():
+            all_audio.extend(chunks)
+        return b''.join(all_audio)
+
+    def get_user_audio(self, user_id: int) -> bytes:
+        """Get audio from a specific user.
+
+        Args:
+            user_id: Discord user ID
+
+        Returns:
+            PCM audio data from that user
+        """
+        chunks = self.user_buffers.get(user_id, [])
+        return b''.join(chunks)
+
+    def clear_buffers(self):
+        """Clear all audio buffers."""
+        self.user_buffers.clear()
+
+    def cleanup(self):
+        """Cleanup resources."""
+        self.clear_buffers()
 
 
 class EnhancedVoiceListener:
@@ -35,7 +125,8 @@ class EnhancedVoiceListener:
 
         # Default trigger words (bot, assistant, hey, question)
         self.bot_trigger_words = bot_trigger_words or [
-            "bot", "assistant", "hey", "help", "question", "tell me", "what"
+            "bot", "assistant", "arby", "hey", "help", "question", "tell me", "what",
+            "can you", "could you", "would you", "will you", "how", "why", "when", "where", "who"
         ]
 
         # Active listening sessions per guild
@@ -75,12 +166,16 @@ class EnhancedVoiceListener:
             session_id = str(uuid.uuid4())
             audio_file = temp_dir / f"smart_listen_{session_id}.wav"
 
+            # Create the transcription sink
+            sink = TranscriptionSink(self, guild_id)
+
             session = {
                 "session_id": session_id,
                 "user_id": user_id,
                 "audio_file": audio_file,
                 "start_time": time.time(),
                 "voice_client": voice_client,
+                "sink": sink,
                 "audio_chunks": [],
                 "last_speech_time": None,
                 "is_recording_speech": False,
@@ -89,6 +184,10 @@ class EnhancedVoiceListener:
             }
 
             self.active_sessions[guild_id] = session
+
+            # Start listening with the sink
+            voice_client.listen(sink)
+            logger.info(f"Voice receive sink attached for guild {guild_id}")
 
             # Start monitoring loop
             asyncio.create_task(self._monitor_audio(guild_id))
@@ -113,18 +212,6 @@ class EnhancedVoiceListener:
         logger.info(f"Monitoring audio for guild {guild_id}")
 
         try:
-            # In a real implementation, we'd capture audio from Discord
-            # For now, we'll simulate with a timer-based approach
-
-            # This is a simplified version - in production you'd:
-            # 1. Use discord-ext-voice-recv or similar
-            # 2. Process audio chunks in real-time
-            # 3. Use actual VAD (like silero-vad or webrtcvad)
-
-            # For this quick implementation:
-            # - User speaks, we record
-            # - After silence_threshold seconds, we auto-transcribe
-
             while guild_id in self.active_sessions:
                 current_time = time.time()
 
@@ -141,7 +228,7 @@ class EnhancedVoiceListener:
                         session["last_speech_time"] = None
                         session["is_recording_speech"] = False
 
-                await asyncio.sleep(0.5)  # Check every 500ms
+                await asyncio.sleep(0.1)  # Check every 100ms for snappier response
 
         except Exception as e:
             logger.error(f"Error monitoring audio: {e}")
@@ -173,6 +260,44 @@ class EnhancedVoiceListener:
             logger.error(f"Error detecting speech: {e}")
             return False
 
+    def _convert_audio_for_whisper(self, pcm_data: bytes) -> bytes:
+        """Convert 48kHz stereo PCM to 16kHz mono for Whisper.
+
+        Args:
+            pcm_data: Raw PCM audio (48kHz, stereo, 16-bit)
+
+        Returns:
+            Converted PCM audio (16kHz, mono, 16-bit)
+        """
+        import numpy as np
+
+        # Convert bytes to numpy array (16-bit signed integers)
+        audio = np.frombuffer(pcm_data, dtype=np.int16)
+
+        # Convert stereo to mono (average left and right channels)
+        if len(audio) % 2 == 0:
+            audio = audio.reshape(-1, 2)
+            audio = audio.mean(axis=1).astype(np.int16)
+
+        # Resample from 48kHz to 16kHz (divide by 3)
+        # Simple decimation - take every 3rd sample
+        audio = audio[::3]
+
+        return audio.tobytes()
+
+    def _write_wav_file(self, audio_file: Path, pcm_data: bytes):
+        """Write PCM data to a WAV file.
+
+        Args:
+            audio_file: Output file path
+            pcm_data: PCM audio data (16kHz, mono, 16-bit)
+        """
+        with wave.open(str(audio_file), 'wb') as wav:
+            wav.setnchannels(1)  # Mono
+            wav.setsampwidth(2)  # 16-bit
+            wav.setframerate(16000)  # 16kHz for Whisper
+            wav.writeframes(pcm_data)
+
     async def _auto_transcribe(self, guild_id: int):
         """Auto-transcribe recorded audio and process response.
 
@@ -185,11 +310,31 @@ class EnhancedVoiceListener:
 
         try:
             audio_file = session["audio_file"]
+            sink = session.get("sink")
 
-            # Check if audio file exists and has content
-            if not audio_file.exists() or audio_file.stat().st_size == 0:
-                logger.warning("No audio recorded to transcribe")
-                return
+            # Get audio from sink
+            if sink:
+                raw_audio = sink.get_all_audio()
+                # Minimum audio threshold: ~0.5s of audio (48kHz * 2ch * 2bytes * 0.5s = 96000 bytes)
+                if not raw_audio or len(raw_audio) < 96000:
+                    logger.debug("Audio too short to transcribe (< 0.5s)")
+                    logger.warning("No audio recorded to transcribe")
+                    sink.clear_buffers()
+                    return
+
+                # Convert and write to WAV file
+                converted_audio = self._convert_audio_for_whisper(raw_audio)
+                self._write_wav_file(audio_file, converted_audio)
+
+                # Clear buffers for next segment
+                sink.clear_buffers()
+
+                logger.info(f"Wrote {len(converted_audio)} bytes to {audio_file}")
+            else:
+                # Fallback: check if file exists (legacy path)
+                if not audio_file.exists() or audio_file.stat().st_size == 0:
+                    logger.warning("No audio recorded to transcribe")
+                    return
 
             # Transcribe
             result = await self.whisper.transcribe_file(audio_file)
@@ -201,7 +346,41 @@ class EnhancedVoiceListener:
             transcription = result["text"].strip()
             language = result.get("language", "unknown")
 
-            logger.info(f"Auto-transcribed: {transcription}")
+            logger.info(f"Auto-transcribed (raw): {transcription}")
+
+            # Fix common transcription errors
+            fixer = get_transcription_fixer()
+            fixed_transcription = fixer.fix(transcription)
+
+            if fixed_transcription != transcription:
+                transcription = fixed_transcription
+                logger.info(f"Fixed transcription: {transcription}")
+
+            # Check for interrupt command (stop talking)
+            voice_client = session.get("voice_client")
+            if voice_client and voice_client.is_playing():
+                # Check if it's TTS that's playing
+                source = voice_client.source if hasattr(voice_client, 'source') else None
+                is_tts = getattr(source, '_is_tts', False) if source else False
+
+                # If user says "stop" while bot is talking, interrupt it
+                if is_tts and transcription.lower().strip() in ['stop', 'stop.', 'stop talking', 'stop talking.', 'quiet', 'quiet.', 'shut up', 'shut up.']:
+                    logger.info(f"Interrupt detected - stopping bot TTS: '{transcription}'")
+                    voice_client.stop()
+                    # Don't process this as a command - just interrupt
+                    return
+
+            # Check for sound effect triggers
+            try:
+                sound_effects = await get_sound_effects_service()
+                matching_effect = sound_effects.find_matching_effect(transcription)
+
+                if matching_effect:
+                    if voice_client:
+                        logger.info(f"Sound effect triggered: {matching_effect.name} by '{transcription}'")
+                        await sound_effects.play_effect(matching_effect, voice_client)
+            except Exception as e:
+                logger.error(f"Error playing sound effect: {e}")
 
             # Callback for transcription
             if session["on_transcription"]:
@@ -222,8 +401,9 @@ class EnhancedVoiceListener:
 
         Logic:
         1. Check for bot trigger words (bot, assistant, hey, etc.)
-        2. Check if it's a question (ends with ?)
-        3. Check for command-like phrases (tell me, show me, etc.)
+        2. Check for @mentions (at Arby, add Arby, etc.)
+        3. Check if it's a question (ends with ?)
+        4. Check for command-like phrases (tell me, show me, etc.)
 
         Args:
             transcription: Transcribed text
@@ -238,7 +418,20 @@ class EnhancedVoiceListener:
             logger.info(f"Trigger word found in: {transcription}")
             return True
 
-        # 2. Check if it's a question
+        # 2. Check for @mention variations (Whisper transcribes @ as "at", "add", etc.)
+        mention_patterns = [
+            r'\b@\s*arby\b',      # "@Arby"
+            r'\bat\s+arby\b',     # "at Arby"
+            r'\badd\s+arby\b',    # "add Arby" (common mishear)
+            r'\bat\s+r\.?b\.?\b', # "at R.B."
+        ]
+        import re
+        for pattern in mention_patterns:
+            if re.search(pattern, text_lower):
+                logger.info(f"@mention detected in: {transcription}")
+                return True
+
+        # 3. Check if it's a question
         if transcription.strip().endswith("?"):
             logger.info(f"Question detected: {transcription}")
             return True
@@ -253,6 +446,13 @@ class EnhancedVoiceListener:
         if any(phrase in text_lower for phrase in imperative_phrases):
             logger.info(f"Imperative phrase detected: {transcription}")
             return True
+
+        # 4. REMOVED: Conversational starts (too aggressive)
+        # The bot should only respond when explicitly addressed, not to all conversation
+
+        # 5. REMOVED: Length heuristic (too aggressive)
+        # Don't respond to every 4+ word sentence - people are just talking!
+        # Only respond when explicitly addressed (trigger words, questions, @mentions, etc.)
 
         # Otherwise, stay quiet
         logger.info(f"No response trigger in: {transcription}")
@@ -272,27 +472,54 @@ class EnhancedVoiceListener:
             return None
 
         try:
+            # Stop voice client listening
+            voice_client = session.get("voice_client")
+            if voice_client:
+                try:
+                    voice_client.stop_listening()
+                    logger.info(f"Stopped voice client listening for guild {guild_id}")
+                except Exception as e:
+                    logger.warning(f"Error stopping voice client listening: {e}")
+
+            # Get any remaining audio from sink
+            sink = session.get("sink")
+            audio_file = session["audio_file"]
+            result = None
+
+            if sink:
+                raw_audio = sink.get_all_audio()
+                if raw_audio and len(raw_audio) >= 1000:
+                    # Convert and write final audio
+                    converted_audio = self._convert_audio_for_whisper(raw_audio)
+                    self._write_wav_file(audio_file, converted_audio)
+
+                    # Transcribe
+                    result = await self.whisper.transcribe_file(audio_file)
+
+                # Cleanup sink
+                sink.cleanup()
+
+            # Fallback: check if file already exists
+            elif audio_file.exists() and audio_file.stat().st_size > 0:
+                result = await self.whisper.transcribe_file(audio_file)
+
             # Remove from active sessions
             del self.active_sessions[guild_id]
 
-            # Transcribe any remaining audio
-            audio_file = session["audio_file"]
-
-            if audio_file.exists() and audio_file.stat().st_size > 0:
-                result = await self.whisper.transcribe_file(audio_file)
-
-                # Cleanup
-                try:
+            # Cleanup audio file
+            try:
+                if audio_file.exists():
                     audio_file.unlink()
-                except:
-                    pass
+            except Exception as e:
+                logger.warning(f"Failed to delete audio file: {e}")
 
-                return result
-
-            return None
+            return result
 
         except Exception as e:
             logger.error(f"Error stopping listen: {e}")
+            # Ensure session is removed even on error
+            if guild_id in self.active_sessions:
+                del self.active_sessions[guild_id]
             return None
 
     def is_listening(self, guild_id: int) -> bool:
@@ -317,6 +544,22 @@ class EnhancedVoiceListener:
             session["last_speech_time"] = time.time()
             session["is_recording_speech"] = True
 
+            # Smart Barge-in: Only stop BOT TTS, not music
+            # Music continues playing while listening - we'll only stop it for actual commands
+            voice_client = session.get("voice_client")
+            if voice_client and voice_client.is_playing():
+                # Check if this is bot TTS vs music by checking the source type
+                # TTS sources have '_is_tts' attribute, music doesn't
+                source = voice_client.source if hasattr(voice_client, 'source') else None
+                is_tts = getattr(source, '_is_tts', False) if source else False
+
+                if is_tts:
+                    logger.info("Barge-in detected: User speaking, stopping bot TTS")
+                    voice_client.stop()
+                else:
+                    # Music is playing - let it continue, we'll only stop for actual commands
+                    logger.debug("User speaking but music continues (waiting for command)")
+
     def add_audio_chunk(self, guild_id: int, audio_chunk: bytes):
         """Add audio chunk to recording buffer.
 
@@ -325,12 +568,40 @@ class EnhancedVoiceListener:
             audio_chunk: Audio data
         """
         session = self.active_sessions.get(guild_id)
-        if session:
-            session["audio_chunks"].append(audio_chunk)
+        if not session:
+            return
 
-            # Detect if this chunk contains speech
-            if self.detect_speech_in_audio(audio_chunk):
-                self.update_speech_detected(guild_id)
+        # Check if music is playing - if so, keep buffers lean
+        voice_client = session.get("voice_client")
+        if voice_client and voice_client.is_playing():
+            # Check if it's music (not TTS)
+            source = voice_client.source if hasattr(voice_client, 'source') else None
+            is_tts = getattr(source, '_is_tts', False) if source else False
+            is_sound_effect = getattr(source, '_is_sound_effect', False) if source else False
+
+            # If music is playing (not TTS/sound effects), keep only recent chunks
+            if not is_tts and not is_sound_effect:
+                # Keep buffer small during music (only last 5 seconds for commands)
+                # This prevents backlog but still allows "Arby, stop" commands
+                max_music_chunks = 250  # ~5 seconds at 20ms chunks
+                if len(session["audio_chunks"]) > max_music_chunks:
+                    logger.debug("Music playing - trimming audio buffer to recent audio only")
+                    session["audio_chunks"] = session["audio_chunks"][-max_music_chunks:]
+                # Continue processing - don't return! We need to hear "stop" commands
+
+        # Limit buffer size to prevent memory issues (max ~30 seconds of audio)
+        # 48kHz * 2 channels * 2 bytes * 30 seconds = ~5.7MB
+        max_chunks = 1500  # ~30 seconds at 20ms chunks
+        if len(session["audio_chunks"]) > max_chunks:
+            # Buffer too large - drop old chunks
+            logger.warning(f"Audio buffer overflow ({len(session['audio_chunks'])} chunks) - clearing old data")
+            session["audio_chunks"] = session["audio_chunks"][-max_chunks:]
+
+        session["audio_chunks"].append(audio_chunk)
+
+        # Detect if this chunk contains speech
+        if self.detect_speech_in_audio(audio_chunk):
+            self.update_speech_detected(guild_id)
 
     def get_session_duration(self, guild_id: int) -> float:
         """Get how long the current session has been active.

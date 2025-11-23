@@ -89,3 +89,22 @@ Load the GOTHMOMMY model in RVC-WebUI so the dropdown shows:
 ```
 
 Then conversion will work properly.
+
+## Issue: HTTP 500 Error on Conversion
+
+### Problem
+RVC conversion fails with an HTTP 500 error, either immediately or after some processing time.
+
+### Causes & Solutions
+
+#### 1. Audio Too Long
+**Cause:** RVC WebUI has difficulty processing audio files longer than ~20-30 seconds in a single request.
+**Solution:** The bot now automatically chunks audio into 20-second segments. If you are manually using the API, ensure you split long audio files.
+
+#### 2. Invalid Index Path
+**Cause:** Passing a custom index path to the "Dropdown" component of the API can cause validation errors if the file isn't in the dropdown's pre-scanned list.
+**Solution:** The bot has been updated to send the index path to the "Textbox" component instead. Ensure your `rvc_http.py` is up to date.
+
+#### 3. Missing/Corrupt Index File
+**Cause:** The `.index` file specified in the config is missing or corrupt.
+**Solution:** The bot includes a fallback mechanism that will retry the conversion *without* the index file if the first attempt fails. Check your logs to see if this fallback is being triggered.

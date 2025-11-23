@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
+import asyncio
 import aiofiles
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,71 @@ class UserProfileService:
         # AI service for automatic profile learning
         self.ollama = ollama_service
 
+        # Dirty profiles tracking for periodic saving
+        self.dirty_profiles = set()
+        self._save_task = None
+
         logger.info(f"User profile service initialized (dir: {self.profiles_dir})")
+
+    async def start_background_saver(self):
+        """Start the background task to save dirty profiles periodically."""
+        if self._save_task is None:
+            self._save_task = asyncio.create_task(self._periodic_save_loop())
+            logger.info("Started background profile saver")
+
+    async def stop_background_saver(self):
+        """Stop the background saver and flush pending changes."""
+        if self._save_task:
+            self._save_task.cancel()
+            try:
+                await self._save_task
+            except asyncio.CancelledError:
+                pass
+            self._save_task = None
+        
+        # Flush all dirty profiles
+        await self._flush_all_dirty()
+
+    async def _periodic_save_loop(self):
+        """Loop to save dirty profiles every minute."""
+        try:
+            while True:
+                await asyncio.sleep(60)  # Save every minute
+                await self._flush_all_dirty()
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.error(f"Error in periodic save loop: {e}")
+
+    async def _flush_all_dirty(self):
+        """Save all profiles marked as dirty."""
+        if not self.dirty_profiles:
+            return
+
+        dirty_ids = list(self.dirty_profiles)
+        self.dirty_profiles.clear()
+        
+        logger.debug(f"Flushing {len(dirty_ids)} dirty profiles...")
+        for user_id in dirty_ids:
+            await self._flush_profile(user_id)
+
+    async def _flush_profile(self, user_id: int) -> bool:
+        """Internal method to write profile to disk immediately."""
+        if user_id not in self.profiles:
+            return False
+
+        profile = self.profiles[user_id]
+        try:
+            profile_file = self._get_profile_file(user_id)
+            async with aiofiles.open(profile_file, "w", encoding="utf-8") as f:
+                await f.write(json.dumps(profile, indent=2))
+            logger.debug(f"Flushed profile for user {user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to flush profile for user {user_id}: {e}")
+            # Add back to dirty set to retry later
+            self.dirty_profiles.add(user_id)
+            return False
 
     def _get_profile_file(self, user_id: int) -> Path:
         """Get the profile file path for a user.
@@ -118,13 +183,13 @@ class UserProfileService:
         }
 
     async def save_profile(self, user_id: int) -> bool:
-        """Save a user's profile to disk.
-
+        """Mark a user's profile as dirty to be saved later.
+        
         Args:
             user_id: Discord user ID
 
         Returns:
-            True if successful
+            True (always returns True as save is deferred)
         """
         if user_id not in self.profiles:
             logger.warning(f"Attempted to save non-existent profile for user {user_id}")
@@ -132,16 +197,10 @@ class UserProfileService:
 
         profile = self.profiles[user_id]
         profile["last_updated"] = datetime.utcnow().isoformat()
-
-        try:
-            profile_file = self._get_profile_file(user_id)
-            async with aiofiles.open(profile_file, "w", encoding="utf-8") as f:
-                await f.write(json.dumps(profile, indent=2))
-            logger.debug(f"Saved profile for user {user_id}")
-            return True
-        except Exception as e:
-            logger.error(f"Failed to save profile for user {user_id}: {e}")
-            return False
+        
+        # Mark as dirty
+        self.dirty_profiles.add(user_id)
+        return True
 
     async def add_fact(self, user_id: int, fact: str, source: str = "conversation") -> bool:
         """Add a fact about a user.
@@ -609,7 +668,7 @@ Return ONLY a JSON object:
   "sentiment": "positive" | "neutral" | "negative",
   "is_funny": true/false,
   "is_interesting": true/false,
-  "affection_change": -5 to +5  // How much this should change affection
+  "affection_change": <integer from -5 to 5>
 }}
 
 RULES:
@@ -618,7 +677,7 @@ RULES:
 - neutral: Normal conversation
 - is_funny: User made a genuinely funny joke/comment
 - is_interesting: Conversation was engaging/thought-provoking
-- affection_change: Suggest change (-5 to +5)
+- affection_change: Integer from -5 to 5 (no + prefix, just the number)
 
 JSON:"""
 
@@ -646,11 +705,12 @@ JSON:"""
                 if start >= 0 and end > start:
                     response = response[start:end+1]
 
-            # Remove any comments or trailing commas
+            # Remove any comments, trailing commas, and fix common JSON issues
             import re
             response = re.sub(r'//.*$', '', response, flags=re.MULTILINE)  # Remove comments
             response = re.sub(r',\s*}', '}', response)  # Remove trailing commas
             response = re.sub(r',\s*]', ']', response)  # Remove trailing commas in arrays
+            response = re.sub(r':\s*\+(\d)', r': \1', response)  # Remove + prefix from positive numbers
 
             try:
                 sentiment_data = json.loads(response)

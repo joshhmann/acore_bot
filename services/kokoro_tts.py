@@ -6,6 +6,8 @@ import numpy as np
 import wave
 import urllib.request
 import os
+import asyncio
+import concurrent.futures
 
 try:
     from kokoro_onnx import Kokoro
@@ -113,6 +115,35 @@ class KokoroTTSService:
             logger.error(f"Failed to get voices: {e}")
             return []
 
+    def _generate_blocking(
+        self,
+        text: str,
+        output_file: Path,
+        voice: str,
+        speed: float
+    ) -> Path:
+        """Blocking generation method to run in executor."""
+        try:
+            # Generate audio
+            samples, sample_rate = self.kokoro.create(text, voice=voice, speed=speed)
+
+            # Convert float32 to int16
+            # Kokoro returns samples in range [-1, 1], scale to int16 range
+            audio_int16 = np.clip(samples * 32767, -32768, 32767).astype(np.int16)
+
+            # Save as WAV
+            with wave.open(str(output_file), 'wb') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)  # 16-bit
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(audio_int16.tobytes())
+
+            logger.info(f"Generated speech: {output_file} (voice: {voice}, {len(samples)} samples)")
+            return output_file
+        except Exception as e:
+            logger.error(f"Blocking speech generation failed: {e}")
+            raise
+
     async def generate(
         self,
         text: str,
@@ -120,7 +151,7 @@ class KokoroTTSService:
         voice: Optional[str] = None,
         speed: Optional[float] = None,
     ) -> Path:
-        """Generate speech from text.
+        """Generate speech from text (non-blocking).
 
         Args:
             text: Text to convert to speech
@@ -141,22 +172,16 @@ class KokoroTTSService:
         speed = speed or self.speed
 
         try:
-            # Generate audio
-            samples, sample_rate = self.kokoro.create(text, voice=voice, speed=speed)
-
-            # Convert float32 to int16
-            # Kokoro returns samples in range [-1, 1], scale to int16 range
-            audio_int16 = np.clip(samples * 32767, -32768, 32767).astype(np.int16)
-
-            # Save as WAV
-            with wave.open(str(output_file), 'wb') as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)  # 16-bit
-                wav_file.setframerate(sample_rate)
-                wav_file.writeframes(audio_int16.tobytes())
-
-            logger.info(f"Generated speech: {output_file} (voice: {voice}, {len(samples)} samples)")
-            return output_file
+            loop = asyncio.get_running_loop()
+            # Run blocking generation in executor
+            return await loop.run_in_executor(
+                None,
+                self._generate_blocking,
+                text,
+                output_file,
+                voice,
+                speed
+            )
 
         except Exception as e:
             logger.error(f"Failed to generate speech: {e}")

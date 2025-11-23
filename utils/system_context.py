@@ -109,7 +109,7 @@ class SystemContextProvider:
         """
         now = datetime.now()
         time_context = SystemContextProvider.get_time_of_day_context()
-        return f"[Current time: {now.strftime('%I:%M %p')}, {now.strftime('%A, %B %d, %Y')} - {time_context}]"
+        return f"[IMPORTANT - CURRENT TIME & DATE: It is currently {now.strftime('%I:%M %p')} ({now.strftime('%H:%M')} in 24-hour format) on {now.strftime('%A, %B %d, %Y')}. Period: {time_context}. You MUST use this exact time when mentioning the current time in your responses.]"
 
     @staticmethod
     def get_activity_context(

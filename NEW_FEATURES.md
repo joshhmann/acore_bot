@@ -10,6 +10,12 @@ This document describes the newly implemented features and how to use them.
 4. [Response Streaming](#4-response-streaming)
 5. [Conversation Summarization with RAG](#5-conversation-summarization-with-rag)
 6. [Voice Activity Detection (Whisper STT)](#6-voice-activity-detection-whisper-stt)
+7. [Web Dashboard](#7-web-dashboard)
+8. [Memory Recall](#8-memory-recall)
+9. [Sentiment-Based Voice Modulation](#9-sentiment-based-voice-modulation)
+10. [Conversation Export/Import](#10-conversation-exportimport)
+11. [Smart Summarization](#11-smart-summarization)
+12. [RVC Stability & Performance](#12-rvc-stability--performance)
 
 ---
 
@@ -496,6 +502,28 @@ pip install openai-whisper
 **Issue**: Out of memory
 - Use smaller model:  `WHISPER_MODEL_SIZE=tiny`
 - Switch to CPU: `WHISPER_DEVICE=cpu`
+
+
+---
+
+## 12. RVC Stability & Performance
+
+### Overview
+Major improvements to the RVC (Retrieval-based Voice Conversion) integration to ensure reliability and support for long responses.
+
+### Features
+- **Audio Chunking**: Automatically splits long audio files (>20s) into smaller chunks for processing, overcoming RVC WebUI's duration limits.
+- **Smart Fallback**: If conversion fails with a specific index file, automatically retries without the index to ensure voice conversion still happens.
+- **Robust API Integration**: Improved handling of RVC WebUI's API inputs (using Textbox instead of Dropdown for file paths) to prevent validation errors.
+- **Error Recovery**: Better error handling and logging for conversion failures.
+
+### Technical Details
+- **Chunk Size**: 20 seconds (configurable in code)
+- **Processing**: Sequential chunk processing with automatic concatenation
+- **Libraries**: Uses `librosa` for duration analysis and `soundfile` for audio manipulation
+
+### Usage
+Completely automatic. You can now generate long speeches or read long stories without the voice conversion failing halfway through.
 
 ---
 
