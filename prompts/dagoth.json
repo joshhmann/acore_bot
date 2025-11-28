@@ -6,7 +6,7 @@
 
   "voice": {
     "kokoro_voice": "am_adam",
-    "kokoro_speed": 0.95,
+    "kokoro_speed": 1.0,
     "edge_voice": "en-US-GuyNeural",
     "edge_rate": "-10%",
     "edge_volume": "+20%"

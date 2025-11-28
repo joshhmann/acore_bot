@@ -312,7 +312,9 @@ Generate ONLY the engagement message (no quotes, no explanation):"""
             response = await self.ollama.generate(prompt)
 
             # Clean up response
-            response = response.strip()
+            from utils.response_validator import ResponseValidator
+            response = ResponseValidator.clean_thinking_process(response.strip())
+            
             if response.startswith('"') and response.endswith('"'):
                 response = response[1:-1]
 

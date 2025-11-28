@@ -46,6 +46,7 @@ class VoiceCog(commands.Cog):
         self.voice_activity_detector = voice_activity_detector
         self.enhanced_listener = enhanced_voice_listener
         self.voice_clients = {}  # guild_id -> voice_client
+        self.voice_clients_lock = asyncio.Lock()  # Protect voice_clients dict from race conditions
 
     @app_commands.command(name="join", description="Join your voice channel")
     async def join(self, interaction: discord.Interaction):
@@ -63,14 +64,15 @@ class VoiceCog(commands.Cog):
         channel = interaction.user.voice.channel
 
         try:
-            if interaction.guild.id in self.voice_clients:
-                await interaction.response.send_message(
-                    "✅ Already connected to a voice channel!", ephemeral=True
-                )
-                return
+            async with self.voice_clients_lock:
+                if interaction.guild.id in self.voice_clients:
+                    await interaction.response.send_message(
+                        "✅ Already connected to a voice channel!", ephemeral=True
+                    )
+                    return
 
-            voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
-            self.voice_clients[interaction.guild.id] = voice_client
+                voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
+                self.voice_clients[interaction.guild.id] = voice_client
 
             await interaction.response.send_message(
                 format_success(f"Joined **{channel.name}**!"), ephemeral=True
@@ -89,17 +91,18 @@ class VoiceCog(commands.Cog):
         """
         guild_id = interaction.guild.id
 
-        if guild_id not in self.voice_clients:
-            await interaction.response.send_message(
-                "❌ Not connected to any voice channel!", ephemeral=True
-            )
-            return
+        async with self.voice_clients_lock:
+            if guild_id not in self.voice_clients:
+                await interaction.response.send_message(
+                    "❌ Not connected to any voice channel!", ephemeral=True
+                )
+                return
 
-        try:
             voice_client = self.voice_clients[guild_id]
-            await voice_client.disconnect()
             del self.voice_clients[guild_id]
 
+        try:
+            await voice_client.disconnect()
             await interaction.response.send_message(
                 format_success("Disconnected from voice channel!"), ephemeral=True
             )
@@ -110,6 +113,7 @@ class VoiceCog(commands.Cog):
 
     @app_commands.command(name="speak", description="Generate speech and play in voice channel")
     @app_commands.describe(text="Text to speak")
+    @app_commands.checks.cooldown(1, 3.0)  # 1 use per 3 seconds per user
     async def speak(self, interaction: discord.Interaction, text: str):
         """Generate TTS and play in voice channel.
 
@@ -117,19 +121,27 @@ class VoiceCog(commands.Cog):
             interaction: Discord interaction
             text: Text to convert to speech
         """
+        # Input validation
+        if len(text) > 1000:
+            await interaction.response.send_message(
+                "❌ Text too long! Please keep speech under 1000 characters.",
+                ephemeral=True
+            )
+            return
+
         await interaction.response.defer(thinking=True)
 
         try:
             guild_id = interaction.guild.id
 
             # Check if connected to voice
-            if guild_id not in self.voice_clients:
-                await interaction.followup.send(
-                    "❌ Not connected to a voice channel! Use `/join` first."
-                )
-                return
-
-            voice_client = self.voice_clients[guild_id]
+            async with self.voice_clients_lock:
+                if guild_id not in self.voice_clients:
+                    await interaction.followup.send(
+                        "❌ Not connected to a voice channel! Use `/join` first."
+                    )
+                    return
+                voice_client = self.voice_clients[guild_id]
 
             # Check if already playing
             if voice_client.is_playing():
@@ -152,8 +164,11 @@ class VoiceCog(commands.Cog):
                 )
                 audio_file = rvc_file
 
-            # Play audio
-            audio_source = discord.FFmpegPCMAudio(str(audio_file))
+            # Play audio with explicit FFmpeg options for proper conversion
+            audio_source = discord.FFmpegPCMAudio(
+                str(audio_file),
+                options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+            )
             voice_client.play(
                 audio_source,
                 after=lambda e: asyncio.run_coroutine_threadsafe(
@@ -168,6 +183,7 @@ class VoiceCog(commands.Cog):
             await interaction.followup.send(format_error(e))
 
     @app_commands.command(name="speak_as", description="Speak with a specific RVC voice")
+    @app_commands.checks.cooldown(1, 3.0)  # 1 use per 3 seconds per user
     @app_commands.describe(voice_model="Voice model to use", text="Text to speak")
     async def speak_as(self, interaction: discord.Interaction, voice_model: str, text: str):
         """Generate TTS with specific RVC voice.
@@ -189,13 +205,13 @@ class VoiceCog(commands.Cog):
             guild_id = interaction.guild.id
 
             # Check if connected to voice
-            if guild_id not in self.voice_clients:
-                await interaction.followup.send(
-                    "❌ Not connected to a voice channel! Use `/join` first."
-                )
-                return
-
-            voice_client = self.voice_clients[guild_id]
+            async with self.voice_clients_lock:
+                if guild_id not in self.voice_clients:
+                    await interaction.followup.send(
+                        "❌ Not connected to a voice channel! Use `/join` first."
+                    )
+                    return
+                voice_client = self.voice_clients[guild_id]
 
             # Check if already playing
             if voice_client.is_playing():
@@ -216,8 +232,11 @@ class VoiceCog(commands.Cog):
                     protect=Config.RVC_PROTECT
                 )
 
-            # Play audio
-            audio_source = discord.FFmpegPCMAudio(str(rvc_file))
+            # Play audio with explicit FFmpeg options for proper conversion
+            audio_source = discord.FFmpegPCMAudio(
+                str(rvc_file),
+                options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+            )
             voice_client.play(
                 audio_source,
                 after=lambda e: asyncio.run_coroutine_threadsafe(
@@ -470,6 +489,7 @@ class VoiceCog(commands.Cog):
             await interaction.followup.send(format_error(e), ephemeral=True)
 
     @app_commands.command(name="listen", description="Start smart listening with automatic speech detection")
+    @app_commands.checks.cooldown(1, 5.0)  # 1 use per 5 seconds per user (expensive operation)
     async def listen(self, interaction: discord.Interaction):
         """Start smart listening to voice channel with automatic transcription.
 
@@ -691,9 +711,12 @@ class VoiceCog(commands.Cog):
                     logger.info(f"Sent voice response: {response[:100]}...")
 
                     # Speak the response if connected to voice
-                    if guild_id in self.voice_clients:
+                    async with self.voice_clients_lock:
+                        if guild_id not in self.voice_clients:
+                            return
                         vc = self.voice_clients[guild_id]
-                        if not vc.is_playing():
+
+                    if vc and not vc.is_playing():
                             try:
                                 # Generate TTS
                                 audio_file = Config.TEMP_DIR / f"voice_response_{uuid.uuid4()}.mp3"
@@ -711,8 +734,12 @@ class VoiceCog(commands.Cog):
                 )
                                     audio_file = rvc_file
 
-                                # Play audio
-                                audio_source = discord.FFmpegPCMAudio(str(audio_file))
+                                # Play audio with explicit FFmpeg options for proper conversion
+                                audio_source = discord.FFmpegPCMAudio(
+                                    str(audio_file),
+                                    before_options='-f wav',
+                                    options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+                                )
                                 vc.play(
                                     audio_source,
                                     after=lambda e: asyncio.run_coroutine_threadsafe(
@@ -1033,11 +1060,11 @@ class VoiceCog(commands.Cog):
         """
         try:
             # Check if connected to voice
-            if guild_id not in self.voice_clients:
-                logger.warning(f"Cannot speak in voice - not connected to guild {guild_id}")
-                return
-
-            voice_client = self.voice_clients[guild_id]
+            async with self.voice_clients_lock:
+                if guild_id not in self.voice_clients:
+                    logger.warning(f"Cannot speak in voice - not connected to guild {guild_id}")
+                    return
+                voice_client = self.voice_clients[guild_id]
 
             # Check if already playing
             if voice_client.is_playing() and not priority:
@@ -1064,8 +1091,11 @@ class VoiceCog(commands.Cog):
             if priority and voice_client.is_playing():
                 voice_client.stop()
 
-            # Play audio
-            audio_source = discord.FFmpegPCMAudio(str(audio_file))
+            # Play audio with explicit FFmpeg options for proper conversion
+            audio_source = discord.FFmpegPCMAudio(
+                str(audio_file),
+                options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+            )
             # Mark as TTS for smart barge-in
             audio_source._is_tts = True
 

@@ -22,8 +22,22 @@ class Config:
     OLLAMA_MIN_P: float = float(os.getenv("OLLAMA_MIN_P", "0.075"))
     OLLAMA_TOP_K: int = int(os.getenv("OLLAMA_TOP_K", "50"))
     OLLAMA_REPEAT_PENALTY: float = float(os.getenv("OLLAMA_REPEAT_PENALTY", "1.1"))
+    
+    # Advanced Sampling (SillyTavern-style)
+    LLM_FREQUENCY_PENALTY: float = float(os.getenv("LLM_FREQUENCY_PENALTY", "0.0"))
+    LLM_PRESENCE_PENALTY: float = float(os.getenv("LLM_PRESENCE_PENALTY", "0.0"))
+    LLM_TOP_P: float = float(os.getenv("LLM_TOP_P", "1.0"))
+
+    # LLM Provider (ollama or openrouter)
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()
+
+    # OpenRouter
+    OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "nousresearch/hermes-3-llama-3.1-405b")
+    OPENROUTER_URL: str = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1")
 
     # Chat
+    CLEAN_THINKING_OUTPUT: bool = os.getenv("CLEAN_THINKING_OUTPUT", "true").lower() == "true"
     CHAT_HISTORY_ENABLED: bool = os.getenv("CHAT_HISTORY_ENABLED", "true").lower() == "true"
     CHAT_HISTORY_MAX_MESSAGES: int = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "20"))
     AUTO_REPLY_ENABLED: bool = os.getenv("AUTO_REPLY_ENABLED", "false").lower() == "true"
@@ -39,15 +53,21 @@ class Config:
     SYSTEM_PROMPT_FILE: str = os.getenv("SYSTEM_PROMPT_FILE", "./prompts/default.txt")
     SYSTEM_PROMPT: str = os.getenv("SYSTEM_PROMPT", "")  # Override from env if provided
 
+    # AI-First Persona System
+    USE_PERSONA_SYSTEM: bool = os.getenv("USE_PERSONA_SYSTEM", "true").lower() == "true"
+    CHARACTER: str = os.getenv("CHARACTER", "dagoth_ur")
+    FRAMEWORK: str = os.getenv("FRAMEWORK", "neuro")
+
     # RAG (Retrieval-Augmented Generation)
     RAG_ENABLED: bool = os.getenv("RAG_ENABLED", "false").lower() == "true"
     RAG_VECTOR_STORE: str = os.getenv("RAG_VECTOR_STORE", "./data/vector_store")
     RAG_DOCUMENTS_PATH: str = os.getenv("RAG_DOCUMENTS_PATH", "./data/documents")
     RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
+    RAG_IN_CHAT: bool = os.getenv("RAG_IN_CHAT", "true").lower() == "true"  # Use RAG context in conversations
 
-    # MCP (Model Context Protocol)
-    MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "false").lower() == "true"
-    MCP_SERVER_URL: str = os.getenv("MCP_SERVER_URL", "http://localhost:8080")
+    # MCP (Model Context Protocol) - ARCHIVED (service never implemented)
+    # MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "false").lower() == "true"
+    # MCP_SERVER_URL: str = os.getenv("MCP_SERVER_URL", "http://localhost:8080")
 
     # User Profiles
     USER_PROFILES_ENABLED: bool = os.getenv("USER_PROFILES_ENABLED", "true").lower() == "true"
@@ -57,12 +77,12 @@ class Config:
     USER_CONTEXT_IN_CHAT: bool = os.getenv("USER_CONTEXT_IN_CHAT", "true").lower() == "true"
 
     # Web Search
-    WEB_SEARCH_ENABLED: bool = os.getenv("WEB_SEARCH_ENABLED", "false").lower() == "true"
+    WEB_SEARCH_ENABLED: bool = os.getenv("WEB_SEARCH_ENABLED", "true").lower() == "true"
     WEB_SEARCH_ENGINE: str = os.getenv("WEB_SEARCH_ENGINE", "duckduckgo")
     WEB_SEARCH_MAX_RESULTS: int = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "3"))
 
     # Voice/TTS
-    TTS_ENGINE: str = os.getenv("TTS_ENGINE", "edge")  # "edge" or "kokoro"
+    TTS_ENGINE: str = os.getenv("TTS_ENGINE", "edge")  # "edge", "kokoro", or "supertonic"
 
     # Edge TTS Settings
     DEFAULT_TTS_VOICE: str = os.getenv("DEFAULT_TTS_VOICE", "en-US-AriaNeural")
@@ -74,6 +94,11 @@ class Config:
     KOKORO_SPEED: float = float(os.getenv("KOKORO_SPEED", "1.0"))
     KOKORO_VOICE_CHIEF: str = os.getenv("KOKORO_VOICE_CHIEF", "am_onyx")
     KOKORO_VOICE_ARBY: str = os.getenv("KOKORO_VOICE_ARBY", "bm_george")
+
+    # Supertonic TTS Settings
+    SUPERTONIC_VOICE: str = os.getenv("SUPERTONIC_VOICE", "M1")  # M1, M2, F1, F2, or aliases like "male", "female"
+    SUPERTONIC_STEPS: int = int(os.getenv("SUPERTONIC_STEPS", "5"))  # Denoising steps (1-20, higher = better quality)
+    SUPERTONIC_SPEED: float = float(os.getenv("SUPERTONIC_SPEED", "1.05"))  # Speech speed multiplier
 
     # RVC
     RVC_ENABLED: bool = os.getenv("RVC_ENABLED", "false").lower() == "true"
@@ -132,6 +157,12 @@ class Config:
     AMBIENT_IGNORE_USERS: List[int] = [
         int(x.strip()) for x in os.getenv("AMBIENT_IGNORE_USERS", "").split(",") if x.strip()
     ]  # User IDs to ignore for ambient features (reactions, activity comments)
+
+    # Global user ignore list
+    IGNORED_USERS: List[int] = [
+        int(x.strip()) for x in os.getenv("IGNORED_USERS", "").split(",") if x.strip()
+    ]  # User IDs to completely ignore (bot won't respond to them at all)
+
     AMBIENT_LULL_TIMEOUT: int = int(os.getenv("AMBIENT_LULL_TIMEOUT", "300"))  # Seconds of silence before lull trigger
     AMBIENT_MIN_INTERVAL: int = int(os.getenv("AMBIENT_MIN_INTERVAL", "600"))  # Min seconds between ambient messages
     AMBIENT_CHANCE: float = float(os.getenv("AMBIENT_CHANCE", "0.3"))  # Chance to trigger on each check (0.0-1.0)
@@ -146,7 +177,7 @@ class Config:
     REACTIONS_ENABLED: bool = os.getenv("REACTIONS_ENABLED", "true").lower() == "true"
     REACTIONS_CHANCE_MULTIPLIER: float = float(os.getenv("REACTIONS_CHANCE_MULTIPLIER", "1.0"))  # Multiplier for reaction chances
     ACTIVITY_AWARENESS_ENABLED: bool = os.getenv("ACTIVITY_AWARENESS_ENABLED", "true").lower() == "true"
-    ACTIVITY_COMMENT_CHANCE: float = float(os.getenv("ACTIVITY_COMMENT_CHANCE", "0.3"))  # Chance to comment on activity changes
+    ACTIVITY_COMMENT_CHANCE: float = float(os.getenv("ACTIVITY_COMMENT_CHANCE", "0.1"))  # Chance to comment on activity changes
     ACTIVITY_COOLDOWN_SECONDS: int = int(os.getenv("ACTIVITY_COOLDOWN_SECONDS", "300"))  # Cooldown period (in seconds) before commenting on same activity type again
 
     # Natural Timing Settings
@@ -176,18 +207,64 @@ class Config:
     # Trivia Games
     TRIVIA_ENABLED: bool = os.getenv("TRIVIA_ENABLED", "true").lower() == "true"
 
+    # Natural Language Understanding
+    INTENT_RECOGNITION_ENABLED: bool = os.getenv("INTENT_RECOGNITION_ENABLED", "true").lower() == "true"
+    NATURAL_LANGUAGE_REMINDERS: bool = os.getenv("NATURAL_LANGUAGE_REMINDERS", "true").lower() == "true"
+
     @classmethod
     def validate(cls) -> bool:
         """Validate required configuration."""
         if not cls.DISCORD_TOKEN:
             raise ValueError("DISCORD_TOKEN is required")
 
-        # Create necessary directories
-        cls.DATA_DIR.mkdir(exist_ok=True)
-        cls.CHAT_HISTORY_DIR.mkdir(exist_ok=True)
-        cls.VOICE_MODELS_DIR.mkdir(exist_ok=True)
-        cls.TEMP_DIR.mkdir(exist_ok=True)
-        cls.SUMMARY_DIR.mkdir(exist_ok=True)
+        # Validate Ollama parameters
+        if not (0.0 <= cls.OLLAMA_TEMPERATURE <= 2.0):
+            raise ValueError(f"OLLAMA_TEMPERATURE must be between 0.0 and 2.0, got {cls.OLLAMA_TEMPERATURE}")
+
+        if cls.OLLAMA_MAX_TOKENS < 1:
+            raise ValueError(f"OLLAMA_MAX_TOKENS must be at least 1, got {cls.OLLAMA_MAX_TOKENS}")
+
+        if not (0.0 <= cls.OLLAMA_MIN_P <= 1.0):
+            raise ValueError(f"OLLAMA_MIN_P must be between 0.0 and 1.0, got {cls.OLLAMA_MIN_P}")
+
+        if cls.OLLAMA_TOP_K < 1:
+            raise ValueError(f"OLLAMA_TOP_K must be at least 1, got {cls.OLLAMA_TOP_K}")
+
+        if cls.OLLAMA_REPEAT_PENALTY < 0.0:
+            raise ValueError(f"OLLAMA_REPEAT_PENALTY must be non-negative, got {cls.OLLAMA_REPEAT_PENALTY}")
+
+        # Validate chat history settings
+        if cls.CHAT_HISTORY_MAX_MESSAGES < 1:
+            raise ValueError(f"CHAT_HISTORY_MAX_MESSAGES must be at least 1, got {cls.CHAT_HISTORY_MAX_MESSAGES}")
+
+        # Validate timing settings
+        if cls.NATURAL_TIMING_MIN_DELAY < 0:
+            raise ValueError(f"NATURAL_TIMING_MIN_DELAY must be non-negative, got {cls.NATURAL_TIMING_MIN_DELAY}")
+
+        if cls.NATURAL_TIMING_MAX_DELAY < cls.NATURAL_TIMING_MIN_DELAY:
+            raise ValueError(f"NATURAL_TIMING_MAX_DELAY must be >= NATURAL_TIMING_MIN_DELAY")
+
+        # Validate probability values
+        if not (0.0 <= cls.HESITATION_CHANCE <= 1.0):
+            raise ValueError(f"HESITATION_CHANCE must be between 0.0 and 1.0, got {cls.HESITATION_CHANCE}")
+
+        if not (0.0 <= cls.META_COMMENT_CHANCE <= 1.0):
+            raise ValueError(f"META_COMMENT_CHANCE must be between 0.0 and 1.0, got {cls.META_COMMENT_CHANCE}")
+
+        if not (0.0 <= cls.ACTIVITY_COMMENT_CHANCE <= 1.0):
+            raise ValueError(f"ACTIVITY_COMMENT_CHANCE must be between 0.0 and 1.0, got {cls.ACTIVITY_COMMENT_CHANCE}")
+
+        # Create necessary directories with error handling
+        try:
+            cls.DATA_DIR.mkdir(parents=True, exist_ok=True)
+            cls.CHAT_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+            cls.VOICE_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+            cls.TEMP_DIR.mkdir(parents=True, exist_ok=True)
+            cls.SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
+        except PermissionError as e:
+            raise ValueError(f"Permission denied creating directories: {e}")
+        except Exception as e:
+            raise ValueError(f"Failed to create directories: {e}")
 
         return True
 

@@ -12,18 +12,27 @@ logger = logging.getLogger(__name__)
 
 
 class ChatHistoryManager:
-    """Manages chat history per Discord channel."""
+    """Manages chat history per Discord channel with in-memory caching."""
 
-    def __init__(self, history_dir: Path, max_messages: int = 20):
+    def __init__(self, history_dir: Path, max_messages: int = 20, cache_size: int = 100, metrics=None):
         """Initialize chat history manager.
 
         Args:
             history_dir: Directory to store chat history files
             max_messages: Maximum messages to keep per channel
+            cache_size: Maximum number of channel histories to keep in memory
+            metrics: Optional metrics service for tracking cache performance
         """
         self.history_dir = Path(history_dir)
         self.max_messages = max_messages
+        self.cache_size = cache_size
+        self.metrics = metrics
         self.history_dir.mkdir(parents=True, exist_ok=True)
+
+        # In-memory cache: {channel_id: messages_list}
+        self._cache: Dict[int, List[Dict[str, str]]] = {}
+        # Track cache access order for LRU eviction
+        self._cache_access_order: List[int] = []
 
     def _get_history_file(self, channel_id: int) -> Path:
         """Get the history file path for a channel.
@@ -36,8 +45,28 @@ class ChatHistoryManager:
         """
         return self.history_dir / f"{channel_id}.json"
 
+    def _update_cache_access(self, channel_id: int):
+        """Update cache access order for LRU eviction.
+
+        Args:
+            channel_id: Channel ID that was accessed
+        """
+        # Remove from current position if exists
+        if channel_id in self._cache_access_order:
+            self._cache_access_order.remove(channel_id)
+        # Add to end (most recently used)
+        self._cache_access_order.append(channel_id)
+
+        # Evict oldest if cache is full
+        if len(self._cache_access_order) > self.cache_size:
+            # Remove least recently used (first in list)
+            oldest_channel = self._cache_access_order.pop(0)
+            if oldest_channel in self._cache:
+                del self._cache[oldest_channel]
+                logger.debug(f"Evicted channel {oldest_channel} from history cache")
+
     async def load_history(self, channel_id: int) -> List[Dict[str, str]]:
-        """Load chat history for a channel.
+        """Load chat history for a channel (from cache or disk).
 
         Args:
             channel_id: Discord channel ID
@@ -45,33 +74,62 @@ class ChatHistoryManager:
         Returns:
             List of message dicts with 'role' and 'content'
         """
+        # Check cache first
+        if channel_id in self._cache:
+            self._update_cache_access(channel_id)
+            logger.debug(f"Cache hit for channel {channel_id}")
+            # Record cache hit
+            if self.metrics:
+                self.metrics.record_cache_hit('history')
+            return self._cache[channel_id].copy()  # Return copy to prevent external modification
+
+        # Cache miss - load from disk
+        logger.debug(f"Cache miss for channel {channel_id}")
+        # Record cache miss
+        if self.metrics:
+            self.metrics.record_cache_miss('history')
+
         history_file = self._get_history_file(channel_id)
 
         if not history_file.exists():
+            # Initialize empty history in cache
+            self._cache[channel_id] = []
+            self._update_cache_access(channel_id)
             return []
 
         try:
             async with aiofiles.open(history_file, "r") as f:
                 content = await f.read()
-                return json.loads(content)
+                history = json.loads(content)
+
+                # Store in cache
+                self._cache[channel_id] = history
+                self._update_cache_access(channel_id)
+
+                logger.debug(f"Loaded history for channel {channel_id} from disk")
+                return history.copy()  # Return copy
         except Exception as e:
             logger.error(f"Failed to load history for channel {channel_id}: {e}")
             return []
 
     async def save_history(self, channel_id: int, messages: List[Dict[str, str]]) -> None:
-        """Save chat history for a channel.
+        """Save chat history for a channel (to cache and disk).
 
         Args:
             channel_id: Discord channel ID
             messages: List of message dicts to save
         """
-        history_file = self._get_history_file(channel_id)
-
         try:
             # Trim to max messages
             if len(messages) > self.max_messages:
                 messages = messages[-self.max_messages:]
 
+            # Update cache
+            self._cache[channel_id] = messages.copy()
+            self._update_cache_access(channel_id)
+
+            # Save to disk asynchronously
+            history_file = self._get_history_file(channel_id)
             async with aiofiles.open(history_file, "w") as f:
                 await f.write(json.dumps(messages, indent=2))
 
@@ -95,8 +153,7 @@ class ChatHistoryManager:
             username: Username of the speaker (for multi-user tracking)
             user_id: User ID (for multi-user tracking)
         """
-        history = await self.load_history(channel_id)
-
+        # Build message dict
         message = {"role": role, "content": content}
 
         # Add user attribution for multi-user conversations
@@ -105,8 +162,23 @@ class ChatHistoryManager:
         if user_id:
             message["user_id"] = user_id
 
-        history.append(message)
-        await self.save_history(channel_id, history)
+        # Get history from cache or load if needed
+        if channel_id not in self._cache:
+            # Load from disk to populate cache
+            await self.load_history(channel_id)
+
+        # Append to cached history
+        self._cache[channel_id].append(message)
+
+        # Trim if needed
+        if len(self._cache[channel_id]) > self.max_messages:
+            self._cache[channel_id] = self._cache[channel_id][-self.max_messages:]
+
+        # Update access order
+        self._update_cache_access(channel_id)
+
+        # Save to disk asynchronously
+        await self.save_history(channel_id, self._cache[channel_id])
 
     def format_history_for_display(
         self, messages: List[Dict[str, str]], include_usernames: bool = True
@@ -186,17 +258,24 @@ class ChatHistoryManager:
             return f"Group conversation with: {', '.join(names)}"
 
     async def clear_history(self, channel_id: int) -> None:
-        """Clear chat history for a channel.
+        """Clear chat history for a channel (from cache and disk).
 
         Args:
             channel_id: Discord channel ID
         """
-        history_file = self._get_history_file(channel_id)
-
         try:
+            # Clear from cache
+            if channel_id in self._cache:
+                del self._cache[channel_id]
+            if channel_id in self._cache_access_order:
+                self._cache_access_order.remove(channel_id)
+
+            # Clear from disk
+            history_file = self._get_history_file(channel_id)
             if history_file.exists():
                 history_file.unlink()
-                logger.info(f"Cleared history for channel {channel_id}")
+
+            logger.info(f"Cleared history for channel {channel_id}")
         except Exception as e:
             logger.error(f"Failed to clear history for channel {channel_id}: {e}")
 

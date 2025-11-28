@@ -13,6 +13,9 @@ import asyncio
 
 from config import Config
 from services.ollama import OllamaService
+from services.intent_recognition import IntentRecognitionService, ConversationalResponder
+from services.intent_handler import IntentHandler
+from services.naturalness import NaturalnessEnhancer
 from utils.helpers import (
     ChatHistoryManager,
     chunk_message,
@@ -40,6 +43,14 @@ class ChatCog(commands.Cog):
         summarizer=None,
         web_search=None,
         naturalness=None,
+        rag=None,
+        conversation_manager=None,
+        persona_system=None,
+        compiled_persona=None,
+        decision_engine=None,
+        callbacks_system=None,
+        curiosity_system=None,
+        pattern_learner=None,
     ):
         """Initialize chat cog.
 
@@ -51,6 +62,14 @@ class ChatCog(commands.Cog):
             summarizer: Conversation summarizer service (optional)
             web_search: Web search service (optional)
             naturalness: Naturalness service (optional)
+            rag: RAG service (optional)
+            conversation_manager: Multi-turn conversation manager (optional)
+            persona_system: AI-First PersonaSystem (optional)
+            compiled_persona: Current compiled persona (character + framework) (optional)
+            decision_engine: AI decision engine (optional)
+            callbacks_system: Proactive callbacks system for topic memory (optional)
+            curiosity_system: Curiosity system for follow-up questions (optional)
+            pattern_learner: Pattern learner for user adaptation (optional)
         """
         self.bot = bot
         self.ollama = ollama
@@ -59,6 +78,20 @@ class ChatCog(commands.Cog):
         self.summarizer = summarizer
         self.web_search = web_search
         self.naturalness = naturalness
+        self.rag = rag
+        self.conversation_manager = conversation_manager
+
+        # AI-First Persona System (new modular system)
+        self.persona_system = persona_system
+        self.compiled_persona = compiled_persona
+        self.decision_engine = decision_engine
+        self.callbacks_system = callbacks_system
+        self.curiosity_system = curiosity_system
+        self.pattern_learner = pattern_learner
+
+        # Naturalness enhancer for Neuro-like behaviors
+        self.enhancer = NaturalnessEnhancer()
+        logger.info("Naturalness enhancer initialized")
 
         # Conversational callbacks
         try:
@@ -78,19 +111,119 @@ class ChatCog(commands.Cog):
         # Track current persona config
         self.current_persona = None
 
+        # Try to load default persona "dagoth" if available
+        if not self.current_persona:
+            default_persona = self.persona_loader.get_persona("dagoth")
+            if default_persona:
+                self.current_persona = default_persona
+                logger.info(f"Loaded default persona: {default_persona.display_name}")
+
         # Track active conversation sessions per channel
         # Format: {channel_id: {"user_id": user_id, "last_activity": timestamp}}
         self.active_sessions: Dict[int, Dict] = {}
+        self.active_sessions_lock = asyncio.Lock()  # Protect active_sessions from race conditions
+
+        # Track last response time per channel (for conversation context)
+        # Limit size to prevent memory leak
+        self._last_response_time: Dict[int, datetime] = {}
+        self._max_response_time_entries = 50  # Keep only last 50 channels
+
+        # Track background tasks for proper cleanup
+        self._background_tasks: set = set()
+
+        # Intent recognition for natural language commands
+        self.intent_recognition = None
+        self.intent_handler = None
+        if Config.INTENT_RECOGNITION_ENABLED:
+            self.intent_recognition = IntentRecognitionService()
+            self.intent_handler = IntentHandler(bot)
+            logger.info("Intent recognition enabled - bot can now understand natural language commands")
+
+        # AI-powered message batching
+        from services.message_batcher import MessageBatcher
+        self.message_batcher = MessageBatcher(bot, ollama)
+        logger.info("AI-powered message batching initialized")
+        # Agentic tool system (ReAct pattern)
+        from services.agentic_tools import AgenticToolSystem
+        self.agentic_tools = AgenticToolSystem()
+        logger.info("Agentic tool system initialized")
+
+    def _cleanup_response_time_tracker(self):
+        """Clean up old entries from response time tracker to prevent memory leak."""
+        if len(self._last_response_time) > self._max_response_time_entries:
+            # Sort by timestamp (oldest first) and remove oldest entries
+            sorted_items = sorted(self._last_response_time.items(), key=lambda x: x[1])
+            # Keep only the most recent entries
+            entries_to_remove = len(self._last_response_time) - self._max_response_time_entries
+            for channel_id, _ in sorted_items[:entries_to_remove]:
+                del self._last_response_time[channel_id]
+            logger.debug(f"Cleaned up {entries_to_remove} old response time entries")
+
+    def _create_background_task(self, coro):
+        """Create a background task and track it for cleanup.
+
+        Args:
+            coro: Coroutine to run in background
+
+        Returns:
+            The created task
+        """
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        # Remove from set when done
+        task.add_done_callback(self._background_tasks.discard)
+        return task
+
+    async def cleanup_tasks(self):
+        """Cancel all background tasks (called on shutdown)."""
+        if self._background_tasks:
+            logger.info(f"Cancelling {len(self._background_tasks)} ChatCog background tasks...")
+            for task in self._background_tasks:
+                task.cancel()
+            # Wait for all to complete
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            logger.info("ChatCog background tasks cancelled")
+
+    def _replace_mentions_with_names(self, content: str, message: discord.Message) -> str:
+        """Replace user mention IDs with readable usernames.
+
+        Args:
+            content: Message content with <@user_id> mentions
+            message: Discord message object with mentions list
+
+        Returns:
+            Content with mentions replaced as @username
+        """
+        if not message or not message.mentions:
+            return content
+
+        # Replace each user mention with their display name
+        for user in message.mentions:
+            # Skip bot mentions (already handled separately)
+            if user.id == self.bot.user.id:
+                continue
+
+            # Replace <@user_id> with @username
+            mention_pattern = f"<@{user.id}>"
+            # Use display_name for server nicknames, fallback to name
+            display_name = user.display_name if hasattr(user, 'display_name') else user.name
+            content = content.replace(mention_pattern, f"@{display_name}")
+
+            # Also handle <!@user_id> format (mobile mentions)
+            mention_pattern_mobile = f"<@!{user.id}>"
+            content = content.replace(mention_pattern_mobile, f"@{display_name}")
+
+        return content
 
     def _analyze_sentiment(self, text: str) -> str:
         """Simple sentiment analysis heuristic."""
         text = text.lower()
         positive_words = ["!", "awesome", "great", "love", "amazing", "excited", "happy", "yay", "wow", "excellent", "good", "haha"]
         negative_words = ["sorry", "sad", "unfortunate", "regret", "bad", "terrible", "awful", "depressed", "grief", "miss", "pain"]
-        
+
         pos_score = sum(1 for w in positive_words if w in text)
         neg_score = sum(1 for w in negative_words if w in text)
-        
+
         if pos_score > neg_score:
             return "positive"
         elif neg_score > pos_score:
@@ -103,18 +236,25 @@ class ChatCog(commands.Cog):
         Returns:
             System prompt string
         """
-        # Check if SYSTEM_PROMPT is set directly in env (takes precedence)
+        # NEW: Check if compiled persona is available (AI-First PersonaSystem)
+        if self.compiled_persona:
+            logger.info(f"✨ Using system prompt from compiled persona: {self.compiled_persona.persona_id}")
+            logger.info(f"   Character: {self.compiled_persona.character.display_name}")
+            logger.info(f"   Framework: {self.compiled_persona.framework.name}")
+            return self.compiled_persona.system_prompt
+
+        # Check if SYSTEM_PROMPT is set directly in env (takes precedence for legacy mode)
         if Config.SYSTEM_PROMPT:
-            logger.info("Using system prompt from environment variable")
+            logger.info("Using system prompt from environment variable (legacy mode)")
             return Config.SYSTEM_PROMPT
 
-        # Try to load from file
+        # Try to load from file (legacy mode)
         prompt_file = Path(Config.SYSTEM_PROMPT_FILE)
         if prompt_file.exists():
             try:
                 with open(prompt_file, 'r', encoding='utf-8') as f:
                     prompt = f.read().strip()
-                    logger.info(f"Loaded system prompt from {prompt_file}")
+                    logger.info(f"Loaded system prompt from {prompt_file} (legacy mode)")
                     return prompt
             except Exception as e:
                 logger.error(f"Failed to load prompt from {prompt_file}: {e}")
@@ -128,30 +268,201 @@ class ChatCog(commands.Cog):
         logger.warning(f"Using default system prompt (file not found: {prompt_file})")
         return default_prompt
 
-    def _start_session(self, channel_id: int, user_id: int):
+    async def _track_interesting_topic(
+        self,
+        message: discord.Message,
+        bot_response: str,
+        conversation_history: list
+    ):
+        """Track interesting topics for proactive callbacks.
+
+        Args:
+            message: User's Discord message
+            bot_response: Bot's response
+            conversation_history: Recent conversation context
+        """
+        if not self.callbacks_system:
+            return
+
+        try:
+            # Build conversation context
+            context_messages = conversation_history[-5:] if conversation_history else []
+            context = "\n".join([
+                f"{msg.get('role', 'unknown')}: {msg.get('content', '')[:100]}"
+                for msg in context_messages
+            ])
+
+            # Ask LLM to extract topic and assess importance
+            prompt = f"""Analyze this conversation and determine if there's an interesting topic worth remembering for later.
+
+Conversation:
+{context}
+
+Latest message: {message.content[:200]}
+Bot response: {bot_response[:200]}
+
+Extract:
+1. Topic (brief, 5-10 words)
+2. Importance (0.0 to 1.0, where 0.5+ is worth remembering)
+3. Sentiment (positive/negative/neutral/excited)
+4. Keywords (3-5 relevant keywords)
+
+Respond in JSON format:
+{{"topic": "...", "importance": 0.0, "sentiment": "neutral", "keywords": ["..."]}}
+
+If this conversation isn't interesting enough to remember, set importance to 0.0.
+JSON only:"""
+
+            response = await self.ollama.generate(prompt, max_tokens=200)
+
+            if not response:
+                return
+
+            # Parse JSON response
+            import json
+            try:
+                # Try to extract JSON from response
+                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                if json_match:
+                    data = json.loads(json_match.group())
+
+                    topic = data.get('topic', '')
+                    importance = float(data.get('importance', 0.0))
+                    sentiment = data.get('sentiment', 'neutral')
+                    keywords = data.get('keywords', [])
+
+                    if importance >= 0.3 and topic:
+                        # Store the topic memory
+                        self.callbacks_system.add_topic_memory(
+                            topic=topic,
+                            context=context,
+                            users=[message.author.name],
+                            channel_id=message.channel.id,
+                            importance=importance,
+                            sentiment=sentiment,
+                            keywords=keywords
+                        )
+                        logger.debug(f"Tracked topic (importance {importance:.2f}): {topic}")
+
+            except json.JSONDecodeError as e:
+                logger.debug(f"Failed to parse topic extraction JSON: {e}")
+
+        except Exception as e:
+            logger.warning(f"Failed to track interesting topic: {e}")
+
+    async def _check_and_ask_followup(
+        self,
+        message: discord.Message,
+        user_content: str,
+        conversation_history: list
+    ):
+        """Check if we should ask a follow-up question and ask it.
+
+        Args:
+            message: User's Discord message
+            user_content: User's message content
+            conversation_history: Recent conversation context
+        """
+        if not self.curiosity_system:
+            return
+
+        try:
+            # Give the bot a moment to "think" before asking
+            await asyncio.sleep(random.uniform(2.0, 5.0))
+
+            # Build context from history
+            context_messages = [
+                msg.get('content', '') for msg in conversation_history[-5:]
+                if msg.get('content')
+            ]
+
+            # Check if we should ask a question
+            opportunity = await self.curiosity_system.should_ask_question(
+                message_content=user_content,
+                channel_id=message.channel.id,
+                conversation_context=context_messages
+            )
+
+            if not opportunity:
+                return
+
+            # Generate the follow-up question
+            question = await self.curiosity_system.generate_followup_question(
+                opportunity=opportunity,
+                message_content=user_content
+            )
+
+            if question:
+                # Send the question with typing indicator
+                async with message.channel.typing():
+                    # Small delay for natural feel
+                    await asyncio.sleep(random.uniform(1.0, 2.0))
+                    await message.channel.send(question)
+
+                # Mark that we asked
+                self.curiosity_system.mark_question_asked(
+                    message.channel.id,
+                    opportunity.topic
+                )
+                logger.info(f"Asked curious follow-up: {question[:50]}...")
+
+        except Exception as e:
+            logger.warning(f"Failed to ask follow-up question: {e}")
+
+    async def _track_user_interaction(
+        self,
+        user_id: int,
+        user_message: str,
+        bot_response: str
+    ):
+        """Track user interaction for learning & adaptation.
+
+        Args:
+            user_id: Discord user ID
+            user_message: User's message
+            bot_response: Bot's response
+        """
+        if not self.pattern_learner:
+            return
+
+        try:
+            # Track the interaction (reaction detection could be added later)
+            self.pattern_learner.learn_user_interaction(
+                user_id=user_id,
+                user_message=user_message,
+                bot_response=bot_response,
+                user_reaction=None  # Could detect reactions/emoji later
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to track user interaction: {e}")
+
+    async def _start_session(self, channel_id: int, user_id: int):
         """Start or refresh a conversation session.
 
         Args:
             channel_id: Discord channel ID
             user_id: User ID who initiated the session
         """
-        self.active_sessions[channel_id] = {
-            "user_id": user_id,
-            "last_activity": time.time()
-        }
+        async with self.active_sessions_lock:
+            self.active_sessions[channel_id] = {
+                "user_id": user_id,
+                "last_activity": time.time()
+            }
         logger.info(f"Started conversation session in channel {channel_id} for user {user_id}")
 
-    def _refresh_session(self, channel_id: int):
+    async def _refresh_session(self, channel_id: int):
         """Refresh the timeout for an active session.
 
         Args:
             channel_id: Discord channel ID
         """
-        if channel_id in self.active_sessions:
-            self.active_sessions[channel_id]["last_activity"] = time.time()
-            logger.debug(f"Refreshed session in channel {channel_id}")
+        async with self.active_sessions_lock:
+            if channel_id in self.active_sessions:
+                self.active_sessions[channel_id]["last_activity"] = time.time()
+                logger.debug(f"Refreshed session in channel {channel_id}")
 
-    def _is_session_active(self, channel_id: int) -> bool:
+    async def _is_session_active(self, channel_id: int) -> bool:
         """Check if a conversation session is still active.
 
         Args:
@@ -160,29 +471,31 @@ class ChatCog(commands.Cog):
         Returns:
             True if session is active and hasn't timed out
         """
-        if channel_id not in self.active_sessions:
-            return False
+        async with self.active_sessions_lock:
+            if channel_id not in self.active_sessions:
+                return False
 
-        session = self.active_sessions[channel_id]
-        elapsed = time.time() - session["last_activity"]
+            session = self.active_sessions[channel_id]
+            elapsed = time.time() - session["last_activity"]
 
-        if elapsed > Config.CONVERSATION_TIMEOUT:
-            # Session timed out
-            logger.info(f"Session timed out in channel {channel_id} after {elapsed:.0f}s")
-            del self.active_sessions[channel_id]
-            return False
+            if elapsed > Config.CONVERSATION_TIMEOUT:
+                # Session timed out
+                logger.info(f"Session timed out in channel {channel_id} after {elapsed:.0f}s")
+                del self.active_sessions[channel_id]
+                return False
 
-        return True
+            return True
 
-    def _end_session(self, channel_id: int):
+    async def _end_session(self, channel_id: int):
         """Manually end a conversation session.
 
         Args:
             channel_id: Discord channel ID
         """
-        if channel_id in self.active_sessions:
-            del self.active_sessions[channel_id]
-            logger.info(f"Ended session in channel {channel_id}")
+        async with self.active_sessions_lock:
+            if channel_id in self.active_sessions:
+                del self.active_sessions[channel_id]
+                logger.info(f"Ended session in channel {channel_id}")
 
     async def _safe_learn_from_conversation(self, user_id: int, username: str, user_message: str, bot_response: str):
         """Wrapper to run learning safely in background."""
@@ -207,20 +520,473 @@ class ChatCog(commands.Cog):
         except Exception as e:
             logger.error(f"Background affection update failed: {e}")
 
-    @app_commands.command(name="chat", description="Chat with the AI")
-    @app_commands.describe(message="Your message to the AI")
-    async def chat(self, interaction: discord.Interaction, message: str):
-        """Chat with Ollama AI.
+    async def check_and_handle_message(self, message: discord.Message) -> bool:
+        """Check if message should be handled as chat and process it.
+        
+        Returns:
+            True if message was handled, False otherwise.
+        """
+        from datetime import datetime, timedelta
+        
+        # Ignore self, bots, and system messages
+        logger.debug(f"check_and_handle_message: msg_id={message.id}, author={message.author.name} (bot={message.author.bot}), content='{message.content[:50]}'")
+        if message.author.bot or message.is_system():
+            return False
+
+        # Ignore users in the ignore list
+        if message.author.id in Config.IGNORED_USERS:
+            logger.debug(f"Ignoring message from ignored user: {message.author.name} ({message.author.id})")
+            return False
+
+        # Ignore commands (starting with prefix)
+        if message.content.startswith(self.bot.command_prefix):
+            return False
+
+        # Ignore messages with #ignore tag
+        if "#ignore" in message.content.lower():
+            return False
+
+        # Deduplication: Skip if we recently processed this exact message
+        if not hasattr(self, '_processed_messages'):
+            self._processed_messages = {}
+        
+        message_key = f"{message.id}_{message.channel.id}"
+        if message_key in self._processed_messages:
+            logger.debug(f"Skipping duplicate message {message.id}")
+            return True  # Return True to prevent other handlers from processing
+        
+        # Mark as processed (will be cleaned up periodically)
+        self._processed_messages[message_key] = True
+        
+        # Clean up old entries (keep last 100)
+        if len(self._processed_messages) > 100:
+            # Remove oldest half
+            keys = list(self._processed_messages.keys())
+            for key in keys[:50]:
+                del self._processed_messages[key]
+
+        # Check if we should respond
+        should_respond = False
+        response_reason = None
+        suggested_style = None
+
+        # 1. Direct Mention (ALWAYS respond)
+        if self.bot.user in message.mentions:
+            should_respond = True
+            response_reason = "mentioned"
+            suggested_style = "direct"
+
+        # 2. Reply to bot (ALWAYS respond)
+        elif message.reference:
+            try:
+                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                if ref_msg.author == self.bot.user:
+                    should_respond = True
+                    response_reason = "reply_to_bot"
+                    suggested_style = "conversational"
+            except:
+                pass
+                
+        # 3. Name trigger (ALWAYS respond)
+        if not should_respond:
+            # Get bot names (user name, persona name)
+            bot_names = [self.bot.user.name.lower(), "bot", "computer", "assistant"]
+
+            # Add first name (e.g. "Dagoth" from "Dagoth Ur")
+            if " " in self.bot.user.name:
+                bot_names.append(self.bot.user.name.split(" ")[0].lower())
+
+            # Add nickname if in a guild
+            if isinstance(message.channel, discord.TextChannel):
+                if message.guild.me.nick:
+                    bot_names.append(message.guild.me.nick.lower())
+
+            if self.current_persona:
+                bot_names.append(self.current_persona.name.lower())
+                # Add persona first name
+                if " " in self.current_persona.name:
+                    bot_names.append(self.current_persona.name.split(" ")[0].lower())
+
+                if hasattr(self.current_persona, 'display_name'):
+                    bot_names.append(self.current_persona.display_name.lower())
+
+            content_lower = message.content.lower()
+            # Check if name is in message
+            if any(name in content_lower for name in bot_names):
+                should_respond = True
+                response_reason = "name_trigger"
+                suggested_style = "direct"
+                logger.info(f"Message triggered by name mention: {message.content[:20]}...")
+
+        # 4. Image reference / Question about attachment (ALWAYS respond)
+        if not should_respond:
+            image_keywords = [
+                "what is this", "what is that", "who is this", "who is that",
+                "look at this", "look at that", "describe this", "describe that",
+                "thoughts?", "opinion?", "can you see", "do you see"
+            ]
+            content_lower = message.content.lower()
+            if any(k in content_lower for k in image_keywords):
+                 # Case A: Current message has attachment
+                 if message.attachments or message.embeds:
+                     should_respond = True
+                     response_reason = "image_question"
+                     suggested_style = "descriptive"
+
+                 # Case B: Recent message has attachment (User posted image then asked)
+                 # We look back at the last 3 messages to see if there's an image context
+                 else:
+                     try:
+                         async for msg in message.channel.history(limit=3, before=message):
+                             if msg.attachments or msg.embeds:
+                                 # Found a recent image. Assume they are talking about it.
+                                 should_respond = True
+                                 response_reason = "image_question"
+                                 suggested_style = "descriptive"
+                                 break
+                     except Exception:
+                         pass
+
+        # 5. AI Decision Engine (Framework-based decision making)
+        # Use AIDecisionEngine if available and no hard trigger matched yet
+        if not should_respond and self.decision_engine:
+            try:
+                # Build context for decision engine
+                decision_context = {
+                    "channel_id": message.channel.id,
+                    "user_id": message.author.id,
+                    "mentioned": self.bot.user in message.mentions,
+                    "has_question": "?" in message.content,
+                    "message_length": len(message.content),
+                }
+
+                # Ask decision engine if we should respond
+                decision = await self.decision_engine.should_respond(
+                    message.content,
+                    decision_context
+                )
+
+                if decision.get("should_respond"):
+                    should_respond = True
+                    response_reason = f"ai_decision:{decision.get('reason', 'unknown')}"
+                    suggested_style = decision.get("suggested_style")
+                    logger.info(f"✨ AI Decision Engine: RESPOND - Reason: {decision.get('reason')}, Style: {suggested_style}")
+                else:
+                    logger.debug(f"AI Decision Engine: SKIP - Reason: {decision.get('reason')}")
+
+            except Exception as e:
+                logger.warning(f"AI Decision Engine failed: {e}")
+                # Continue with fallback logic below
+
+        # 6. Conversation context tracking (Fallback)
+        # If bot recently spoke in this channel, respond to follow-ups
+        if not should_respond:
+            channel_id = message.channel.id
+
+            # Check if we have recent activity in this channel
+            last_time = self._last_response_time.get(channel_id)
+            if last_time:
+                time_since = datetime.now() - last_time
+                # Respond to follow-ups within 5 minutes
+                if time_since < timedelta(minutes=5):
+                    should_respond = True
+                    response_reason = "conversation_context"
+                    suggested_style = "conversational"
+                    logger.info(f"Responding due to recent conversation context ({time_since.seconds}s ago)")
+
+
+        # 7. Always respond in configured ambient channels (Fallback)
+        if not should_respond and Config.AMBIENT_CHANNELS:
+            if message.channel.id in Config.AMBIENT_CHANNELS:
+                # Ignore very short messages (likely not directed at bot)
+                if len(message.content.strip()) >= 3:
+                    should_respond = True
+                    response_reason = "ambient_channel"
+                    suggested_style = "casual"
+                    logger.info(f"Responding in always-respond channel: {message.channel.name}")
+
+        # 8. AI-powered message detection (only in ambient channels, as final fallback)
+        if not should_respond and Config.AMBIENT_CHANNELS:
+            if message.channel.id in Config.AMBIENT_CHANNELS:
+                # Use AI to determine if message seems directed at bot
+                try:
+                    persona_name = "Dagoth Ur"
+                    if self.current_persona:
+                        persona_name = self.current_persona.name
+
+                    prompt = f"""Message: "{message.content}"
+
+Is this message likely directed at {persona_name} or asking a question that {persona_name} should answer?
+Consider: questions, statements that seem to want a response, or conversational prompts.
+Answer ONLY "yes" or "no"."""
+
+                    response = await self.bot.ollama.generate(prompt)
+
+                    if "yes" in response.lower():
+                        should_respond = True
+                        response_reason = "ai_ambient_detection"
+                        suggested_style = "helpful"
+                        logger.info(f"AI detected message directed at bot: {message.content[:30]}...")
+                except Exception as e:
+                    logger.debug(f"AI message detection failed: {e}")
+                    # Fallback to simple question detection
+                    content_lower = message.content.lower()
+                    if "?" in message.content or any(content_lower.startswith(q) for q in ["what", "why", "how", "when", "where", "who"]):
+                        should_respond = True
+                        response_reason = "question_detection"
+                        suggested_style = "helpful"
+                        logger.info(f"Fallback question detection: {message.content[:30]}...")
+        
+
+        if should_respond:
+            # Track that we're responding in this channel
+            self._last_response_time[message.channel.id] = datetime.now()
+            # Clean up old entries to prevent memory leak
+            self._cleanup_response_time_tracker()
+
+            # Log response decision
+            logger.info(f"Responding to message - Reason: {response_reason}, Style: {suggested_style}")
+
+            # Use AI-powered message batching
+            # This will wait and combine multiple messages if user sends them quickly
+            async def respond_callback(combined_content: str, original_message: discord.Message):
+                """Callback to handle response after batching decision."""
+                async with message.channel.typing():
+                    await self._handle_chat_response(
+                        message_content=combined_content,
+                        channel=original_message.channel,
+                        user=original_message.author,
+                        original_message=original_message,
+                        response_reason=response_reason,
+                        suggested_style=suggested_style
+                    )
+
+            # Add message to batcher - AI will decide when to respond
+            await self.message_batcher.add_message(message, respond_callback)
+            return True
+            
+        return False
+
+    async def _handle_chat_response(
+        self,
+        message_content: str,
+        channel: discord.TextChannel,
+        user: discord.User,
+        interaction: Optional[discord.Interaction] = None,
+        original_message: Optional[discord.Message] = None,
+        response_reason: Optional[str] = None,
+        suggested_style: Optional[str] = None
+    ):
+        """Core chat logic shared by slash command and on_message listener.
 
         Args:
-            interaction: Discord interaction
-            message: User's message
+            message_content: The message to respond to
+            channel: Discord channel
+            user: User who sent the message
+            interaction: Optional Discord interaction (for slash commands)
+            original_message: Optional original Discord message
+            response_reason: Why we're responding (for logging/analytics)
+            suggested_style: Suggested response style from decision engine
         """
-        await interaction.response.defer(thinking=True)
+        # Start response time tracking
+        import time
+        start_time = time.time()
+        # Helper for sending messages (handling interaction vs channel)
+        async def send_response(content, ephemeral=False):
+            if interaction:
+                if interaction.response.is_done():
+                    await interaction.followup.send(content, ephemeral=ephemeral)
+                else:
+                    await interaction.response.send_message(content, ephemeral=ephemeral)
+            else:
+                if not ephemeral: # Can't send ephemeral to channel
+                    await channel.send(content)
+
+        # Input validation
+        if not isinstance(message_content, str):
+            logger.warning(f"message_content is not a string: {type(message_content)}")
+            message_content = str(message_content) if message_content is not None else ""
+
+        if len(message_content) > 4000:
+            await send_response("❌ Message too long! Please keep messages under 4000 characters.", ephemeral=True)
+            return
+
+        # Replace user mentions with readable names for LLM
+        if original_message:
+            message_content = self._replace_mentions_with_names(message_content, original_message)
+
+        # Check for multi-turn conversation steps (only for actual messages)
+        if original_message and self.conversation_manager:
+            # Prepare user content (strip mention)
+            user_content = message_content
+            if self.bot.user in original_message.mentions:
+                user_content = message_content.replace(f"<@{self.bot.user.id}>", "").strip()
+            
+            conversation = self.conversation_manager.get_conversation(channel.id)
+            if conversation:
+                # Process response in multi-turn conversation
+                result = await self.conversation_manager.process_response(
+                    channel.id,
+                    user.id,
+                    user_content
+                )
+
+                if result:
+                    if result['type'] == 'next_step':
+                        await channel.send(
+                            f"**Step {result['step_number']}/{result['total_steps']}**\n{result['prompt']}"
+                        )
+                    elif result['type'] == 'completed':
+                        await channel.send(result['message'])
+                    elif result['type'] == 'invalid':
+                        remaining = result.get('attempts_remaining', 0)
+                        await channel.send(
+                            f"{result['message']}\n*({remaining} attempts remaining)*"
+                        )
+                    elif result['type'] in ['cancelled', 'failed', 'error']:
+                        await channel.send(result['message'])
+
+                    return  # Multi-turn conversation handled
+
+        # Check for natural language intents (only for actual messages)
+        if original_message and self.intent_recognition:
+            # Prepare user content (strip mention)
+            user_content = message_content
+            if self.bot.user in original_message.mentions:
+                user_content = message_content.replace(f"<@{self.bot.user.id}>", "").strip()
+
+            server_id = original_message.guild.id if original_message.guild else None
+            intent = self.intent_recognition.detect_intent(
+                user_content,
+                bot_mentioned=(self.bot.user in original_message.mentions),
+                server_id=server_id
+            )
+
+            # Handle intents that don't need AI processing
+            if intent and self.intent_handler:
+                logger.info(f"Detected intent: {intent.intent_type} (confidence: {intent.confidence}) for message: '{user_content[:50]}'")
+                handled = await self.intent_handler.handle_intent(intent, original_message)
+                logger.info(f"Intent {intent.intent_type} handled: {handled}")
+                if handled:
+                    # Intent was fully handled, no need for AI response
+                    if self.intent_recognition.learner:
+                        self.intent_recognition.report_success(user_content, intent.intent_type)
+                    return
+                else:
+                    logger.info(f"Intent {intent.intent_type} not handled, falling through to AI")
+
+        # Check if user is referencing an image in recent messages
+        image_reference_keywords = [
+            "image above", "picture above", "photo above",
+            "that image", "this image", "the image",
+            "that picture", "this picture", "the picture",
+            "react to", "what do you think of",
+            "describe", "analyze",
+            "what is that", "what is this", "look at this", "look at that",
+            "who is this", "who is that", "thoughts?", "see this"
+        ]
+        
+        message_lower = message_content.lower()
+        is_referencing_image = any(keyword in message_lower for keyword in image_reference_keywords)
+        
+        # Also check if the current message HAS an image (implicit reference)
+        has_attachment = False
+        if original_message and (original_message.attachments or original_message.embeds):
+            has_attachment = True
+            is_referencing_image = True # Treat as referencing the attached image
+
+        recent_image_url = None
+        if is_referencing_image:
+            # 1. Check current message first
+            if original_message:
+                if original_message.attachments:
+                    for attachment in original_message.attachments:
+                        if is_image_attachment(attachment.filename):
+                            recent_image_url = attachment.url
+                            break
+                if not recent_image_url and original_message.embeds:
+                    for embed in original_message.embeds:
+                        if embed.image:
+                            recent_image_url = embed.image.url
+                            break
+                        elif embed.thumbnail:
+                            recent_image_url = embed.thumbnail.url
+                            break
+
+            # 2. Look back through recent messages if not found in current
+            if not recent_image_url:
+                try:
+                    async for msg in channel.history(limit=10):
+                        # Skip the current message/interaction
+                        if interaction and msg.author == user and msg.content == message_content:
+                            continue
+                        if original_message and msg.id == original_message.id:
+                            continue
+                        
+                        # Check for image attachments
+                        if msg.attachments:
+                            for attachment in msg.attachments:
+                                if is_image_attachment(attachment.filename):
+                                    recent_image_url = attachment.url
+                                    logger.info(f"Found recent image: {recent_image_url}")
+                                    break
+                        
+                        # Check for embeds with images
+                        if msg.embeds:
+                            for embed in msg.embeds:
+                                if embed.image:
+                                    recent_image_url = embed.image.url
+                                    logger.info(f"Found recent embed image: {recent_image_url}")
+                                    break
+                                elif embed.thumbnail:
+                                    recent_image_url = embed.thumbnail.url
+                                    logger.info(f"Found recent thumbnail: {recent_image_url}")
+                                    break
+                        
+                        if recent_image_url:
+                            break
+                except Exception as e:
+                    logger.error(f"Error fetching recent images: {e}")
+
+        # Check for trigger word reactions FIRST (before defer)
+        trigger_reaction = self.enhancer.check_trigger_words(message_content)
+        if trigger_reaction:
+            await send_response(trigger_reaction)
+            logger.info(f"Sent trigger word reaction: {trigger_reaction[:50]}...")
+            return
+
+        # Check for fake glitch
+        glitch = self.enhancer.should_glitch()
+        if glitch:
+            await send_response(glitch)
+            logger.info(f"Sent glitch message: {glitch[:50]}...")
+            return
+
+        # Calculate natural thinking delay
+        thinking_delay = self.enhancer.calculate_thinking_delay(message_content)
+        
+        if interaction:
+            await interaction.response.defer(thinking=True)
+        # Note: For on_message, we already started typing in the listener
+        
+        # Apply thinking delay
+        await asyncio.sleep(thinking_delay)
 
         try:
-            channel_id = interaction.channel_id
-            user_id = interaction.user.id
+            channel_id = channel.id
+            user_id = user.id
+
+            # Update emotional state based on message
+            sentiment_deltas = self.enhancer.analyze_message_sentiment(message_content)
+            for emotion, delta in sentiment_deltas.items():
+                self.enhancer.update_emotion(emotion, delta)
+
+            # Check if we should use a sarcastic short response
+            short_response = self.enhancer.should_use_short_response(message_content)
+            if short_response:
+                await send_response(short_response)
+                logger.info(f"Sent short response: {short_response}")
+                return
 
             # Load conversation history
             history = []
@@ -228,7 +994,7 @@ class ChatCog(commands.Cog):
                 history = await self.history.load_history(channel_id)
 
             # Add user message
-            history.append({"role": "user", "content": message})
+            history.append({"role": "user", "content": message_content})
 
             # Build system prompt with context (TIME FIRST so it's most prominent)
             context_parts = [SystemContextProvider.get_compact_context()]
@@ -242,6 +1008,30 @@ class ChatCog(commands.Cog):
             if self.user_profiles and Config.USER_CONTEXT_IN_CHAT:
                 user_context = await self.user_profiles.get_user_context(user_id)
                 if user_context and user_context != "New user - no profile information yet.":
+                    # Check for behavioral instructions in user profile
+                    profile = await self.user_profiles.load_profile(user.id)
+                    special_instructions = []
+                    
+                    # Look for "when you see" or "always say" type facts
+                    for fact_entry in profile.get("facts", []):
+                        # Handle both dict (new format) and string (legacy format)
+                        if isinstance(fact_entry, dict):
+                            fact_text = fact_entry.get("fact", "")
+                        else:
+                            fact_text = str(fact_entry)
+                            
+                        fact_lower = fact_text.lower()
+                        
+                        # Check for instructions
+                        if any(keyword in fact_lower for keyword in ["when you see", "always say", "greet with", "call them", "respond with", "call me"]):
+                            special_instructions.append(fact_text)
+                    
+                    # If there are special instructions, put them at the VERY TOP
+                    if special_instructions:
+                        instruction_text = "\n".join([f"- {inst}" for inst in special_instructions])
+                        context_parts.insert(0, f"\n[CRITICAL USER-SPECIFIC INSTRUCTIONS - FOLLOW EXACTLY:\n{instruction_text}\n]")
+                    
+                    # Add general user context
                     context_parts.append(f"\n[User Info: {user_context}]")
 
                 # Add affection/relationship context if enabled
@@ -252,20 +1042,39 @@ class ChatCog(commands.Cog):
 
             # Add memory recall from past conversations
             if self.summarizer:
-                memory_context = await self.summarizer.build_memory_context(message)
+                memory_context = await self.summarizer.build_memory_context(message_content)
                 if memory_context:
                     context_parts.append(f"\n{memory_context}")
+
+            # Add RAG context from documents (if enabled and has documents)
+            if self.rag and Config.RAG_IN_CHAT and self.rag.is_enabled():
+                # Boost documents matching the current persona
+                persona_boost = None
+                if self.current_persona:
+                    # Use explicitly configured category or fallback to persona name
+                    persona_boost = self.current_persona.rag_boost_category or self.current_persona.name
+                
+                rag_context = self.rag.get_context(message_content, max_length=1000, boost_category=persona_boost)
+                if rag_context:
+                    # CRITICAL: Insert RAG context at the VERY BEGINNING of context_parts
+                    # This ensures it overrides general personality traits
+                    context_parts.insert(0, f"\n[CRITICAL KNOWLEDGE - USE THIS TO ANSWER:\n{rag_context}\n]")
+
+            # Add emotional state context
+            emotional_context = self.enhancer.get_emotional_context()
+            if emotional_context:
+                context_parts.append(f"\n[{emotional_context}]")
 
             # Track conversation topics for callbacks
             if self.callbacks:
                 await self.callbacks.track_conversation_topic(
                     channel_id,
-                    message,
-                    str(interaction.user.name)
+                    message_content,
+                    str(user.name)
                 )
 
                 # Check for callback opportunities
-                callback_prompt = await self.callbacks.get_callback_opportunity(channel_id, message)
+                callback_prompt = await self.callbacks.get_callback_opportunity(channel_id, message_content)
                 if callback_prompt:
                     context_parts.append(f"\n{callback_prompt}")
 
@@ -276,7 +1085,7 @@ class ChatCog(commands.Cog):
 
             # Track message rhythm
             if self.naturalness:
-                self.naturalness.track_message_rhythm(channel_id, len(message))
+                self.naturalness.track_message_rhythm(channel_id, len(message_content))
 
                 # Add rhythm-based style guidance
                 rhythm_prompt = self.naturalness.get_rhythm_style_prompt(channel_id)
@@ -284,18 +1093,18 @@ class ChatCog(commands.Cog):
                     context_parts.append(f"\n{rhythm_prompt}")
 
                 # Add voice context if applicable
-                if interaction.guild:
-                    voice_context = self.naturalness.get_voice_context(interaction.guild)
+                if channel.guild:
+                    voice_context = self.naturalness.get_voice_context(channel.guild)
                     if voice_context:
                         context_parts.append(f"\n{voice_context}")
 
             # Add web search results if query needs current information
-            if self.web_search and await self.web_search.should_search(message):
+            if self.web_search and await self.web_search.should_search(message_content):
                 try:
-                    search_context = await self.web_search.get_context(message, max_length=800)
+                    search_context = await self.web_search.get_context(message_content, max_length=800)
                     if search_context:
                         context_parts.append(f"\n\n{'='*60}\n[REAL-TIME WEB SEARCH RESULTS - READ THIS EXACTLY]\n{'='*60}\n{search_context}\n{'='*60}\n[END OF WEB SEARCH RESULTS]\n{'='*60}\n\n[CRITICAL INSTRUCTIONS - VIOLATION WILL BE DETECTED]\n1. You MUST ONLY cite information that appears EXACTLY in the search results above\n2. COPY the exact URLs shown - DO NOT modify or create new ones\n3. If search results are irrelevant (e.g., wrong topic, unrelated content), tell the user: 'The search didn't return relevant results'\n4. DO NOT invent Steam pages, Reddit posts, YouTube videos, or patch notes\n5. If you cite a URL, it MUST be copied EXACTLY from the search results\n6. When in doubt, say 'I don't have current information' - DO NOT GUESS\n\nVIOLATING THESE RULES BY INVENTING INFORMATION WILL BE IMMEDIATELY DETECTED.")
-                        logger.info(f"Added web search context for: {message[:50]}...")
+                        logger.info(f"Added web search context for: {message_content[:50]}...")
                 except Exception as e:
                     logger.error(f"Web search failed: {e}")
 
@@ -305,59 +1114,166 @@ class ChatCog(commands.Cog):
                 if mood_context:
                     context_parts.append(f"\n{mood_context}")
 
-            # Add response style guidance
-            context_parts.append("\n[Style: Match the conversation's energy. Keep responses natural and conversational - typically 1-2 sentences for simple questions/comments, longer only when genuinely needed for complex topics or storytelling.]")
+            # Add user-specific adaptation guidance (Learning & Adaptation)
+            if self.pattern_learner:
+                adaptation_guidance = self.pattern_learner.get_adaptation_guidance(user.id)
+                if adaptation_guidance:
+                    context_parts.append(f"\n[User Adaptation: {adaptation_guidance}]")
+                    logger.debug(f"Added adaptation guidance for user {user.id}")
 
-            # Inject all context into system prompt (TIME at the VERY START)
-            context_injected_prompt = f"{''.join(context_parts)}\n\n{self.system_prompt}"
+            # Add AI Decision Engine style guidance if available
+            if suggested_style:
+                style_map = {
+                    "direct": "Be direct and to-the-point in your response.",
+                    "conversational": "Keep the conversation flowing naturally and casually.",
+                    "descriptive": "Provide detailed, descriptive responses.",
+                    "helpful": "Be helpful and informative.",
+                    "casual": "Keep it casual and relaxed.",
+                    "playful": "Be playful and engaging in your tone.",
+                    "corrective": "Provide corrections or clarifications confidently.",
+                    "engaged": "Show genuine interest and engagement with the topic.",
+                    "random": "Feel free to be spontaneous and unpredictable.",
+                }
+                style_guidance = style_map.get(suggested_style, f"Adopt a {suggested_style} tone.")
+                context_parts.append(f"\n[Response Style: {style_guidance}]")
+                logger.debug(f"Added style guidance: {suggested_style}")
+
+            # Add response style guidance for natural conversation
+            context_parts.append("""
+[CONVERSATIONAL STYLE GUIDE - FOLLOW THIS CAREFULLY]
+• FLOW NATURALLY - Don't announce yourself, introduce yourself, or explain yourself
+• NEVER say "As [character name]..." or "[Character name] here" or "Speaking as..."
+• NEVER explain your status/nature mid-conversation ("I'm a god", "being immortal", etc.)
+• Just BE the character - respond naturally without meta-commentary
+• Avoid filler phrases like "Tell me more...", "How interesting...", "Fascinating..." (sounds fake)
+• Talk like a real person would talk
+• Use contractions (I'm, you're, don't, can't) frequently
+• Vary your sentence structure - mix short and long sentences
+• Express genuine reactions: "Oh nice!", "Hmm interesting", "Wait really?"
+• Match the user's energy and tone
+• Response length: Aim for 2-4 sentences typically. Simple acknowledgments can be 1 sentence, but questions about YOU deserve fuller responses with personality
+• NEVER give one-word answers unless it's truly appropriate (rare)
+• It's okay to be uncertain or admit when you don't know something
+• Use informal language when appropriate: "yeah", "nah", "totally", "pretty much"
+• Show personality consistent with your character
+• USE YOUR MEMORIES & KNOWLEDGE: If you see relevant info in the context, use it naturally as if it's your own memory
+]""")
+
+            # Inject all context into system prompt (CHARACTER FIRST, then context)
+            # CRITICAL: Put character instructions FIRST so they're not overridden by context
+            context_injected_prompt = f"{self.system_prompt}\n\n{''.join(context_parts)}"
 
             # Log action for self-awareness
             if self.naturalness:
-                self.naturalness.log_action("chat", f"User: {str(interaction.user.name)}")
+                self.naturalness.log_action("chat", f"User: {str(user.name)}")
 
-            # Get AI response with streaming if enabled
-            if Config.RESPONSE_STREAMING_ENABLED:
-                response = ""
-                response_message = None
-                last_update = time.time()
+            # If we found a recent image, process it with vision
+            if recent_image_url and Config.VISION_ENABLED:
+                try:
+                    logger.info(f"Processing recent image with vision: {recent_image_url}")
+                    # Download the image (returns bytes)
+                    image_data = await download_attachment(recent_image_url)
+                    
+                    if image_data:
+                        # Convert to base64
+                        image_base64 = image_to_base64(image_data)
+                        
+                        # Add image context to the message
+                        vision_message = f"{message_content}\n\n[Note: User is referencing an image from a recent message]"
+                        
+                        # Use vision model
+                        response = await self.ollama.chat_with_vision(
+                            prompt=vision_message,
+                            images=[image_base64],
+                            system_prompt=context_injected_prompt,
+                            model=Config.VISION_MODEL
+                        )
+                        
+                        logger.info("Successfully processed recent image with vision")
+                    else:
+                        # Fallback to text-only if download failed
+                        response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
+                except Exception as e:
+                    logger.error(f"Vision processing failed for recent image: {e}")
+                    # Fallback to text-only
+                    response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
+            else:
+                # Regular text-only chat - Get AI response with streaming if enabled
+                if Config.RESPONSE_STREAMING_ENABLED:
+                    response = ""
+                    response_message = None
+                    last_update = time.time()
 
-                async for chunk in self.ollama.chat_stream(history, system_prompt=context_injected_prompt):
-                    response += chunk
+                    async for chunk in self.ollama.chat_stream(history, system_prompt=context_injected_prompt):
+                        response += chunk
 
-                    # Update message periodically to avoid rate limits
-                    current_time = time.time()
-                    if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
-                        if not response_message:
-                            response_message = await interaction.followup.send(response[:2000])
-                        else:
-                            try:
-                                await response_message.edit(content=response[:2000])
-                            except discord.HTTPException:
-                                pass  # Rate limit hit, skip this update
-                        last_update = current_time
+                        # Update message periodically to avoid rate limits
+                        current_time = time.time()
+                        if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
+                            if interaction:
+                                if not response_message:
+                                    response_message = await interaction.followup.send(response[:2000])
+                                else:
+                                    try:
+                                        await response_message.edit(content=response[:2000])
+                                    except discord.HTTPException:
+                                        pass  # Rate limit hit, skip this update
+                            # Note: We don't stream edits to regular messages as it's spammy/rate-limited
+                            # We only send final for non-interaction messages usually, or maybe 1-2 updates
+                            
+                            last_update = current_time
 
-                # Send final update if needed
-                if response_message:
-                    try:
-                        await response_message.edit(content=response[:2000])
-                    except discord.HTTPException:
+                    # Send final update if needed
+                    if interaction and response_message:
+                        try:
+                            await response_message.edit(content=response[:2000])
+                        except discord.HTTPException:
+                            pass
+                    elif interaction:
+                        await interaction.followup.send(response[:2000])
+                    else:
+                        # For non-interaction, send the final response
+                        # (Streaming to channel.send is not implemented here to avoid spam/ratelimits)
                         pass
                 else:
-                    await interaction.followup.send(response[:2000])
-            else:
-                # Non-streaming fallback
-                response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
+                    # Non-streaming fallback
+                    response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
+
+            # Validate response and fix hallucinations (e.g., wrong times)
+            from utils.response_validator import ResponseValidator
+            # Use agentic tool system to generate response with possible tool calls
+            async def llm_generate(conv):
+                # Ollama chat expects messages list; system prompt already in conv
+                return await self.ollama.chat(conv, system_prompt=None)
+
+            response = await self.agentic_tools.process_with_tools(
+                llm_generate_func=llm_generate,
+                user_message=message_content,
+                system_prompt=context_injected_prompt,
+                max_iterations=3,
+            )
+
+            # Validate and clean response (remove thinking tags, fix hallucinations)
+            response = ResponseValidator.validate_response(response)
 
             # Enhance response with self-awareness features if enabled
             if self.naturalness and Config.SELF_AWARENESS_ENABLED:
                 response = self.naturalness.enhance_response(response, context="chat")
 
+            # Apply AI-first persona framework effects (spontaneity, chaos, etc.)
+            if hasattr(self.bot, 'decision_engine') and self.bot.decision_engine:
+                response = await self.bot.decision_engine.enhance_response(response)
+                logger.debug("Applied decision engine framework effects to response")
+
+            # Clean up response (remove trailing backslashes, extra whitespace)
+            response = response.rstrip('\\').rstrip()
+
             # Update mood based on interaction
             if self.naturalness and Config.MOOD_UPDATE_FROM_INTERACTIONS:
                 # Analyze sentiment
-                sentiment = self._analyze_sentiment(message)
+                sentiment = self._analyze_sentiment(message_content)
                 # Check if conversation is interesting (has questions, details, etc.)
-                is_interesting = len(message.split()) > 10 or "?" in message or "how" in message.lower()
+                is_interesting = len(message_content.split()) > 10 or "?" in message_content or "how" in message_content.lower()
                 self.naturalness.update_mood(sentiment, is_interesting)
 
             # Update user profile - increment interaction count and learn from conversation
@@ -365,17 +1281,17 @@ class ChatCog(commands.Cog):
                 profile = await self.user_profiles.load_profile(user_id)
                 profile["interaction_count"] += 1
                 if not profile.get("username"):
-                    profile["username"] = str(interaction.user.name)
+                    profile["username"] = str(user.name)
                 await self.user_profiles.save_profile(user_id)
 
                 # AI-powered learning from conversation (runs in background)
                 if Config.USER_PROFILES_AUTO_LEARN:
                     # Run in background to avoid blocking response
-                    asyncio.create_task(
+                    self._create_background_task(
                         self._safe_learn_from_conversation(
                             user_id=user_id,
-                            username=str(interaction.user.name),
-                            user_message=message,
+                            username=str(user.name),
+                            user_message=message_content,
                             bot_response=response
                         )
                     )
@@ -383,10 +1299,10 @@ class ChatCog(commands.Cog):
                 # Update affection score if enabled
                 if Config.USER_AFFECTION_ENABLED:
                     # Run in background
-                    asyncio.create_task(
+                    self._create_background_task(
                         self._safe_update_affection(
                             user_id=user_id,
-                            message=message,
+                            message=message_content,
                             bot_response=response
                         )
                     )
@@ -394,29 +1310,36 @@ class ChatCog(commands.Cog):
             # Save to history with user attribution
             if Config.CHAT_HISTORY_ENABLED:
                 await self.history.add_message(
-                    channel_id, "user", message,
-                    username=str(interaction.user.name),
-                    user_id=interaction.user.id
+                    channel_id, "user", message_content,
+                    username=str(user.name),
+                    user_id=user.id
                 )
                 await self.history.add_message(channel_id, "assistant", response)
 
             # Start a conversation session
-            self._start_session(channel_id, interaction.user.id)
+            await self._start_session(channel_id, user.id)
 
             # Send response (handle long messages) - only if not streaming
             if not Config.RESPONSE_STREAMING_ENABLED:
                 chunks = await chunk_message(response)
                 for i, chunk in enumerate(chunks):
                     if i == 0:
-                        await interaction.followup.send(chunk)
+                        await send_response(chunk)
                     else:
-                        await interaction.channel.send(chunk)
+                        await channel.send(chunk)
+            elif not interaction:
+                # If streaming was enabled but we are in non-interaction mode, we haven't sent the final message yet
+                # (because we skipped streaming updates to channel)
+                chunks = await chunk_message(response)
+                for i, chunk in enumerate(chunks):
+                    await channel.send(chunk)
+
 
             # Check if we should auto-summarize
             if self.summarizer and len(history) >= Config.AUTO_SUMMARIZE_THRESHOLD:
                 # Summarize in background (don't block)
                 participants = self.history.get_conversation_participants(history)
-                asyncio.create_task(
+                self._create_background_task(
                     self.summarizer.summarize_and_store(
                         messages=history,
                         channel_id=channel_id,
@@ -428,326 +1351,44 @@ class ChatCog(commands.Cog):
             # Also speak in voice channel if bot is connected and feature is enabled
             if Config.AUTO_REPLY_WITH_VOICE:
                 # Only generate TTS if actually in a voice channel
-                voice_client = interaction.guild.voice_client
+                voice_client = channel.guild.voice_client if channel.guild else None
                 if voice_client and voice_client.is_connected():
-                    await self._speak_response_in_voice(interaction.guild, response)
+                    await self._speak_response_in_voice(channel.guild, response)
+
+            # Record metrics for successful response
+            if hasattr(self.bot, 'metrics'):
+                duration_ms = (time.time() - start_time) * 1000
+                self.bot.metrics.record_response_time(duration_ms)
+                self.bot.metrics.record_message(user.id, channel.id)
 
         except Exception as e:
+            import traceback
             logger.error(f"Chat command failed: {e}")
-            await interaction.followup.send(format_error(e))
+            logger.error(f"Traceback: {traceback.format_exc()}")
 
-    @app_commands.command(name="ask", description="Ask the AI a question (no history)")
-    @app_commands.describe(question="Your question")
-    async def ask(self, interaction: discord.Interaction, question: str):
-        """Ask a one-off question without using conversation history.
+            # Record error in metrics
+            if hasattr(self.bot, 'metrics'):
+                error_type = type(e).__name__
+                self.bot.metrics.record_error(error_type, str(e))
 
-        Args:
-            interaction: Discord interaction
-            question: User's question
-        """
-        await interaction.response.defer(thinking=True)
+            await send_response(format_error(e))
 
-        try:
-            response = await self.ollama.generate(question, system_prompt=self.system_prompt)
-
-            # Send response
-            chunks = await chunk_message(response)
-            for i, chunk in enumerate(chunks):
-                if i == 0:
-                    await interaction.followup.send(chunk)
-                else:
-                    await interaction.channel.send(chunk)
-
-        except Exception as e:
-            logger.error(f"Ask command failed: {e}")
-            await interaction.followup.send(format_error(e))
-
-    @app_commands.command(name="search", description="Search the web for current information")
-    @app_commands.describe(query="What to search for")
-    async def search(self, interaction: discord.Interaction, query: str):
-        """Search the web and get an AI response based on current information.
+    @app_commands.command(name="chat", description="Chat with the AI")
+    @app_commands.describe(message="Your message to the AI")
+    @app_commands.checks.cooldown(1, 3.0)  # 1 use per 3 seconds per user
+    async def chat(self, interaction: discord.Interaction, message: str):
+        """Chat with Ollama AI.
 
         Args:
             interaction: Discord interaction
-            query: Search query
+            message: User's message
         """
-        await interaction.response.defer(thinking=True)
-
-        try:
-            if not self.web_search:
-                await interaction.followup.send("❌ Web search is not enabled on this bot.", ephemeral=True)
-                return
-
-            # Perform web search
-            search_context = await self.web_search.get_context(query, max_length=1000)
-
-            if not search_context:
-                await interaction.followup.send(f"❌ No search results found for: **{query}**")
-                return
-
-            # Build prompt with search results
-            prompt = f"[IMPORTANT - REAL-TIME WEB SEARCH RESULTS - USE THIS CURRENT INFORMATION TO ANSWER THE QUESTION]\n{search_context}\n[END WEB SEARCH RESULTS - Base your response on these actual current facts]\n\nUser question: {query}"
-
-            # Get AI response
-            response = await self.ollama.generate(prompt, system_prompt=self.system_prompt)
-
-            # Send response
-            chunks = await chunk_message(response)
-            for i, chunk in enumerate(chunks):
-                if i == 0:
-                    await interaction.followup.send(f"🔍 **Search results for:** {query}\n\n{chunk}")
-                else:
-                    await interaction.channel.send(chunk)
-
-        except Exception as e:
-            logger.error(f"Search command failed: {e}")
-            await interaction.followup.send(format_error(e))
-
-    @app_commands.command(name="search_stats", description="View query optimization statistics")
-    async def search_stats(self, interaction: discord.Interaction):
-        """Show statistics about query optimization and search success rates.
-
-        Args:
-            interaction: Discord interaction
-        """
-        try:
-            if not self.web_search or not self.web_search.optimizer:
-                await interaction.response.send_message(
-                    "❌ Query optimization is not enabled.",
-                    ephemeral=True
-                )
-                return
-
-            await interaction.response.defer(ephemeral=True, thinking=True)
-
-            # Get stats from optimizer
-            stats = await self.web_search.optimizer.get_stats()
-
-            # Create embed
-            embed = discord.Embed(
-                title="🧠 Query Optimization Stats",
-                description="Statistics about web search query optimization and learning",
-                color=discord.Color.blue()
-            )
-
-            embed.add_field(
-                name="📊 Overview",
-                value=f"**Total Queries:** {stats['total_queries']}\n"
-                      f"**Successful:** {stats['successful_queries']}\n"
-                      f"**Success Rate:** {stats['success_rate']*100:.1f}%",
-                inline=False
-            )
-
-            embed.add_field(
-                name="🎯 Optimization Methods",
-                value=f"**Pattern Matches:** {stats['pattern_matches']}\n"
-                      f"**Learned Transformations:** {stats['learned_matches']}\n"
-                      f"**Fallback Used:** {stats['fallback_used']}",
-                inline=False
-            )
-
-            embed.set_footer(text="The bot learns from successful searches to improve future queries")
-
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"Search stats command failed: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="export_chat", description="Export conversation history to a file")
-    async def export_chat(self, interaction: discord.Interaction):
-        """Export conversation history for this channel.
-
-        Args:
-            interaction: Discord interaction
-        """
-        await interaction.response.defer(ephemeral=True)
-
-        try:
-            history = await self.history.load_history(interaction.channel_id)
-            if not history:
-                await interaction.followup.send("❌ No conversation history found for this channel.", ephemeral=True)
-                return
-
-            # Create export file
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"chat_export_{interaction.channel_id}_{timestamp}.json"
-            filepath = Config.TEMP_DIR / filename
-            
-            async with aiofiles.open(filepath, "w") as f:
-                await f.write(json.dumps(history, indent=2))
-
-            # Send file
-            await interaction.followup.send(
-                f"✅ Here is the conversation export for <#{interaction.channel_id}>:",
-                file=discord.File(filepath, filename=filename),
-                ephemeral=True
-            )
-            
-            # Cleanup
-            # filepath.unlink() # Keep for a bit or let memory manager handle it
-
-        except Exception as e:
-            logger.error(f"Export chat failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="import_chat", description="Import conversation history from a file")
-    @app_commands.describe(file="The JSON file to import")
-    async def import_chat(self, interaction: discord.Interaction, file: discord.Attachment):
-        """Import conversation history from a JSON file.
-
-        Args:
-            interaction: Discord interaction
-            file: JSON file attachment
-        """
-        await interaction.response.defer(ephemeral=True)
-
-        try:
-            if not file.filename.endswith('.json'):
-                await interaction.followup.send("❌ Please upload a JSON file.", ephemeral=True)
-                return
-
-            # Read file content
-            content = await file.read()
-            try:
-                history = json.loads(content)
-            except json.JSONDecodeError:
-                await interaction.followup.send("❌ Invalid JSON file.", ephemeral=True)
-                return
-
-            if not isinstance(history, list):
-                await interaction.followup.send("❌ Invalid format: Root must be a list of messages.", ephemeral=True)
-                return
-
-            # Validate structure (simple check)
-            if history and not all(isinstance(m, dict) and "role" in m and "content" in m for m in history):
-                await interaction.followup.send("❌ Invalid format: Messages must have 'role' and 'content' fields.", ephemeral=True)
-                return
-
-            # Save to history
-            await self.history.save_history(interaction.channel_id, history)
-
-            await interaction.followup.send(
-                f"✅ Successfully imported {len(history)} messages to <#{interaction.channel_id}>.",
-                ephemeral=True
-            )
-
-        except Exception as e:
-            logger.error(f"Import chat failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="summarize_now", description="Force a summary of the current conversation")
-    async def summarize_now(self, interaction: discord.Interaction):
-        """Force a summary of the current conversation immediately.
-
-        Args:
-            interaction: Discord interaction
-        """
-        await interaction.response.defer(thinking=True)
-
-        try:
-            if not self.summarizer:
-                await interaction.followup.send("❌ Summarization service is not enabled.", ephemeral=True)
-                return
-
-            history = await self.history.load_history(interaction.channel_id)
-            if not history:
-                await interaction.followup.send("❌ No history to summarize.", ephemeral=True)
-                return
-
-            # Trigger summarization
-            summary_data = await self.summarizer.summarize_and_store(
-                messages=history,
-                channel_id=interaction.channel_id,
-                participants=[interaction.user.name], # Simple single user assumption for now
-                store_in_rag=True,
-                store_in_file=True
-            )
-
-            if summary_data:
-                await interaction.followup.send(
-                    f"✅ Conversation summarized and stored in memory!\n\n**Summary:**\n{summary_data['summary']}"
-                )
-            else:
-                await interaction.followup.send("❌ Failed to generate summary (possibly too short).")
-
-        except Exception as e:
-            logger.error(f"Summarize now failed: {e}")
-            await interaction.followup.send(format_error(e))
-
-    @app_commands.command(name="recall", description="Search past conversation summaries")
-    @app_commands.describe(query="What to search for")
-    async def recall(self, interaction: discord.Interaction, query: str):
-        """Search past conversation summaries.
-
-        Args:
-            interaction: Discord interaction
-            query: Search query
-        """
-        await interaction.response.defer(thinking=True)
-
-        try:
-            if not self.summarizer:
-                await interaction.followup.send(
-                    "❌ Conversation summarization is not enabled.",
-                    ephemeral=True
-                )
-                return
-
-            memories = await self.summarizer.retrieve_relevant_memories(query, max_results=3)
-
-            if not memories:
-                await interaction.followup.send(
-                    f"❌ No relevant memories found for: **{query}**",
-                    ephemeral=True
-                )
-                return
-
-            embed = discord.Embed(
-                title=f"🧠 Memory Recall: {query}",
-                color=discord.Color.gold()
-            )
-
-            for i, memory in enumerate(memories):
-                # Extract summary part if possible to make it cleaner
-                content = memory
-                if "SUMMARY:" in memory:
-                    parts = memory.split("SUMMARY:")
-                    if len(parts) > 1:
-                        content = parts[1].split("[Stored:")[0].strip()
-                
-                # Truncate if too long
-                if len(content) > 1000:
-                    content = content[:997] + "..."
-
-                embed.add_field(
-                    name=f"Memory {i+1}",
-                    value=content,
-                    inline=False
-                )
-
-            await interaction.followup.send(embed=embed)
-
-        except Exception as e:
-            logger.error(f"Recall command failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="clear_history", description="Clear conversation history for this channel")
-    async def clear_history(self, interaction: discord.Interaction):
-        """Clear chat history for the current channel.
-
-        Args:
-            interaction: Discord interaction
-        """
-        try:
-            channel_id = interaction.channel_id
-            await self.history.clear_history(channel_id)
-            await interaction.response.send_message(
-                format_success("Conversation history cleared!"), ephemeral=True
-            )
-        except Exception as e:
-            logger.error(f"Clear history failed: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
+        await self._handle_chat_response(
+            message_content=message,
+            channel=interaction.channel,
+            user=interaction.user,
+            interaction=interaction
+        )
 
     @app_commands.command(name="ambient", description="Toggle or check ambient mode status")
     @app_commands.describe(action="Action to perform")
@@ -845,8 +1486,8 @@ class ChatCog(commands.Cog):
         """
         try:
             channel_id = interaction.channel_id
-            if self._is_session_active(channel_id):
-                self._end_session(channel_id)
+            if await self._is_session_active(channel_id):
+                await self._end_session(channel_id)
                 timeout_minutes = Config.CONVERSATION_TIMEOUT // 60
                 await interaction.response.send_message(
                     format_success(f"Conversation session ended. Use @mention or `/chat` to start a new session."),
@@ -861,636 +1502,7 @@ class ChatCog(commands.Cog):
             logger.error(f"End session failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="set_model", description="Change the Ollama model")
-    @app_commands.describe(model="Model name (e.g., llama3.2, mistral, etc.)")
-    async def set_model(self, interaction: discord.Interaction, model: str):
-        """Change the active Ollama model.
-
-        Args:
-            interaction: Discord interaction
-            model: Name of the model to use
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            # Check if model is available
-            models = await self.ollama.list_models()
-
-            if model not in models:
-                available = ", ".join(models) if models else "None found"
-                await interaction.followup.send(
-                    f"❌ Model '{model}' not found.\n\nAvailable models: {available}",
-                    ephemeral=True,
-                )
-                return
-
-            # Update model
-            self.ollama.model = model
-            await interaction.followup.send(
-                format_success(f"Model changed to: **{model}**"), ephemeral=True
-            )
-
-        except Exception as e:
-            logger.error(f"Set model failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="models", description="List available Ollama models")
-    async def models(self, interaction: discord.Interaction):
-        """List all available models.
-
-        Args:
-            interaction: Discord interaction
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            models = await self.ollama.list_models()
-
-            if not models:
-                await interaction.followup.send("❌ No models found on Ollama server.", ephemeral=True)
-                return
-
-            current = self.ollama.model
-            model_list = "\n".join([f"{'🟢' if m == current else '⚪'} {m}" for m in models])
-
-            embed = discord.Embed(
-                title="Available Ollama Models",
-                description=model_list,
-                color=discord.Color.blue(),
-            )
-            embed.set_footer(text=f"Current model: {current}")
-
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"Models command failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="set_persona", description="Change the bot's personality/character")
-    @app_commands.describe(persona="Persona name (chief, arbiter, gothmommy, etc.)")
-    async def set_persona(self, interaction: discord.Interaction, persona: str):
-        """Change the bot's personality using persona configuration.
-
-        Args:
-            interaction: Discord interaction
-            persona: Name of the persona
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            # Load persona config
-            persona_config = self.persona_loader.get_persona(persona)
-
-            if not persona_config:
-                # List available personas
-                available = self.persona_loader.list_personas()
-                available_str = ", ".join(available) if available else "None found"
-
-                await interaction.followup.send(
-                    f"❌ Persona '{persona}' not found.\n\n**Available personas:** {available_str}\n\n"
-                    f"Use `/list_personas` for more details.",
-                    ephemeral=True,
-                )
-                return
-
-            if not persona_config.prompt_text:
-                await interaction.followup.send(
-                    f"❌ Persona '{persona}' has no prompt text.",
-                    ephemeral=True,
-                )
-                return
-
-            # Update the system prompt
-            self.system_prompt = persona_config.prompt_text
-            self.current_persona = persona_config
-            logger.info(f"Changed persona to: {persona_config.display_name}")
-
-            # Switch voice based on config
-            voice_cog = self.bot.get_cog("VoiceCog")
-            voice_info = []
-            if voice_cog and voice_cog.tts:
-                # Apply voice settings based on TTS engine
-                if Config.TTS_ENGINE == "kokoro":
-                    voice_cog.tts.kokoro_voice = persona_config.voice.kokoro_voice
-                    voice_cog.tts.kokoro_speed = persona_config.voice.kokoro_speed
-                    voice_info.append(f"🎤 Voice: {persona_config.voice.kokoro_voice} (speed: {persona_config.voice.kokoro_speed}x)")
-                else:  # Edge TTS
-                    voice_cog.tts.default_voice = persona_config.voice.edge_voice
-                    voice_cog.tts.rate = persona_config.voice.edge_rate
-                    voice_cog.tts.volume = persona_config.voice.edge_volume
-                    voice_info.append(f"🎤 Voice: {persona_config.voice.edge_voice}")
-
-                logger.info(f"Applied voice settings for {persona}")
-
-            # Apply RVC settings if enabled
-            rvc_info = []
-            if voice_cog and voice_cog.rvc and persona_config.rvc.enabled:
-                if persona_config.rvc.model:
-                    # Note: This sets the default model, actual usage depends on RVC being enabled
-                    Config.DEFAULT_RVC_MODEL = persona_config.rvc.model
-                    rvc_info.append(f"🔊 RVC Model: {persona_config.rvc.model}")
-                    logger.info(f"Set RVC model to: {persona_config.rvc.model}")
-
-            # Clear history if configured
-            if persona_config.behavior.clear_history_on_switch:
-                await self.history.clear_history(interaction.channel_id)
-
-            # Build response message
-            msg_parts = [f"✅ Persona changed to: **{persona_config.display_name}**"]
-            if persona_config.description:
-                msg_parts.append(f"_{persona_config.description}_")
-            if voice_info:
-                msg_parts.extend(voice_info)
-            if rvc_info:
-                msg_parts.extend(rvc_info)
-            if persona_config.behavior.clear_history_on_switch:
-                msg_parts.append("🗑️ Conversation history cleared")
-            if persona_config.tags:
-                msg_parts.append(f"🏷️ Tags: {', '.join(persona_config.tags)}")
-
-            await interaction.followup.send(
-                "\n".join(msg_parts),
-                ephemeral=True,
-            )
-
-        except Exception as e:
-            logger.error(f"Set persona failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="list_personas", description="List all available bot personalities")
-    async def list_personas(self, interaction: discord.Interaction):
-        """List all available persona/prompt files.
-
-        Args:
-            interaction: Discord interaction
-        """
-        try:
-            prompts_dir = Path("prompts")
-            if not prompts_dir.exists():
-                await interaction.response.send_message(
-                    "❌ Prompts directory not found.",
-                    ephemeral=True,
-                )
-                return
-
-            # Get all .txt files in prompts directory
-            prompt_files = sorted(prompts_dir.glob("*.txt"))
-
-            if not prompt_files:
-                await interaction.response.send_message(
-                    "❌ No persona files found in prompts/ directory.",
-                    ephemeral=True,
-                )
-                return
-
-            # Build embed with persona descriptions
-            embed = discord.Embed(
-                title="🎭 Available Bot Personas",
-                description="Use `/set_persona <name>` to switch personalities",
-                color=discord.Color.purple(),
-            )
-
-            # Parse each file for description (first 100 chars)
-            for prompt_file in prompt_files:
-                persona_name = prompt_file.stem
-                try:
-                    with open(prompt_file, 'r', encoding='utf-8') as f:
-                        content = f.read().strip()
-                        # Get first line or first 100 chars as preview
-                        preview = content.split('\n')[0][:100]
-                        if len(content.split('\n')[0]) > 100:
-                            preview += "..."
-
-                        embed.add_field(
-                            name=persona_name,
-                            value=preview or "No description",
-                            inline=False,
-                        )
-                except Exception as e:
-                    embed.add_field(
-                        name=persona_name,
-                        value=f"Error loading: {e}",
-                        inline=False,
-                    )
-
-            # Show current persona
-            current_prompt_file = Path(Config.SYSTEM_PROMPT_FILE).stem
-            embed.set_footer(text=f"Current persona: {current_prompt_file}")
-
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"List personas failed: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="add_persona", description="Create a new bot persona")
-    @app_commands.describe(
-        name="Persona name (lowercase, no spaces)",
-        display_name="Display name for the persona",
-        description="Short description of the persona",
-        prompt="The personality/system prompt for the persona",
-        kokoro_voice="Kokoro voice to use (e.g., am_adam, af_bella)",
-    )
-    async def add_persona(
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        display_name: str,
-        description: str,
-        prompt: str,
-        kokoro_voice: Optional[str] = "am_adam",
-    ):
-        """Create a new persona with configuration.
-
-        Args:
-            interaction: Discord interaction
-            name: Persona identifier (lowercase, no spaces)
-            display_name: Human-readable name
-            description: Short description
-            prompt: System prompt for the persona
-            kokoro_voice: Kokoro voice to use
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            # Validate name (lowercase, alphanumeric + underscores only)
-            if not re.match(r'^[a-z0-9_]+$', name):
-                await interaction.followup.send(
-                    "❌ Persona name must be lowercase alphanumeric with underscores only (e.g., 'my_persona')",
-                    ephemeral=True,
-                )
-                return
-
-            prompts_dir = Path("prompts")
-            prompts_dir.mkdir(parents=True, exist_ok=True)
-
-            # Check if persona already exists
-            json_file = prompts_dir / f"{name}.json"
-            txt_file = prompts_dir / f"{name}.txt"
-
-            if json_file.exists() or txt_file.exists():
-                await interaction.followup.send(
-                    f"❌ Persona '{name}' already exists. Use `/edit_persona` to modify it.",
-                    ephemeral=True,
-                )
-                return
-
-            # Create persona JSON configuration
-            persona_config = {
-                "name": name,
-                "display_name": display_name,
-                "description": description,
-                "prompt_file": f"{name}.txt",
-                "voice": {
-                    "kokoro_voice": kokoro_voice,
-                    "kokoro_speed": 1.0,
-                    "edge_voice": "en-US-AriaNeural",
-                    "edge_rate": "+0%",
-                    "edge_volume": "+0%"
-                },
-                "rvc": {
-                    "enabled": False,
-                    "model": None,
-                    "pitch_shift": 0
-                },
-                "behavior": {
-                    "clear_history_on_switch": True,
-                    "auto_reply_enabled": True,
-                    "affection_multiplier": 1.0
-                },
-                "tags": []
-            }
-
-            # Write JSON config
-            with open(json_file, 'w', encoding='utf-8') as f:
-                json.dump(persona_config, f, indent=2)
-
-            # Write prompt text file
-            with open(txt_file, 'w', encoding='utf-8') as f:
-                f.write(prompt)
-
-            # Reload persona loader to include new persona
-            self.persona_loader = PersonaLoader()
-
-            await interaction.followup.send(
-                f"✅ Persona **{display_name}** created successfully!\n\n"
-                f"**Name:** {name}\n"
-                f"**Description:** {description}\n"
-                f"**Voice:** {kokoro_voice}\n\n"
-                f"Use `/set_persona {name}` to activate it.\n"
-                f"Use `/edit_persona {name}` to modify settings.",
-                ephemeral=True,
-            )
-
-            logger.info(f"Created new persona: {name} ({display_name})")
-
-        except Exception as e:
-            logger.error(f"Add persona failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="edit_persona", description="Edit an existing persona's settings")
-    @app_commands.describe(
-        name="Persona name to edit",
-        display_name="New display name (optional)",
-        description="New description (optional)",
-        kokoro_voice="New Kokoro voice (optional)",
-        kokoro_speed="Voice speed multiplier (optional, e.g., 1.0, 1.2)",
-    )
-    async def edit_persona(
-        self,
-        interaction: discord.Interaction,
-        name: str,
-        display_name: Optional[str] = None,
-        description: Optional[str] = None,
-        kokoro_voice: Optional[str] = None,
-        kokoro_speed: Optional[float] = None,
-    ):
-        """Edit an existing persona's configuration.
-
-        Args:
-            interaction: Discord interaction
-            name: Persona name to edit
-            display_name: New display name
-            description: New description
-            kokoro_voice: New Kokoro voice
-            kokoro_speed: New voice speed
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            prompts_dir = Path("prompts")
-            json_file = prompts_dir / f"{name}.json"
-
-            if not json_file.exists():
-                await interaction.followup.send(
-                    f"❌ Persona '{name}' not found. Use `/add_persona` to create it.",
-                    ephemeral=True,
-                )
-                return
-
-            # Load existing config
-            with open(json_file, 'r', encoding='utf-8') as f:
-                persona_config = json.load(f)
-
-            # Track what was changed
-            changes = []
-
-            # Update fields if provided
-            if display_name:
-                persona_config["display_name"] = display_name
-                changes.append(f"Display name → {display_name}")
-
-            if description:
-                persona_config["description"] = description
-                changes.append(f"Description → {description}")
-
-            if kokoro_voice:
-                persona_config["voice"]["kokoro_voice"] = kokoro_voice
-                changes.append(f"Kokoro voice → {kokoro_voice}")
-
-            if kokoro_speed is not None:
-                persona_config["voice"]["kokoro_speed"] = kokoro_speed
-                changes.append(f"Voice speed → {kokoro_speed}x")
-
-            if not changes:
-                await interaction.followup.send(
-                    "❌ No changes specified. Provide at least one parameter to update.",
-                    ephemeral=True,
-                )
-                return
-
-            # Save updated config
-            with open(json_file, 'w', encoding='utf-8') as f:
-                json.dump(persona_config, f, indent=2)
-
-            # Reload persona loader
-            self.persona_loader = PersonaLoader()
-
-            changes_text = "\n".join([f"• {c}" for c in changes])
-            await interaction.followup.send(
-                f"✅ Persona **{name}** updated successfully!\n\n"
-                f"**Changes:**\n{changes_text}\n\n"
-                f"Use `/set_persona {name}` to apply the changes.",
-                ephemeral=True,
-            )
-
-            logger.info(f"Updated persona: {name} - {len(changes)} changes")
-
-        except Exception as e:
-            logger.error(f"Edit persona failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="my_profile", description="View your user profile and affection level")
-    async def my_profile(self, interaction: discord.Interaction):
-        """Show the user their profile information.
-
-        Args:
-            interaction: Discord interaction
-        """
-        try:
-            if not self.user_profiles:
-                await interaction.response.send_message(
-                    "❌ User profiles are not enabled on this bot.",
-                    ephemeral=True
-                )
-                return
-
-            user_id = interaction.user.id
-            profile = await self.user_profiles.load_profile(user_id)
-
-            # Create embed
-            embed = discord.Embed(
-                title=f"📊 Profile: {interaction.user.name}",
-                color=discord.Color.blue(),
-            )
-
-            # Basic stats
-            embed.add_field(
-                name="📈 Stats",
-                value=f"**Messages:** {profile.get('interaction_count', 0)}\n"
-                      f"**First Met:** {profile.get('first_met', 'Unknown')[:10]}",
-                inline=False
-            )
-
-            # Traits
-            if profile.get("traits"):
-                traits_str = ", ".join(profile["traits"][:10])
-                embed.add_field(
-                    name="🎭 Personality Traits",
-                    value=traits_str,
-                    inline=False
-                )
-
-            # Interests
-            if profile.get("interests"):
-                interests_str = ", ".join(profile["interests"][:10])
-                embed.add_field(
-                    name="❤️ Interests",
-                    value=interests_str,
-                    inline=False
-                )
-
-            # Preferences
-            if profile.get("preferences"):
-                prefs_str = "\n".join([f"**{k}:** {v}" for k, v in list(profile["preferences"].items())[:5]])
-                embed.add_field(
-                    name="⚙️ Preferences",
-                    value=prefs_str or "None yet",
-                    inline=False
-                )
-
-            # Affection/Relationship
-            if profile.get("affection") and Config.USER_AFFECTION_ENABLED:
-                affection = profile["affection"]
-                level = affection.get("level", 0)
-                stage = affection.get("relationship_stage", "stranger")
-
-                # Create affection bar
-                bar_length = 10
-                filled = int((level / 100) * bar_length)
-                bar = "█" * filled + "░" * (bar_length - filled)
-
-                embed.add_field(
-                    name="💖 Relationship",
-                    value=f"**Stage:** {stage.replace('_', ' ').title()}\n"
-                          f"**Affection:** {bar} {level}/100\n"
-                          f"**Positive:** {affection.get('positive_interactions', 0)} | "
-                          f"**Negative:** {affection.get('negative_interactions', 0)}",
-                    inline=False
-                )
-
-            # Memorable quotes
-            if profile.get("memorable_quotes"):
-                last_quote = profile["memorable_quotes"][-1]
-                embed.add_field(
-                    name="💬 Last Memorable Quote",
-                    value=f"\"{last_quote['quote']}\"",
-                    inline=False
-                )
-
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"My profile failed: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="relationship", description="Check your relationship status with the bot")
-    async def relationship(self, interaction: discord.Interaction):
-        """Show detailed relationship/affection info.
-
-        Args:
-            interaction: Discord interaction
-        """
-        try:
-            if not self.user_profiles or not Config.USER_AFFECTION_ENABLED:
-                await interaction.response.send_message(
-                    "❌ Affection system is not enabled on this bot.",
-                    ephemeral=True
-                )
-                return
-
-            user_id = interaction.user.id
-            profile = await self.user_profiles.load_profile(user_id)
-            affection = profile.get("affection", {})
-
-            if not affection:
-                await interaction.response.send_message(
-                    "❌ No affection data found. Chat with the bot to build a relationship!",
-                    ephemeral=True
-                )
-                return
-
-            level = affection.get("level", 0)
-            stage = affection.get("relationship_stage", "stranger")
-
-            # Create embed
-            embed = discord.Embed(
-                title=f"💖 Relationship with {self.bot.user.name}",
-                color=discord.Color.from_rgb(255, 105, 180),  # Pink
-            )
-
-            # Affection bar
-            bar_length = 20
-            filled = int((level / 100) * bar_length)
-            bar = "█" * filled + "░" * (bar_length - filled)
-
-            embed.add_field(
-                name="Affection Level",
-                value=f"{bar}\n**{level}/100** - {stage.replace('_', ' ').title()}",
-                inline=False
-            )
-
-            # Interaction stats
-            embed.add_field(
-                name="Interaction History",
-                value=f"**Total Conversations:** {profile.get('interaction_count', 0)}\n"
-                      f"**Positive Interactions:** {affection.get('positive_interactions', 0)}\n"
-                      f"**Negative Interactions:** {affection.get('negative_interactions', 0)}",
-                inline=False
-            )
-
-            # Relationship description
-            stage_descriptions = {
-                "stranger": "We just met! Keep chatting to get to know each other better.",
-                "acquaintance": "We're getting to know each other. I enjoy our conversations!",
-                "friend": "We're friends! I look forward to talking with you.",
-                "close_friend": "You're a close friend! I really enjoy our time together.",
-                "best_friend": "You're my best friend! I genuinely care about you and love our conversations.",
-            }
-
-            description = stage_descriptions.get(stage, "Unknown relationship stage.")
-            embed.add_field(
-                name="How I Feel",
-                value=description,
-                inline=False
-            )
-
-            # Last interaction
-            if affection.get("last_interaction"):
-                last = affection["last_interaction"][:19]
-                embed.set_footer(text=f"Last interaction: {last}")
-
-            await interaction.response.send_message(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"Relationship command failed: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="status", description="Check AI status")
-    async def status(self, interaction: discord.Interaction):
-        """Check Ollama service status.
-
-        Args:
-            interaction: Discord interaction
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            healthy = await self.ollama.check_health()
-
-            if healthy:
-                embed = discord.Embed(
-                    title="🟢 AI Status: Online",
-                    color=discord.Color.green(),
-                )
-                embed.add_field(name="Server", value=self.ollama.host)
-                embed.add_field(name="Model", value=self.ollama.model)
-                embed.add_field(name="Temperature", value=f"{self.ollama.temperature}")
-            else:
-                embed = discord.Embed(
-                    title="🔴 AI Status: Offline",
-                    description=f"Cannot connect to Ollama at {self.ollama.host}",
-                    color=discord.Color.red(),
-                )
-
-            await interaction.followup.send(embed=embed, ephemeral=True)
-
-        except Exception as e:
-            logger.error(f"Status command failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
+    async def _disabled_on_message(self, message: discord.Message):
         """Listen for messages to enable auto-reply with text and TTS.
 
         Supports conversation sessions: once started with @mention or /chat,
@@ -1503,13 +1515,8 @@ class ChatCog(commands.Cog):
         if message.author.bot:
             return
 
-        # Track message for ambient mode (do this before other checks)
-        if hasattr(self.bot, 'ambient_mode') and self.bot.ambient_mode:
-            await self.bot.ambient_mode.on_message(message)
-
-        # Process for naturalness (reactions, etc.)
-        if hasattr(self.bot, 'naturalness') and self.bot.naturalness:
-            await self.bot.naturalness.on_message(message)
+        # NOTE: ambient_mode and naturalness are called from main.py on_message
+        # Don't duplicate those calls here to avoid double processing
 
         # Ignore messages with #ignore tag
         if "#ignore" in message.content.lower():
@@ -1523,7 +1530,7 @@ class ChatCog(commands.Cog):
             return
 
         # Check if there's an active session OR bot is mentioned
-        is_session_active = self._is_session_active(message.channel.id)
+        is_session_active = await self._is_session_active(message.channel.id)
         is_mentioned = self.bot.user in message.mentions
 
         # Only respond if mentioned OR session is active
@@ -1534,13 +1541,66 @@ class ChatCog(commands.Cog):
         # If session is active, this will refresh it
 
         try:
+            # Check for active multi-turn conversations FIRST
+            user_content = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
+
+            if self.conversation_manager:
+                conversation = self.conversation_manager.get_conversation(message.channel.id)
+                if conversation:
+                    # Process response in multi-turn conversation
+                    result = await self.conversation_manager.process_response(
+                        message.channel.id,
+                        message.author.id,
+                        user_content
+                    )
+
+                    if result:
+                        if result['type'] == 'next_step':
+                            await message.channel.send(
+                                f"**Step {result['step_number']}/{result['total_steps']}**\n{result['prompt']}"
+                            )
+                        elif result['type'] == 'completed':
+                            await message.channel.send(result['message'])
+                            # Handle completed conversation data here
+                        elif result['type'] == 'invalid':
+                            remaining = result.get('attempts_remaining', 0)
+                            await message.channel.send(
+                                f"{result['message']}\n*({remaining} attempts remaining)*"
+                            )
+                        elif result['type'] in ['cancelled', 'failed']:
+                            await message.channel.send(result['message'])
+                        elif result['type'] == 'error':
+                            await message.channel.send(result['message'])
+
+                        return  # Multi-turn conversation handled
+
+            # Check for natural language intents
+            if self.intent_recognition:
+                server_id = message.guild.id if message.guild else None
+                intent = self.intent_recognition.detect_intent(
+                    user_content,
+                    bot_mentioned=is_mentioned,
+                    server_id=server_id
+                )
+
+                # Handle intents that don't need AI processing
+                if intent and self.intent_handler:
+                    logger.info(f"Detected intent: {intent.intent_type} (confidence: {intent.confidence}) for message: '{user_content[:50]}'")
+                    handled = await self.intent_handler.handle_intent(intent, message)
+                    logger.info(f"Intent {intent.intent_type} handled: {handled}")
+                    if handled:
+                        # Intent was fully handled, no need for AI response
+                        # Report success to learner
+                        if self.intent_recognition.learner:
+                            self.intent_recognition.report_success(user_content, intent.intent_type)
+                        return
+                    else:
+                        logger.info(f"Intent {intent.intent_type} not handled, falling through to AI")
+
             # Load history
             history = []
             if Config.CHAT_HISTORY_ENABLED:
                 history = await self.history.load_history(message.channel.id)
-
-            # Add user message
-            user_content = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
             history.append({"role": "user", "content": user_content})
 
             # Build system prompt with context (TIME FIRST so it's most prominent)
@@ -1592,11 +1652,44 @@ class ChatCog(commands.Cog):
                 except Exception as e:
                     logger.error(f"Web search failed: {e}")
 
-            # Add response style guidance
-            context_parts.append("\n[Style: Match the conversation's energy. Keep responses natural and conversational - typically 1-2 sentences for simple questions/comments, longer only when genuinely needed for complex topics or storytelling.]")
+            # Add memory recall from past conversations
+            if self.summarizer:
+                memory_context = await self.summarizer.build_memory_context(user_content)
+                if memory_context:
+                    context_parts.append(f"\n{memory_context}")
 
-            # Inject all context into system prompt (TIME at the VERY START)
-            context_injected_prompt = f"{''.join(context_parts)}\n\n{self.system_prompt}"
+            # Add RAG context from documents (if enabled and has documents)
+            if self.rag and Config.RAG_IN_CHAT and self.rag.is_enabled():
+                rag_context = self.rag.get_context(user_content, max_length=400)
+                if rag_context:
+                    context_parts.append(f"\n[Knowledge Base: {rag_context}]")
+
+            # Add response style guidance for natural conversation
+            context_parts.append("""
+[CONVERSATIONAL STYLE GUIDE - FOLLOW THIS CAREFULLY]
+• FLOW NATURALLY - Don't announce yourself, introduce yourself, or explain yourself
+• NEVER say "As [character name]..." or "[Character name] here" or "Speaking as..."
+• NEVER explain your status/nature mid-conversation ("I'm a god", "being immortal", etc.)
+• Just BE the character - respond naturally without meta-commentary
+• Avoid filler phrases like "Tell me more...", "How interesting...", "Fascinating..." (sounds fake)
+• Talk like a real person, not a formal assistant
+• Use contractions (I'm, you're, don't, can't) frequently
+• Vary your sentence structure - mix short and long sentences
+• Express genuine reactions: "Oh nice!", "Hmm interesting", "Wait really?"
+• Don't be overly helpful or formal - be casual and friendly
+• Match the user's energy and tone
+• Response length: Aim for 2-4 sentences typically. Simple acknowledgments can be 1 sentence, but questions about YOU deserve fuller responses with personality
+• NEVER give one-word answers unless it's truly appropriate (rare)
+• It's okay to be uncertain or admit when you don't know something
+• Use informal language when appropriate: "yeah", "nah", "totally", "pretty much"
+• Show personality consistent with your character
+• NEVER say "Let me know if you need anything else!" - that's robotic
+• USE YOUR MEMORIES & KNOWLEDGE: If you see relevant info in the context, use it naturally as if it's your own memory
+]""")
+
+            # Inject all context into system prompt (CHARACTER FIRST, then context)
+            # CRITICAL: Put character instructions FIRST so they're not overridden by context
+            context_injected_prompt = f"{self.system_prompt}\n\n{''.join(context_parts)}"
 
             # Update dashboard status
             if hasattr(self.bot, 'web_dashboard'):
@@ -1671,7 +1764,7 @@ class ChatCog(commands.Cog):
                 # 1. Message Count Trigger (existing)
                 if len(history) >= Config.AUTO_SUMMARIZE_THRESHOLD:
                     # Trigger background summarization
-                    asyncio.create_task(self.summarizer.summarize_and_store(
+                    self._create_background_task(self.summarizer.summarize_and_store(
                         messages=history,
                         channel_id=message.channel.id,
                         participants=[message.author.name],
@@ -1679,11 +1772,11 @@ class ChatCog(commands.Cog):
                     ))
                     # Optionally clear history after summary to start fresh context
                     # await self.history.clear_history(message.channel.id)
-                
+
                 # 2. Topic Change / Conclusion Trigger (Smart)
                 # If the bot says goodbye or wraps up, it's a good time to summarize
                 elif any(phrase in response.lower() for phrase in ["talk to you later", "goodbye", "bye for now", "have a good night", "see you soon"]):
-                     asyncio.create_task(self.summarizer.summarize_and_store(
+                     self._create_background_task(self.summarizer.summarize_and_store(
                         messages=history,
                         channel_id=message.channel.id,
                         participants=[message.author.name],
@@ -1698,10 +1791,10 @@ class ChatCog(commands.Cog):
             # Start or refresh the conversation session
             if is_mentioned:
                 # Mentioned - start new session
-                self._start_session(message.channel.id, message.author.id)
+                await self._start_session(message.channel.id, message.author.id)
             else:
                 # Session active - just refresh
-                self._refresh_session(message.channel.id)
+                await self._refresh_session(message.channel.id)
 
             # Apply natural timing delay before responding
             if hasattr(self.bot, 'naturalness') and self.bot.naturalness:
@@ -1713,6 +1806,24 @@ class ChatCog(commands.Cog):
             chunks = await chunk_message(response)
             for chunk in chunks:
                 await message.channel.send(chunk)
+
+            # Track interesting topics for proactive callbacks (runs in background)
+            if self.callbacks_system:
+                self._create_background_task(
+                    self._track_interesting_topic(message, response, history)
+                )
+
+            # Track user interaction for learning & adaptation (runs in background)
+            if self.pattern_learner:
+                self._create_background_task(
+                    self._track_user_interaction(message.author.id, user_content, response)
+                )
+
+            # Check for curiosity opportunities (runs in background)
+            if self.curiosity_system:
+                self._create_background_task(
+                    self._check_and_ask_followup(message, user_content, history)
+                )
 
             # Also speak in voice channel if bot is connected and feature is enabled
             if Config.AUTO_REPLY_WITH_VOICE:
@@ -1726,7 +1837,7 @@ class ChatCog(commands.Cog):
             # Reset status to Idle after a short delay
             if hasattr(self.bot, 'web_dashboard'):
                 # We don't await this, just let it happen
-                asyncio.create_task(self._reset_status_delayed())
+                self._create_background_task(self._reset_status_delayed())
 
         except Exception as e:
             logger.error(f"Auto-reply failed: {e}")
@@ -1788,9 +1899,38 @@ class ChatCog(commands.Cog):
                 )
                 audio_file = rvc_file
 
-            # Play audio
+            # Play audio with explicit FFmpeg options for proper conversion
             import asyncio
-            audio_source = discord.FFmpegPCMAudio(str(audio_file))
+            import os
+
+            # Log detailed audio file info
+            file_size = os.path.getsize(audio_file) if os.path.exists(audio_file) else 0
+            logger.info(f"=== AUDIO PLAYBACK DEBUG ===")
+            logger.info(f"File path: {audio_file}")
+            logger.info(f"File size: {file_size} bytes")
+            logger.info(f"File extension: {audio_file.suffix}")
+            logger.info(f"FFmpeg options: -vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo")
+
+            # Probe audio file properties
+            import subprocess
+            try:
+                probe_result = subprocess.run(
+                    ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(audio_file)],
+                    capture_output=True, text=True, timeout=5
+                )
+                if probe_result.returncode == 0:
+                    import json
+                    probe_data = json.loads(probe_result.stdout)
+                    if 'streams' in probe_data and len(probe_data['streams']) > 0:
+                        stream = probe_data['streams'][0]
+                        logger.info(f"Audio properties - Sample rate: {stream.get('sample_rate')}, Channels: {stream.get('channels')}, Format: {probe_data.get('format', {}).get('format_name')}")
+            except Exception as probe_error:
+                logger.warning(f"Could not probe audio file: {probe_error}")
+
+            audio_source = discord.FFmpegPCMAudio(
+                str(audio_file),
+                options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+            )
             voice_client.play(
                 audio_source,
                 after=lambda e: asyncio.run_coroutine_threadsafe(
@@ -1841,22 +1981,7 @@ class ChatCog(commands.Cog):
             if response:
                 await reaction.message.channel.send(response)
 
-    @commands.Cog.listener()
-    async def on_presence_update(self, before: discord.Member, after: discord.Member):
-        """Handle presence updates for activity awareness.
 
-        Args:
-            before: Member state before
-            after: Member state after
-        """
-        if hasattr(self.bot, 'naturalness') and self.bot.naturalness:
-            comment = await self.bot.naturalness.on_presence_update(before, after)
-            if comment:
-                # Send to first configured ambient channel
-                if Config.AMBIENT_CHANNELS:
-                    channel = self.bot.get_channel(Config.AMBIENT_CHANNELS[0])
-                    if channel and channel.permissions_for(after.guild.me).send_messages:
-                        await channel.send(comment)
 
 
 async def setup(bot: commands.Bot):

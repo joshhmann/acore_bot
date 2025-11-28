@@ -1,6 +1,8 @@
 """Direct HTTP client for RVC-WebUI (bypassing Gradio Client issues)."""
+import asyncio
 import logging
 import requests
+import shutil
 from pathlib import Path
 from typing import Optional
 import json
@@ -102,7 +104,8 @@ class RVCHTTPClient:
 
             temp_input = rvc_temp / input_audio.name
             import shutil
-            shutil.copy(input_audio, temp_input)
+            # Run blocking file copy in executor to avoid blocking event loop
+            await asyncio.to_thread(shutil.copy, input_audio, temp_input)
 
             input_path = str(temp_input.absolute())
             index_path = f"logs/{model}/added_{model}_v2.index"
@@ -113,8 +116,8 @@ class RVCHTTPClient:
             import soundfile as sf
             import numpy as np
             
-            # Load audio to check duration
-            y, sr = librosa.load(input_audio, sr=None)
+            # Load audio to check duration (run in executor to avoid blocking)
+            y, sr = await asyncio.to_thread(librosa.load, input_audio, sr=None)
             duration = librosa.get_duration(y=y, sr=sr)
             
             MAX_CHUNK_DURATION = 20.0  # seconds
@@ -135,9 +138,9 @@ class RVCHTTPClient:
                     chunk_idx = i // chunk_samples
                     chunk_y = y[i:min(i + chunk_samples, total_samples)]
                     
-                    # Save chunk to temp file
+                    # Save chunk to temp file (run in executor to avoid blocking)
                     chunk_path = rvc_temp / f"{input_audio.stem}_chunk_{chunk_idx}.wav"
-                    sf.write(chunk_path, chunk_y, sr)
+                    await asyncio.to_thread(sf.write, chunk_path, chunk_y, sr)
                     
                     logger.info(f"Processing chunk {chunk_idx + 1} ({len(chunk_y)/sr:.2f}s)...")
                     
@@ -173,8 +176,34 @@ class RVCHTTPClient:
                 # Concatenate all chunks
                 if converted_chunks:
                     final_y = np.concatenate(converted_chunks)
-                    sf.write(output_audio, final_y, sr)
-                    logger.info(f"Merged {len(converted_chunks)} chunks into {output_audio}")
+                    # Use RVC output sample rate (48000 Hz), not original input rate
+
+                    # Write to temp WAV first (sf.write only supports WAV)
+                    temp_wav = output_audio.with_suffix('.wav')
+                    sf.write(temp_wav, final_y, 48000)
+
+                    # Convert to MP3 if output is MP3
+                    if output_audio.suffix.lower() == '.mp3':
+                        try:
+                            import subprocess
+                            subprocess.run([
+                                'ffmpeg', '-i', str(temp_wav),
+                                '-codec:a', 'libmp3lame',
+                                '-b:a', '192k',
+                                '-y',  # Overwrite output
+                                str(output_audio)
+                            ], check=True, capture_output=True)
+                            temp_wav.unlink()  # Clean up temp WAV
+                            logger.info(f"Merged {len(converted_chunks)} chunks into {output_audio}")
+                        except Exception as e:
+                            logger.error(f"Failed to convert merged WAV to MP3: {e}")
+                            # Fall back to WAV
+                            shutil.move(str(temp_wav), str(output_audio.with_suffix('.wav')))
+                            return output_audio.with_suffix('.wav')
+                    else:
+                        # Output is already WAV
+                        logger.info(f"Merged {len(converted_chunks)} chunks into {temp_wav}")
+
                     return output_audio
             
             # If short enough, proceed with normal conversion
@@ -237,7 +266,7 @@ class RVCHTTPClient:
                 "",  # Index path from dropdown (Dropdown)
                 index_rate,  # Index rate
                 filter_radius,  # Filter radius
-                0,  # Resample sr
+                48000,  # Resample sr (Discord expects 48kHz)
                 0.25,  # RMS mix rate
                 protect,  # Protect
             ],
@@ -289,12 +318,8 @@ class RVCHTTPClient:
 
                 if output_file_path:
                     # Copy directly from filesystem with proper delay for file writing
-                    import asyncio
-                    import os
-                    from pathlib import Path as PathLib
-
                     try:
-                        source_path = PathLib(output_file_path)
+                        source_path = Path(output_file_path)
 
                         # Wait for file to be fully written (Gradio may still be writing)
                         logger.info(f"Waiting for RVC output file: {output_file_path}")

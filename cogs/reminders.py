@@ -39,6 +39,12 @@ class RemindersCog(commands.Cog):
         try:
             # Parse the time from the reminder text
             trigger_time = TimeParser.parse(reminder)
+            message = TimeParser.extract_message(reminder)
+
+            # If regex parsing failed, try LLM fallback
+            if not trigger_time:
+                logger.info(f"Regex parsing failed for '{reminder}', trying LLM fallback...")
+                trigger_time, message = await self._parse_with_llm(reminder)
 
             if not trigger_time:
                 await interaction.response.send_message(
@@ -50,9 +56,6 @@ class RemindersCog(commands.Cog):
                     ephemeral=True
                 )
                 return
-
-            # Extract the message part
-            message = TimeParser.extract_message(reminder)
 
             # Add the reminder
             reminder_id = await self.reminders.add_reminder(
@@ -89,6 +92,48 @@ class RemindersCog(commands.Cog):
         except Exception as e:
             logger.error(f"Remind command failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)
+
+    async def _parse_with_llm(self, text: str):
+        """Parse reminder text using LLM as fallback.
+        
+        Args:
+            text: Reminder text
+            
+        Returns:
+            Tuple of (datetime, message) or (None, None)
+        """
+        if not hasattr(self.bot, 'ollama'):
+            return None, None
+            
+        try:
+            current_time = datetime.now().isoformat()
+            prompt = (
+                f"Extract the reminder message and the target time from this text: '{text}'.\n"
+                f"The current time is {current_time}.\n"
+                "Return ONLY a JSON object with keys 'message' (string) and 'trigger_time' (ISO 8601 string).\n"
+                "Do not include any markdown formatting or explanation."
+            )
+            
+            response = await self.bot.ollama.generate(prompt)
+            
+            # Clean response (remove markdown code blocks if present)
+            response = response.replace("```json", "").replace("```", "").strip()
+            
+            import json
+            data = json.loads(response)
+            
+            trigger_time = datetime.fromisoformat(data['trigger_time'])
+            message = data['message']
+            
+            # Ensure timezone naive for consistency
+            if trigger_time.tzinfo:
+                trigger_time = trigger_time.replace(tzinfo=None)
+                
+            return trigger_time, message
+            
+        except Exception as e:
+            logger.error(f"LLM time parsing failed: {e}")
+            return None, None
 
     @app_commands.command(name="reminders", description="List your active reminders")
     async def list_reminders(self, interaction: discord.Interaction):

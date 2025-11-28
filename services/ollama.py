@@ -21,6 +21,9 @@ class OllamaService:
         min_p: float = 0.075,
         top_k: int = 50,
         repeat_penalty: float = 1.1,
+        frequency_penalty: float = 0.0,
+        presence_penalty: float = 0.0,
+        top_p: float = 1.0,
     ):
         """Initialize Ollama service.
 
@@ -32,6 +35,9 @@ class OllamaService:
             min_p: Min-P sampling (0.0-1.0, recommended 0.075 for roleplay)
             top_k: Top-K sampling (recommended 50 for roleplay)
             repeat_penalty: Repetition penalty (recommended 1.1 for roleplay)
+            frequency_penalty: Frequency penalty
+            presence_penalty: Presence penalty
+            top_p: Top-P sampling
         """
         self.host = host.rstrip("/")
         self.model = model
@@ -40,6 +46,9 @@ class OllamaService:
         self.min_p = min_p
         self.top_k = top_k
         self.repeat_penalty = repeat_penalty
+        self.frequency_penalty = frequency_penalty
+        self.presence_penalty = presence_penalty
+        self.top_p = top_p
         self.session: Optional[aiohttp.ClientSession] = None
 
     async def initialize(self):
@@ -52,6 +61,26 @@ class OllamaService:
         if self.session:
             await self.session.close()
             self.session = None
+
+    def _clean_messages(self, messages: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        """Clean messages to only include 'role' and 'content' fields.
+
+        Ollama API only expects 'role' and 'content'. Extra fields like 'username' or 'user_id'
+        can cause issues or be included in model responses.
+
+        Args:
+            messages: List of message dicts (may have extra metadata fields)
+
+        Returns:
+            Cleaned messages with only role and content
+        """
+        cleaned = []
+        for msg in messages:
+            cleaned.append({
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", "")
+            })
+        return cleaned
 
     async def chat(
         self,
@@ -75,6 +104,9 @@ class OllamaService:
         if not self.session:
             await self.initialize()
 
+        # Clean messages to remove extra metadata fields
+        messages = self._clean_messages(messages)
+
         # Prepend system message if provided
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
@@ -89,6 +121,10 @@ class OllamaService:
                 "min_p": self.min_p,
                 "top_k": self.top_k,
                 "repeat_penalty": self.repeat_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "presence_penalty": self.presence_penalty,
+                "top_p": self.top_p,
+                "num_ctx": 4096,  # Ensure full context window
             },
         }
 
@@ -131,6 +167,9 @@ class OllamaService:
         if not self.session:
             await self.initialize()
 
+        # Clean messages to remove extra metadata fields
+        messages = self._clean_messages(messages)
+
         # Prepend system message if provided
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
@@ -145,6 +184,10 @@ class OllamaService:
                 "min_p": self.min_p,
                 "top_k": self.top_k,
                 "repeat_penalty": self.repeat_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "presence_penalty": self.presence_penalty,
+                "top_p": self.top_p,
+                "num_ctx": 4096,  # Ensure full context window
             },
         }
 
@@ -232,6 +275,12 @@ class OllamaService:
             "options": {
                 "temperature": self.temperature,
                 "num_predict": self.max_tokens,
+                "min_p": self.min_p,
+                "top_k": self.top_k,
+                "repeat_penalty": self.repeat_penalty,
+                "frequency_penalty": self.frequency_penalty,
+                "presence_penalty": self.presence_penalty,
+                "top_p": self.top_p,
             },
         }
 

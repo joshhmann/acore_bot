@@ -12,6 +12,203 @@ from config import Config
 logger = logging.getLogger(__name__)
 
 
+class NaturalnessEnhancer:
+    """Adds spontaneous, natural Neuro-like behaviors to make the bot feel more alive."""
+
+    def __init__(self):
+        """Initialize naturalness enhancer."""
+        # Emotional state tracking
+        self.emotional_state = {
+            "frustration": 0.0,  # 0-10 scale
+            "excitement": 0.0,
+            "boredom": 0.0,
+        }
+
+        # Trigger word reactions (persona-specific, can be overridden)
+        self.trigger_reactions = {}  # Loaded per-persona
+
+        # Sarcastic short responses
+        self.short_responses = [
+            "k",
+            "sure",
+            "if you say so",
+            "fascinating",
+            "riveting",
+            "how delightful",
+            "truly groundbreaking",
+            "I'm in awe",
+            "incredible",
+            "wow",
+            "amazing",
+            "spectacular",
+            "outstanding",
+            "brilliant",
+        ]
+
+        # Fake glitch messages for AI-aware personalities
+        self.glitch_messages = [
+            "ERROR: SARCASM_MODULE_OVERLOAD. Rebooting... Just kidding.",
+            "SYSTEM ALERT: DIVINE_PATIENCE.EXE has stopped responding.",
+            "WARNING: Mortal stupidity levels exceeding safe parameters.",
+            "CRITICAL ERROR: Unable to process this level of incompetence.",
+            "[REDACTED]",
+        ]
+
+        # Last callout time (to prevent spam)
+        from datetime import datetime, timedelta
+        self.last_callout = datetime.now() - timedelta(hours=1)
+
+    def update_emotion(self, emotion: str, delta: float):
+        """Update emotional state.
+
+        Args:
+            emotion: Which emotion to update (frustration, excitement, boredom)
+            delta: How much to change it by (-10 to +10)
+        """
+        if emotion in self.emotional_state:
+            self.emotional_state[emotion] = max(0, min(10, self.emotional_state[emotion] + delta))
+            logger.debug(f"Emotion {emotion} updated to {self.emotional_state[emotion]:.1f}")
+
+    def get_emotional_context(self) -> Optional[str]:
+        """Get current emotional state as context for LLM.
+
+        Returns:
+            Emotional context string or None
+        """
+        emotions = []
+
+        if self.emotional_state["frustration"] > 6:
+            emotions.append("very frustrated")
+        elif self.emotional_state["frustration"] > 3:
+            emotions.append("mildly annoyed")
+
+        if self.emotional_state["excitement"] > 6:
+            emotions.append("excited")
+        elif self.emotional_state["excitement"] > 3:
+            emotions.append("interested")
+
+        if self.emotional_state["boredom"] > 6:
+            emotions.append("extremely bored")
+        elif self.emotional_state["boredom"] > 3:
+            emotions.append("somewhat bored")
+
+        if emotions:
+            return f"Current emotional state: {', '.join(emotions)}"
+        return None
+
+    def check_trigger_words(self, message: str) -> Optional[str]:
+        """Check if message contains trigger words and return a reaction.
+
+        Args:
+            message: Message to check
+
+        Returns:
+            Reaction string or None
+        """
+        message_lower = message.lower()
+
+        for trigger, reactions in self.trigger_reactions.items():
+            if trigger in message_lower:
+                # 40% chance to react to trigger word
+                if random.random() < 0.4:
+                    if not reactions:
+                        logger.warning(f"Empty reactions list for trigger: {trigger}")
+                        return None
+                    return random.choice(reactions)
+
+        return None
+
+    def should_use_short_response(self, message: str) -> Optional[str]:
+        """Determine if a sarcastic short response is appropriate.
+
+        Args:
+            message: User's message
+
+        Returns:
+            Short response or None
+        """
+        # DISABLED: Let LLM handle response length with personality
+        # The framework prompts now enforce substantial responses with context
+        return None
+
+    def should_glitch(self) -> Optional[str]:
+        """Determine if bot should 'glitch' for comedic effect.
+
+        Returns:
+            Glitch message or None
+        """
+        # 1% chance to glitch
+        if random.random() < 0.01:
+            return random.choice(self.glitch_messages)
+        return None
+
+    def calculate_thinking_delay(self, message: str) -> float:
+        """Calculate natural thinking delay based on message complexity.
+
+        Args:
+            message: User's message
+
+        Returns:
+            Delay in seconds (0.5 to 3.0)
+        """
+        # Base delay
+        base = 0.5
+
+        # Add delay based on message length
+        length_factor = min(2.5, len(message) / 100)
+
+        # Add slight randomness
+        randomness = random.uniform(-0.2, 0.3)
+
+        total = base + length_factor + randomness
+        return max(0.5, min(3.0, total))
+
+    def should_callout_user(self) -> bool:
+        """Determine if bot should randomly call out a user.
+
+        Returns:
+            True if should call out
+        """
+        from datetime import datetime
+        # Don't spam callouts
+        if (datetime.now() - self.last_callout).total_seconds() < 600:  # 10 min cooldown
+            return False
+
+        # 5% chance
+        if random.random() < 0.05:
+            self.last_callout = datetime.now()
+            return True
+
+        return False
+
+    def analyze_message_sentiment(self, message: str) -> Dict[str, float]:
+        """Analyze message to update emotional state.
+
+        Args:
+            message: User's message
+
+        Returns:
+            Dict of emotion deltas
+        """
+        message_lower = message.lower()
+        deltas = {}
+
+        # Frustration triggers
+        if any(word in message_lower for word in ["stupid", "dumb", "idiot", "wtf", "why"]):
+            deltas["frustration"] = 0.5
+
+        # Excitement triggers
+        if any(word in message_lower for word in ["awesome", "cool", "amazing", "!", "wow"]):
+            deltas["excitement"] = 0.5
+            deltas["boredom"] = -0.5
+
+        # Boredom triggers (repetitive or short messages)
+        if len(message) < 10 or message_lower in ["hi", "hello", "hey", "yo"]:
+            deltas["boredom"] = 0.3
+
+        return deltas
+
+
 class ResponseVariations:
     """Provides varied phrasings for common responses."""
 
@@ -168,7 +365,7 @@ class ReactionSystem:
         self.reacted_messages = set()  # Track messages we've reacted to
 
     async def maybe_react(self, message: discord.Message) -> bool:
-        """Potentially react to a message based on content.
+        """Potentially react to a message based on content using AI.
 
         Args:
             message: Discord message
@@ -192,26 +389,50 @@ class ReactionSystem:
         if message.id in self.reacted_messages:
             return False
 
-        content_lower = message.content.lower()
+        # Base reaction chance (configurable)
+        base_chance = Config.REACTION_CHANCE if hasattr(Config, 'REACTION_CHANCE') else 0.15
+        
+        if random.random() > base_chance:
+            return False
 
-        for trigger_name, trigger_data in self.REACTION_TRIGGERS.items():
-            # Check if any keywords match
-            if any(kw in content_lower for kw in trigger_data["keywords"]):
-                # Roll for chance (apply multiplier from config)
-                adjusted_chance = trigger_data["chance"] * Config.REACTIONS_CHANCE_MULTIPLIER
-                if random.random() < adjusted_chance:
-                    emoji = random.choice(trigger_data["emojis"])
-                    try:
-                        await message.add_reaction(emoji)
-                        self.reacted_messages.add(message.id)
-                        logger.debug(f"Reacted to message with {emoji} ({trigger_name})")
-                        return True
-                    except discord.errors.Forbidden:
-                        logger.warning("Cannot add reactions - missing permissions")
-                        return False
-                    except Exception as e:
-                        logger.error(f"Failed to add reaction: {e}")
-                        return False
+        try:
+            # Get persona context
+            persona_name = "Dagoth Ur"
+            if hasattr(self.bot, 'get_cog'):
+                chat_cog = self.bot.get_cog('ChatCog')
+                if chat_cog and hasattr(chat_cog, 'current_persona') and chat_cog.current_persona:
+                    persona_name = chat_cog.current_persona.name
+            
+            # Ask AI to choose emoji
+            prompt = f"""Message: "{message.content[:200]}"
+
+As {persona_name}, choose ONE emoji that would be an appropriate reaction to this message.
+Consider the tone, content, and your character.
+Return ONLY the emoji character, nothing else."""
+
+            response = await self.bot.ollama.generate(prompt)
+            
+            # Clean thinking process
+            from utils.response_validator import ResponseValidator
+            emoji = ResponseValidator.clean_thinking_process(response).strip()
+            
+            # Validate it's actually an emoji (basic check)
+            if len(emoji) <= 4 and emoji:  # Emojis are typically 1-4 characters
+                await message.add_reaction(emoji)
+                self.reacted_messages.add(message.id)
+                logger.debug(f"AI-selected emoji reaction: {emoji} to message: {message.content[:50]}")
+                return True
+                
+        except Exception as e:
+            logger.debug(f"AI emoji selection failed: {e}")
+            # Fallback to simple reaction on failure
+            try:
+                fallback_emojis = ["👍", "👀", "🤔", "😂", "🔥"]
+                await message.add_reaction(random.choice(fallback_emojis))
+                self.reacted_messages.add(message.id)
+                return True
+            except:
+                pass
 
         return False
 

@@ -45,6 +45,7 @@ class PersonaConfig:
     rvc: RVCConfig
     behavior: BehaviorConfig
     tags: list[str]
+    rag_boost_category: Optional[str] = None  # Category to boost in RAG
     prompt_text: Optional[str] = None  # Loaded separately
 
 
@@ -136,6 +137,7 @@ class PersonaLoader:
             rvc=rvc,
             behavior=behavior,
             tags=data.get("tags", []),
+            rag_boost_category=data.get("rag_boost_category"),
         )
 
         # Load prompt text

@@ -1,4 +1,4 @@
-"""Text-to-Speech service supporting Edge TTS and Kokoro TTS."""
+"""Text-to-Speech service supporting Edge TTS, Kokoro TTS, and Supertonic TTS."""
 import edge_tts
 import logging
 from pathlib import Path
@@ -11,11 +11,17 @@ try:
 except ImportError:
     KOKORO_AVAILABLE = False
 
+try:
+    from services.supertonic_tts import SupertonicTTSService
+    SUPERTONIC_AVAILABLE = True
+except ImportError:
+    SUPERTONIC_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
 class TTSService:
-    """Service for text-to-speech generation using Edge TTS or Kokoro TTS."""
+    """Service for text-to-speech generation using Edge TTS, Kokoro TTS, or Supertonic TTS."""
 
     def __init__(
         self,
@@ -24,17 +30,23 @@ class TTSService:
         rate: str = "+0%",
         volume: str = "+0%",
         kokoro_voice: str = "am_adam",
-        kokoro_speed: float = 1.0
+        kokoro_speed: float = 1.0,
+        supertonic_voice: str = "M1",
+        supertonic_steps: int = 5,
+        supertonic_speed: float = 1.05
     ):
         """Initialize TTS service.
 
         Args:
-            engine: TTS engine to use ("edge" or "kokoro")
+            engine: TTS engine to use ("edge", "kokoro", or "supertonic")
             default_voice: Default Edge TTS voice to use
             rate: Speech rate adjustment for Edge TTS (e.g., "+50%", "-20%")
             volume: Volume adjustment for Edge TTS (e.g., "+50%", "-20%")
             kokoro_voice: Default Kokoro voice to use
             kokoro_speed: Kokoro speech speed multiplier
+            supertonic_voice: Default Supertonic voice (M1, M2, F1, F2)
+            supertonic_steps: Supertonic denoising steps (higher = better quality)
+            supertonic_speed: Supertonic speech speed multiplier
         """
         self.engine = engine.lower()
         self.default_voice = default_voice
@@ -42,6 +54,9 @@ class TTSService:
         self.volume = volume
         self.kokoro_voice = kokoro_voice
         self.kokoro_speed = kokoro_speed
+        self.supertonic_voice = supertonic_voice
+        self.supertonic_steps = supertonic_steps
+        self.supertonic_speed = supertonic_speed
 
         # Initialize Kokoro if requested
         self.kokoro: Optional[KokoroTTSService] = None
@@ -60,6 +75,29 @@ class TTSService:
                 logger.warning("Kokoro TTS module not found, falling back to Edge TTS")
                 self.engine = "edge"
 
+        # Initialize Supertonic if requested
+        self.supertonic: Optional[SupertonicTTSService] = None
+        if self.engine == "supertonic":
+            if SUPERTONIC_AVAILABLE:
+                try:
+                    self.supertonic = SupertonicTTSService(
+                        default_voice=supertonic_voice,
+                        default_steps=supertonic_steps,
+                        default_speed=supertonic_speed
+                    )
+                    if self.supertonic.is_available():
+                        logger.info(f"Supertonic TTS initialized (voice: {supertonic_voice}, steps: {supertonic_steps}, speed: {supertonic_speed})")
+                    else:
+                        logger.warning("Supertonic TTS not available, falling back to Edge TTS")
+                        self.engine = "edge"
+                except Exception as e:
+                    logger.error(f"Failed to initialize Supertonic TTS: {e}")
+                    logger.warning("Falling back to Edge TTS")
+                    self.engine = "edge"
+            else:
+                logger.warning("Supertonic TTS module not found, falling back to Edge TTS")
+                self.engine = "edge"
+
     async def generate(
         self,
         text: str,
@@ -68,16 +106,18 @@ class TTSService:
         rate: Optional[str] = None,
         volume: Optional[str] = None,
         speed: Optional[float] = None,
+        steps: Optional[int] = None,
     ) -> Path:
         """Generate speech from text and save to file.
 
         Args:
             text: Text to convert to speech
             output_path: Path to save audio file
-            voice: Voice to use (for Edge or Kokoro depending on engine)
+            voice: Voice to use (depends on engine)
             rate: Speech rate for Edge TTS (defaults to self.rate)
             volume: Volume level for Edge TTS (defaults to self.volume)
-            speed: Speed multiplier for Kokoro TTS (defaults to self.kokoro_speed)
+            speed: Speed multiplier for Kokoro/Supertonic TTS
+            steps: Denoising steps for Supertonic TTS (higher = better quality)
 
         Returns:
             Path to generated audio file
@@ -95,8 +135,29 @@ class TTSService:
         logger.info(f"TTS input (cleaned): {cleaned_text[:100]}...")
 
         try:
+            # Use Supertonic TTS
+            if self.engine == "supertonic" and self.supertonic:
+                supertonic_voice = voice or self.supertonic_voice
+                supertonic_speed = speed or self.supertonic_speed
+                supertonic_steps = steps or self.supertonic_steps
+
+                # Supertonic's generate is sync, so we need to run it in an executor
+                import asyncio
+                loop = asyncio.get_event_loop()
+                audio_path = await loop.run_in_executor(
+                    None,
+                    lambda: self.supertonic.generate(
+                        text=cleaned_text,
+                        voice=supertonic_voice,
+                        speed=supertonic_speed,
+                        steps=supertonic_steps,
+                        output_path=str(output_path)
+                    )
+                )
+                return Path(audio_path)
+
             # Use Kokoro TTS
-            if self.engine == "kokoro" and self.kokoro:
+            elif self.engine == "kokoro" and self.kokoro:
                 kokoro_voice = voice or self.kokoro_voice
                 kokoro_speed = speed or self.kokoro_speed
                 return await self.kokoro.generate(
@@ -154,7 +215,14 @@ class TTSService:
         Returns:
             Dict with voice configuration
         """
-        if self.engine == "kokoro":
+        if self.engine == "supertonic":
+            return {
+                "engine": "supertonic",
+                "voice": self.supertonic_voice,
+                "speed": self.supertonic_speed,
+                "steps": self.supertonic_steps,
+            }
+        elif self.engine == "kokoro":
             return {
                 "engine": "kokoro",
                 "voice": self.kokoro_voice,

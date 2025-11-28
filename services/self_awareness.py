@@ -220,7 +220,8 @@ class SelfAwarenessSystem:
             ],
         }
 
-        return random.choice(comments.get(feature, []))
+        feature_comments = comments.get(feature, [])
+        return random.choice(feature_comments) if feature_comments else None
 
     def should_add_hesitation(self) -> bool:
         """Determine if a hesitation should be added.
@@ -280,9 +281,11 @@ class SelfAwarenessSystem:
             "short": ["Short and sweet!", "Keeping it brief", "TL;DR version"],
             "verbose": ["Okay that was long-winded, sorry", "I rambled a bit there"],
             "mediocre": ["Hope that makes sense", "Not my clearest explanation"],
+            "good": ["There we go!", "That should do it", "Hope that helps!"],
         }
 
-        return random.choice(comments.get(quality, []))
+        quality_comments = comments.get(quality, [])
+        return random.choice(quality_comments) if quality_comments else None
 
     def detect_interruption(self) -> bool:
         """Detect if the bot might have interrupted something.

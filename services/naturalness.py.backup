@@ -1,0 +1,728 @@
+"""Naturalness service - makes the bot feel more alive and present."""
+import logging
+import random
+import re
+from typing import Optional, List, Dict
+from datetime import datetime
+
+import discord
+
+from config import Config
+
+logger = logging.getLogger(__name__)
+
+
+class ResponseVariations:
+    """Provides varied phrasings for common responses."""
+
+    # Acknowledgments
+    ACKNOWLEDGMENTS = [
+        "Got it!", "Sure thing!", "On it!", "Understood!", "Alright!",
+        "You got it!", "Will do!", "Okay!", "No problem!", "Right away!",
+    ]
+
+    # Affirmatives
+    AFFIRMATIVES = [
+        "Yeah!", "Yep!", "Absolutely!", "Definitely!", "For sure!",
+        "Of course!", "Totally!", "You bet!", "Indeed!", "Certainly!",
+    ]
+
+    # Greetings
+    GREETINGS = [
+        "Hey!", "Hi there!", "Hello!", "Hey hey!", "What's up!",
+        "Yo!", "Hiya!", "Howdy!", "Hey there!", "Hi!",
+    ]
+
+    # Farewells
+    FAREWELLS = [
+        "Later!", "See ya!", "Bye!", "Take care!", "Catch you later!",
+        "Peace!", "Bye bye!", "Until next time!", "Talk soon!", "Cya!",
+    ]
+
+    # Thinking expressions
+    THINKING = [
+        "Hmm...", "Let me think...", "Interesting...", "Well...",
+        "Let's see...", "One moment...", "Thinking...", "Ah...",
+    ]
+
+    # Excitement
+    EXCITEMENT = [
+        "Oh nice!", "Sweet!", "Awesome!", "Cool!", "That's great!",
+        "Love it!", "Perfect!", "Excellent!", "Fantastic!", "Amazing!",
+    ]
+
+    # Sympathy
+    SYMPATHY = [
+        "Aw man...", "That's rough...", "I'm sorry to hear that...",
+        "That sucks...", "Dang...", "Oh no...", "Yikes...",
+    ]
+
+    # Hesitation patterns (new!)
+    HESITATIONS = [
+        "Uh...", "Um...", "Well...", "So...", "I mean...",
+        "Like...", "You know...", "Hmm...", "Err...",
+    ]
+
+    # Corrections (new!)
+    CORRECTIONS = [
+        "Actually...", "Wait...", "Hold on...", "Correction...",
+        "I mean...", "Sorry...", "My bad...", "Let me rephrase...",
+    ]
+
+    # Filler phrases (new!)
+    FILLERS = [
+        "you know", "I think", "kind of", "sort of", "basically",
+        "honestly", "to be fair", "I guess", "pretty much",
+    ]
+
+    # Self-aware comments (new!)
+    SELF_AWARE = [
+        "Did that make sense?", "Hope that helps!", "Not my best explanation...",
+        "I tried!", "That came out weird...", "Let me know if that's unclear!",
+    ]
+
+    @classmethod
+    def get(cls, category: str) -> str:
+        """Get a random variation from a category.
+
+        Args:
+            category: Category name (acknowledgments, affirmatives, etc.)
+
+        Returns:
+            Random phrase from the category
+        """
+        variations = getattr(cls, category.upper(), None)
+        if variations:
+            return random.choice(variations)
+        return ""
+
+
+class ReactionSystem:
+    """Handles emoji reactions to messages."""
+
+    # Emoji mappings for different sentiments/content
+    REACTION_TRIGGERS = {
+        # Positive emotions
+        "positive": {
+            "keywords": ["awesome", "amazing", "great", "love", "perfect", "excellent", "fantastic", "wonderful", "best", "nice", "cool", "sweet"],
+            "emojis": ["🔥", "💯", "👏", "✨", "🙌", "💪", "🎉"],
+            "chance": 0.6,
+        },
+        # Humor
+        "funny": {
+            "keywords": ["lol", "lmao", "haha", "hehe", "rofl", "😂", "🤣", "joke", "funny", "hilarious"],
+            "emojis": ["😂", "🤣", "💀", "😆"],
+            "chance": 0.7,
+        },
+        # Sadness
+        "sad": {
+            "keywords": ["sad", "depressed", "upset", "crying", "terrible", "awful", "worst", "hate", "frustrated"],
+            "emojis": ["😢", "💙", "🫂"],
+            "chance": 0.5,
+        },
+        # Questions
+        "question": {
+            "keywords": ["?", "how do", "what is", "why", "when", "where", "can you"],
+            "emojis": ["🤔", "👀"],
+            "chance": 0.3,
+        },
+        # Food
+        "food": {
+            "keywords": ["food", "eating", "hungry", "lunch", "dinner", "breakfast", "snack", "pizza", "burger", "coffee", "tea"],
+            "emojis": ["🍕", "🍔", "☕", "🍴", "😋"],
+            "chance": 0.5,
+        },
+        # Gaming
+        "gaming": {
+            "keywords": ["game", "gaming", "playing", "stream", "streaming", "win", "gg", "poggers", "clutch"],
+            "emojis": ["🎮", "🕹️", "🏆", "⚔️"],
+            "chance": 0.5,
+        },
+        # Music
+        "music": {
+            "keywords": ["music", "song", "listening", "album", "artist", "band", "playlist", "banger"],
+            "emojis": ["🎵", "🎶", "🔊", "🎧"],
+            "chance": 0.5,
+        },
+        # Agreement
+        "agreement": {
+            "keywords": ["agree", "right", "exactly", "true", "facts", "yes", "yep", "yeah", "correct"],
+            "emojis": ["👍", "💯", "✅"],
+            "chance": 0.4,
+        },
+        # Celebration
+        "celebration": {
+            "keywords": ["birthday", "congrats", "congratulations", "celebrate", "party", "anniversary", "promotion"],
+            "emojis": ["🎉", "🥳", "🎊", "🍾", "🎂"],
+            "chance": 0.8,
+        },
+    }
+
+    def __init__(self, bot):
+        """Initialize the reaction system.
+
+        Args:
+            bot: Discord bot instance
+        """
+        self.bot = bot
+        self.reacted_messages = set()  # Track messages we've reacted to
+
+    async def maybe_react(self, message: discord.Message) -> bool:
+        """Potentially react to a message based on content using AI.
+
+        Args:
+            message: Discord message
+
+        Returns:
+            True if reacted
+        """
+        # Check if reactions are enabled
+        if not Config.REACTIONS_ENABLED:
+            return False
+
+        # Don't react to own messages
+        if message.author == self.bot.user:
+            return False
+
+        # Ignore specific users
+        if message.author.id in Config.AMBIENT_IGNORE_USERS:
+            return False
+
+        # Don't double-react
+        if message.id in self.reacted_messages:
+            return False
+
+        # Base reaction chance (configurable)
+        base_chance = Config.REACTION_CHANCE if hasattr(Config, 'REACTION_CHANCE') else 0.15
+        
+        if random.random() > base_chance:
+            return False
+
+        try:
+            # Get persona context
+            persona_name = "Dagoth Ur"
+            if hasattr(self.bot, 'get_cog'):
+                chat_cog = self.bot.get_cog('ChatCog')
+                if chat_cog and hasattr(chat_cog, 'current_persona') and chat_cog.current_persona:
+                    persona_name = chat_cog.current_persona.name
+            
+            # Ask AI to choose emoji
+            prompt = f"""Message: "{message.content[:200]}"
+
+As {persona_name}, choose ONE emoji that would be an appropriate reaction to this message.
+Consider the tone, content, and your character.
+Return ONLY the emoji character, nothing else."""
+
+            response = await self.bot.ollama.generate(prompt)
+            emoji = response.strip()
+            
+            # Validate it's actually an emoji (basic check)
+            if len(emoji) <= 4 and emoji:  # Emojis are typically 1-4 characters
+                await message.add_reaction(emoji)
+                self.reacted_messages.add(message.id)
+                logger.debug(f"AI-selected emoji reaction: {emoji} to message: {message.content[:50]}")
+                return True
+                
+        except Exception as e:
+            logger.debug(f"AI emoji selection failed: {e}")
+            # Fallback to simple reaction on failure
+            try:
+                fallback_emojis = ["👍", "👀", "🤔", "😂", "🔥"]
+                await message.add_reaction(random.choice(fallback_emojis))
+                self.reacted_messages.add(message.id)
+                return True
+            except:
+                pass
+
+        return False
+
+    async def respond_to_reaction(self, reaction: discord.Reaction, user: discord.User) -> Optional[str]:
+        """Generate a response when someone reacts to the bot's message.
+
+        Args:
+            reaction: The reaction added
+            user: User who added the reaction
+
+        Returns:
+            Response string or None
+        """
+        # Only respond to reactions on our messages
+        if reaction.message.author != self.bot.user:
+            return None
+
+        # Don't respond to own reactions
+        if user == self.bot.user:
+            return None
+
+        # Small chance to respond
+        if random.random() > 0.3:
+            return None
+
+        emoji_str = str(reaction.emoji)
+
+        # Generate contextual responses
+        responses = {
+            "👍": ["Glad you liked it!", "Thanks!", "😊"],
+            "❤️": ["Aw thanks! 💕", "You're sweet!", "❤️"],
+            "😂": ["Hehe glad that landed!", "I try! 😄", "Comedy gold, I know"],
+            "🔥": ["You know it! 🔥", "Fire recognizes fire", "💪"],
+            "👀": ["👀", "I see you seeing me", "Interesting, right?"],
+            "🤔": ["Need me to explain more?", "Got questions?", "What's on your mind?"],
+            "💯": ["Straight facts!", "100%!", "You get it! 💯"],
+        }
+
+        if emoji_str in responses:
+            return random.choice(responses[emoji_str])
+
+        # Generic responses for other reactions
+        generic = [
+            f"I see that {emoji_str}!",
+            f"{emoji_str} right back at ya!",
+            "Thanks for the reaction!",
+        ]
+        return random.choice(generic)
+
+
+class ActivityAwareness:
+    """Tracks and responds to user activities."""
+
+    def __init__(self, bot):
+        """Initialize activity awareness.
+
+        Args:
+            bot: Discord bot instance
+        """
+        self.bot = bot
+        self.previous_activities: Dict[int, Optional[str]] = {}  # user_id -> activity name
+        self.commented_activities: Dict[int, str] = {}  # user_id -> last commented activity
+        self.last_comment_time: Dict[tuple, float] = {}  # (user_id, activity_type) -> timestamp
+
+    def detect_activity_change(self, before: discord.Member, after: discord.Member) -> Optional[Dict]:
+        """Detect if a user's activity has changed in an interesting way.
+
+        Args:
+            before: Member state before
+            after: Member state after
+
+        Returns:
+            Dict with activity info or None
+        """
+        user_id = after.id
+
+        # Ignore specific users
+        if user_id in Config.AMBIENT_IGNORE_USERS:
+            return None
+
+        # Get current activity
+        current_activity = None
+        activity_type = None
+        activity_details = None
+
+        for activity in after.activities:
+            if isinstance(activity, discord.Game):
+                current_activity = activity.name
+                activity_type = "game"
+                break
+            elif isinstance(activity, discord.Streaming):
+                current_activity = activity.name or activity.game
+                activity_type = "stream"
+                activity_details = activity.url
+                break
+            elif isinstance(activity, discord.Spotify):
+                # Ignore Spotify activities
+                continue
+            elif isinstance(activity, discord.Activity):
+                if activity.type == discord.ActivityType.playing:
+                    current_activity = activity.name
+                    activity_type = "game"
+                    break
+                elif activity.type == discord.ActivityType.listening:
+                    # Ignore listening activities
+                    continue
+
+        previous = self.previous_activities.get(user_id)
+        self.previous_activities[user_id] = current_activity
+
+        # Check if activity changed and is interesting
+        if current_activity and current_activity != previous:
+            # Don't comment on same activity twice
+            if self.commented_activities.get(user_id) == current_activity:
+                return None
+
+            # Check cooldown for this activity type
+            cooldown_key = (user_id, activity_type)
+            last_comment = self.last_comment_time.get(cooldown_key, 0)
+            current_time = datetime.now().timestamp()
+
+            if current_time - last_comment < Config.ACTIVITY_COOLDOWN_SECONDS:
+                logger.debug(f"Skipping comment for {after.display_name} - cooldown active for {activity_type}")
+                return None
+
+            return {
+                "user": after,
+                "activity": current_activity,
+                "type": activity_type,
+                "details": activity_details,
+            }
+
+        return None
+
+    def mark_commented(self, user_id: int, activity: str, activity_type: str = None):
+        """Mark an activity as commented on.
+
+        Args:
+            user_id: User ID
+            activity: Activity name
+            activity_type: Type of activity (game, spotify, stream, etc.)
+        """
+        self.commented_activities[user_id] = activity
+
+        # Record timestamp for cooldown tracking
+        if activity_type:
+            cooldown_key = (user_id, activity_type)
+            self.last_comment_time[cooldown_key] = datetime.now().timestamp()
+            logger.debug(f"Set cooldown for {user_id} - {activity_type}")
+
+    def generate_comment(self, activity_info: Dict) -> Optional[str]:
+        """Generate a natural comment about an activity.
+
+        Args:
+            activity_info: Dict with activity details
+
+        Returns:
+            Comment string or None
+        """
+        activity = activity_info["activity"]
+        activity_type = activity_info["type"]
+        user = activity_info["user"]
+
+        # Game comments
+        if activity_type == "game":
+            comments = [
+                f"Oh nice, {user.display_name} is playing {activity}!",
+                f"Ooh {activity}! Good choice, {user.display_name}!",
+                f"{activity}? Have fun, {user.display_name}! 🎮",
+                f"👀 {user.display_name} jumping into {activity}",
+                f"Nice! {activity} is solid. Good luck {user.display_name}!",
+            ]
+            return random.choice(comments)
+
+        # Stream comments
+        elif activity_type == "stream":
+            comments = [
+                f"Oh {user.display_name} is streaming! Good luck! 🎥",
+                f"Stream time! Go {user.display_name}! 📺",
+                f"👀 {user.display_name} went live!",
+            ]
+            return random.choice(comments)
+
+        # Spotify comments
+        elif activity_type == "spotify":
+            comments = [
+                f"🎵 {user.display_name} is listening to {activity}",
+                f"Ooh good taste! {activity} 🎶",
+                f"Nice track choice, {user.display_name}! 🎧",
+            ]
+            return random.choice(comments)
+
+        return None
+
+
+class NaturalnessService:
+    """Main service combining all naturalness features."""
+
+    def __init__(self, bot):
+        """Initialize the naturalness service.
+
+        Args:
+            bot: Discord bot instance
+        """
+        self.bot = bot
+        self.reactions = ReactionSystem(bot)
+        self.activity = ActivityAwareness(bot)
+        self.variations = ResponseVariations
+
+        # Import mood and self-awareness systems
+        try:
+            from services.mood_system import MoodSystem
+            from services.self_awareness import SelfAwarenessSystem
+            from services.environmental_awareness import EnvironmentalAwareness
+            from services.rhythm_matching import ConversationalRhythmMatcher
+
+            self.mood = MoodSystem()
+            self.self_awareness = SelfAwarenessSystem()
+            self.environmental = EnvironmentalAwareness(bot)
+            self.rhythm = ConversationalRhythmMatcher()
+            logger.info("All naturalness systems loaded (mood, self-awareness, environmental, rhythm)")
+        except Exception as e:
+            logger.warning(f"Could not load naturalness systems: {e}")
+            self.mood = None
+            self.self_awareness = None
+            self.environmental = None
+            self.rhythm = None
+
+        logger.info("Naturalness service initialized")
+
+    def vary_response(self, response: str) -> str:
+        """Add variation to a response.
+
+        Args:
+            response: Original response
+
+        Returns:
+            Response with variations applied
+        """
+        # Replace common phrases with variations
+        replacements = [
+            (r"^(Got it|Okay|Sure)[.!]?\s*", lambda: self.variations.get("acknowledgments") + " "),
+            (r"^(Hi|Hello|Hey)[.!]?\s*", lambda: self.variations.get("greetings") + " "),
+        ]
+
+        for pattern, replacement_func in replacements:
+            if re.match(pattern, response, re.IGNORECASE):
+                response = re.sub(pattern, replacement_func(), response, count=1, flags=re.IGNORECASE)
+                break
+
+        return response
+
+    async def on_message(self, message: discord.Message):
+        """Process a message for naturalness features.
+
+        Args:
+            message: Discord message
+        """
+        # Maybe react to the message
+        await self.reactions.maybe_react(message)
+
+    async def on_reaction_add(self, reaction: discord.Reaction, user: discord.User) -> Optional[str]:
+        """Handle reaction added events.
+
+        Args:
+            reaction: The reaction
+            user: User who reacted
+
+        Returns:
+            Response string or None
+        """
+        return await self.reactions.respond_to_reaction(reaction, user)
+
+    async def on_presence_update(self, before: discord.Member, after: discord.Member) -> Optional[str]:
+        """Handle presence updates for activity awareness.
+
+        Args:
+            before: Member state before
+            after: Member state after
+
+        Returns:
+            Comment string or None
+        """
+        # Check if activity awareness is enabled
+        if not Config.ACTIVITY_AWARENESS_ENABLED:
+            return None
+
+        activity_info = self.activity.detect_activity_change(before, after)
+        if activity_info:
+            # Use configurable chance to comment
+            if random.random() < Config.ACTIVITY_COMMENT_CHANCE:
+                comment = self.activity.generate_comment(activity_info)
+                if comment:
+                    self.activity.mark_commented(
+                        after.id,
+                        activity_info["activity"],
+                        activity_info["type"]
+                    )
+                    return comment
+        return None
+
+    async def get_natural_delay(self) -> float:
+        """Get a natural-feeling delay for responses.
+
+        Returns:
+            Delay in seconds
+        """
+        if not Config.NATURAL_TIMING_ENABLED:
+            return 0.0
+
+        # Base delay
+        base_delay = random.uniform(
+            Config.NATURAL_TIMING_MIN_DELAY,
+            Config.NATURAL_TIMING_MAX_DELAY
+        )
+
+        # Adjust based on mood if available
+        if self.mood:
+            style = self.mood.get_mood_response_style()
+            speed = style.get("response_speed", "normal")
+
+            if speed == "very_fast":
+                base_delay *= 0.5
+            elif speed == "fast":
+                base_delay *= 0.7
+            elif speed == "slow":
+                base_delay *= 1.5
+            elif speed == "very_slow":
+                base_delay *= 2.0
+
+        return base_delay
+
+    def enhance_response(self, response: str, context: str = "general") -> str:
+        """Enhance a response with natural elements.
+
+        Args:
+            response: Original response text
+            context: Context of the response
+
+        Returns:
+            Enhanced response with hesitations, self-awareness, etc.
+        """
+        if not self.self_awareness:
+            return response
+
+        enhanced = response
+
+        # Log words for repetition tracking
+        self.self_awareness.log_words(response)
+
+        # Maybe add hesitation at the start (sometimes)
+        if self.self_awareness.should_add_hesitation() and not response.startswith(("Uh", "Um", "Well", "So")):
+            hesitation = self.variations.get("hesitations")
+            enhanced = f"{hesitation} {enhanced}"
+
+        # Maybe add self-aware comment at the end
+        if self.self_awareness.should_add_self_aware_comment():
+            meta_comment = self.self_awareness.get_meta_comment(context)
+            if meta_comment:
+                enhanced = f"{enhanced} {meta_comment}"
+
+        # Assess quality and maybe comment
+        quality = self.self_awareness.assess_response_quality(response)
+        quality_comment = self.self_awareness.get_quality_comment(quality)
+        if quality_comment:
+            enhanced = f"{enhanced} {quality_comment}"
+
+        return enhanced
+
+    def get_mood_context(self) -> str:
+        """Get mood context for AI prompts.
+
+        Returns:
+            Mood context string or empty if no mood system
+        """
+        if not self.mood:
+            return ""
+
+        return self.mood.get_mood_prompt_context()
+
+    def update_mood(self, sentiment: str = "neutral", is_interesting: bool = False):
+        """Update mood based on interaction.
+
+        Args:
+            sentiment: "positive", "neutral", or "negative"
+            is_interesting: Whether conversation was interesting
+        """
+        if self.mood:
+            self.mood.update_mood_from_interaction(sentiment, is_interesting)
+
+    def trigger_mood_event(self, event_type: str):
+        """Trigger a mood change from an event.
+
+        Args:
+            event_type: Event type (trivia_won, music_started, etc.)
+        """
+        if self.mood:
+            self.mood.trigger_event_mood(event_type)
+
+    def log_action(self, action_type: str, details: str = ""):
+        """Log an action for self-awareness.
+
+        Args:
+            action_type: Type of action
+            details: Details about the action
+        """
+        if self.self_awareness:
+            self.self_awareness.log_action(action_type, details)
+
+    def log_error(self, error_type: str):
+        """Log an error for self-aware error handling.
+
+        Args:
+            error_type: Type of error
+        """
+        if self.self_awareness:
+            self.self_awareness.log_error(error_type)
+
+    def track_message_rhythm(self, channel_id: int, message_length: int):
+        """Track message for rhythm analysis.
+
+        Args:
+            channel_id: Channel ID
+            message_length: Message length in characters
+        """
+        if self.rhythm:
+            self.rhythm.track_message(channel_id, message_length)
+
+    def get_rhythm_style_prompt(self, channel_id: int) -> str:
+        """Get rhythm-based style prompt.
+
+        Args:
+            channel_id: Channel ID
+
+        Returns:
+            Style prompt or empty string
+        """
+        if not self.rhythm:
+            return ""
+        return self.rhythm.get_style_prompt(channel_id)
+
+    async def on_voice_state_update(self, member, before, after) -> Optional[str]:
+        """Handle voice state updates for environmental awareness.
+
+        Args:
+            member: Member whose state changed
+            before: Previous voice state
+            after: New voice state
+
+        Returns:
+            Comment or None
+        """
+        if not self.environmental:
+            return None
+        return await self.environmental.on_voice_state_update(member, before, after)
+
+    def get_voice_context(self, guild) -> str:
+        """Get voice channel context.
+
+        Args:
+            guild: Discord guild
+
+        Returns:
+            Voice context string
+        """
+        if not self.environmental:
+            return ""
+        return self.environmental.get_voice_context(guild)
+
+    def get_stats(self) -> dict:
+        """Get statistics from all naturalness systems.
+
+        Returns:
+            Combined statistics dict
+        """
+        stats = {
+            "reactions_enabled": Config.REACTIONS_ENABLED,
+            "activity_awareness_enabled": Config.ACTIVITY_AWARENESS_ENABLED,
+        }
+
+        if self.mood:
+            stats["mood"] = self.mood.get_stats()
+
+        if self.self_awareness:
+            stats["self_awareness"] = self.self_awareness.get_stats()
+
+        if self.environmental:
+            stats["environmental"] = self.environmental.get_stats()
+
+        if self.rhythm:
+            stats["rhythm"] = self.rhythm.get_stats()
+
+        return stats

@@ -36,10 +36,18 @@ from services.web_dashboard import WebDashboard
 from services.ambient_mode import AmbientMode
 from services.naturalness import NaturalnessService
 from services.reminders import RemindersService
+from services.proactive_callbacks import ProactiveCallbacksSystem
+from services.curiosity_system import CuriositySystem
+from services.pattern_learner import PatternLearner
 from cogs.reminders import RemindersCog
 from services.web_search import WebSearchService
 from services.trivia import TriviaService
 from cogs.trivia import TriviaCog
+from services.conversation_manager import MultiTurnConversationManager
+from services.persona_system import PersonaSystem
+from services.ai_decision_engine import AIDecisionEngine
+from services.enhanced_tools import EnhancedToolSystem
+from services.metrics import MetricsService
 
 # Setup logging
 logging.basicConfig(
@@ -70,16 +78,42 @@ class OllamaBot(commands.Bot):
             help_command=None,  # We'll create our own
         )
 
+        # Track background tasks for clean shutdown
+        self.background_tasks = set()
+
+        # Initialize metrics service (FIRST so other services can use it)
+        self.metrics = MetricsService()
+        logger.info("Metrics service initialized")
+
         # Initialize services
-        self.ollama = OllamaService(
-            host=Config.OLLAMA_HOST,
-            model=Config.OLLAMA_MODEL,
-            temperature=Config.OLLAMA_TEMPERATURE,
-            max_tokens=Config.OLLAMA_MAX_TOKENS,
-            min_p=Config.OLLAMA_MIN_P,
-            top_k=Config.OLLAMA_TOP_K,
-            repeat_penalty=Config.OLLAMA_REPEAT_PENALTY,
-        )
+        # Initialize LLM service based on provider
+        if Config.LLM_PROVIDER == "openrouter":
+            from services.openrouter import OpenRouterService
+            self.ollama = OpenRouterService(
+                api_key=Config.OPENROUTER_API_KEY,
+                model=Config.OPENROUTER_MODEL,
+                base_url=Config.OPENROUTER_URL,
+                temperature=Config.OLLAMA_TEMPERATURE,
+                max_tokens=Config.OLLAMA_MAX_TOKENS,
+                min_p=Config.OLLAMA_MIN_P,
+                top_k=Config.OLLAMA_TOP_K,
+                repeat_penalty=Config.OLLAMA_REPEAT_PENALTY,
+                frequency_penalty=Config.LLM_FREQUENCY_PENALTY,
+                presence_penalty=Config.LLM_PRESENCE_PENALTY,
+                top_p=Config.LLM_TOP_P,
+            )
+            logger.info(f"Using OpenRouter Provider with model: {Config.OPENROUTER_MODEL}")
+        else:
+            self.ollama = OllamaService(
+                host=Config.OLLAMA_HOST,
+                model=Config.OLLAMA_MODEL,
+                temperature=Config.OLLAMA_TEMPERATURE,
+                max_tokens=Config.OLLAMA_MAX_TOKENS,
+                min_p=Config.OLLAMA_MIN_P,
+                top_k=Config.OLLAMA_TOP_K,
+                repeat_penalty=Config.OLLAMA_REPEAT_PENALTY,
+            )
+            logger.info(f"Using Ollama Provider with model: {Config.OLLAMA_MODEL}")
 
         self.tts = TTSService(
             engine=Config.TTS_ENGINE,
@@ -88,6 +122,9 @@ class OllamaBot(commands.Bot):
             volume=Config.TTS_VOLUME,
             kokoro_voice=Config.KOKORO_VOICE,
             kokoro_speed=Config.KOKORO_SPEED,
+            supertonic_voice=Config.SUPERTONIC_VOICE,
+            supertonic_steps=Config.SUPERTONIC_STEPS,
+            supertonic_speed=Config.SUPERTONIC_SPEED,
         )
 
         self.rvc = None
@@ -103,6 +140,7 @@ class OllamaBot(commands.Bot):
         self.history_manager = ChatHistoryManager(
             history_dir=Config.CHAT_HISTORY_DIR,
             max_messages=Config.CHAT_HISTORY_MAX_MESSAGES,
+            metrics=self.metrics,
         )
 
         # Initialize user profiles if enabled
@@ -180,12 +218,6 @@ class OllamaBot(commands.Bot):
         # Initialize Web Dashboard
         self.web_dashboard = WebDashboard(self)
 
-        # Initialize Ambient Mode
-        self.ambient_mode = None
-        if Config.AMBIENT_MODE_ENABLED:
-            self.ambient_mode = AmbientMode(self, self.ollama)
-            logger.info("Ambient mode initialized")
-
         # Initialize Naturalness Service
         self.naturalness = None
         if Config.NATURALNESS_ENABLED:
@@ -216,6 +248,66 @@ class OllamaBot(commands.Bot):
             )
             logger.info("Trivia service initialized")
 
+        # Initialize Multi-Turn Conversation Manager
+        self.conversation_manager = MultiTurnConversationManager()
+        logger.info("Multi-turn conversation manager initialized")
+
+        # Initialize AI-First Persona System
+        self.persona_system = None
+        self.decision_engine = None
+        self.current_persona = None
+        self.tool_system = None
+
+        if Config.USE_PERSONA_SYSTEM:
+            try:
+                self.persona_system = PersonaSystem()
+                self.tool_system = EnhancedToolSystem()
+
+                # Compile persona from character + framework
+                self.current_persona = self.persona_system.compile_persona(
+                    Config.CHARACTER,
+                    Config.FRAMEWORK
+                )
+
+                if self.current_persona:
+                    # Initialize decision engine with persona
+                    self.decision_engine = AIDecisionEngine(self.ollama, self.tool_system)
+                    self.decision_engine.set_persona(self.current_persona)
+                    logger.info(f"✨ AI-First Persona loaded: {self.current_persona.persona_id}")
+                    logger.info(f"   Character: {self.current_persona.character.display_name}")
+                    logger.info(f"   Framework: {self.current_persona.framework.name}")
+                else:
+                    logger.error(f"Failed to compile persona: {Config.CHARACTER}_{Config.FRAMEWORK}")
+            except Exception as e:
+                logger.error(f"Error initializing persona system: {e}")
+                logger.info("Falling back to traditional mode")
+
+        # Initialize Proactive Callbacks System
+        self.callbacks_system = ProactiveCallbacksSystem()
+        logger.info("Proactive callbacks system initialized")
+
+        # Initialize Curiosity System
+        self.curiosity_system = CuriositySystem(self.ollama)
+        if self.current_persona:
+            self.curiosity_system.set_persona(self.current_persona)
+        logger.info("Curiosity system initialized")
+
+        # Initialize Pattern Learner (Learning & Adaptation)
+        self.pattern_learner = PatternLearner()
+        logger.info("Pattern learner initialized with user adaptation")
+
+        # Initialize Ambient Mode (after PersonaSystem so we can pass persona components)
+        self.ambient_mode = None
+        if Config.AMBIENT_MODE_ENABLED:
+            self.ambient_mode = AmbientMode(
+                self,
+                self.ollama,
+                persona_system=self.persona_system,
+                compiled_persona=self.current_persona,
+                callbacks_system=self.callbacks_system
+            )
+            logger.info("Ambient mode initialized with persona awareness")
+
     async def setup_hook(self):
         """Setup hook called when bot is starting."""
         logger.info("Setting up bot...")
@@ -230,17 +322,24 @@ class OllamaBot(commands.Bot):
             await self.trivia_service.initialize()
             logger.info("Trivia service initialized")
 
-        # Initialize Ollama
+        # Initialize RAG if enabled
+        if self.rag:
+            await self.rag.initialize()
+            logger.info("RAG service initialized (documents loaded)")
+
+        # Initialize LLM Service
         await self.ollama.initialize()
         healthy = await self.ollama.check_health()
 
         if not healthy:
+            provider_name = "OpenRouter" if Config.LLM_PROVIDER == "openrouter" else "Ollama"
             logger.warning(
-                f"Could not connect to Ollama at {Config.OLLAMA_HOST}. "
-                "Make sure Ollama is running!"
+                f"Could not connect to {provider_name}. "
+                "Check your configuration and internet connection."
             )
         else:
-            logger.info(f"Connected to Ollama - Model: {Config.OLLAMA_MODEL}")
+            model_name = Config.OPENROUTER_MODEL if Config.LLM_PROVIDER == "openrouter" else Config.OLLAMA_MODEL
+            logger.info(f"Connected to LLM Provider ({Config.LLM_PROVIDER}) - Model: {model_name}")
 
         # Load cogs
         await self.add_cog(
@@ -252,6 +351,14 @@ class OllamaBot(commands.Bot):
                 self.summarizer,
                 self.web_search,
                 self.naturalness,
+                self.rag,
+                self.conversation_manager,
+                persona_system=self.persona_system,
+                compiled_persona=self.current_persona,
+                decision_engine=self.decision_engine,
+                callbacks_system=self.callbacks_system,
+                curiosity_system=self.curiosity_system,
+                pattern_learner=self.pattern_learner,
             )
         )
         logger.info("Loaded ChatCog")
@@ -280,17 +387,32 @@ class OllamaBot(commands.Bot):
             await self.add_cog(TriviaCog(self, self.trivia_service))
             logger.info("Loaded TriviaCog")
 
+        # Load additional modular cogs
+        # These cogs split up the massive chat.py into organized modules
+        await self.load_extension("cogs.memory_commands")
+        # await self.load_extension("cogs.persona_commands")  # DEPRECATED: Use character_commands instead
+        await self.load_extension("cogs.character_commands")  # AI-First character system
+        await self.load_extension("cogs.profile_commands")
+        await self.load_extension("cogs.search_commands")
+
+        # Load EventListenersCog for natural reactions
+        from cogs.event_listeners import EventListenersCog
+        await self.add_cog(EventListenersCog(self))
+        logger.info("Loaded EventListenersCog")
+
         # Sync commands (for slash commands)
         await self.tree.sync()
         logger.info("Synced command tree")
 
         # Start background tasks
         if self.memory_manager:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 self.memory_manager.start_background_cleanup(
                     interval_hours=Config.MEMORY_CLEANUP_INTERVAL_HOURS
                 )
             )
+            self.background_tasks.add(task)
+            task.add_done_callback(self.background_tasks.discard)
 
             logger.info("Started background memory cleanup task")
 
@@ -337,6 +459,31 @@ class OllamaBot(commands.Bot):
         if message.author.bot:
             return
 
+        # Check if ChatCog should handle this message (implicit chat)
+        chat_cog = self.get_cog("ChatCog")
+        if chat_cog:
+            # We need to check if check_and_handle_message exists (it might not if cog failed to load or old version)
+            if hasattr(chat_cog, 'check_and_handle_message'):
+                handled = await chat_cog.check_and_handle_message(message)
+                if handled:
+                    return
+
+        # Check for AI-first spontaneous thoughts (framework-based)
+        if self.decision_engine and Config.AMBIENT_CHANNELS:
+            if message.channel.id in Config.AMBIENT_CHANNELS:
+                try:
+                    spontaneous_thought = await self.decision_engine.get_spontaneous_thought()
+                    if spontaneous_thought:
+                        await message.channel.send(spontaneous_thought)
+                        logger.info(f"Sent spontaneous thought: {spontaneous_thought[:50]}...")
+                        return  # Don't process other reactions if we sent a thought
+                except Exception as e:
+                    logger.error(f"Failed to generate spontaneous thought: {e}")
+
+        # Enable natural reactions (emojis)
+        if self.naturalness:
+            await self.naturalness.on_message(message)
+
         # Check for proactive engagement
         if self.ambient_mode and Config.PROACTIVE_ENGAGEMENT_ENABLED:
             # Get current mood if available
@@ -359,39 +506,7 @@ class OllamaBot(commands.Bot):
                 except Exception as e:
                     logger.error(f"Failed to send proactive engagement: {e}")
 
-    async def on_voice_state_update(self, member, before, after):
-        """Handle voice state updates for environmental awareness."""
-        if not self.naturalness:
-            return
 
-        # Get environmental comment
-        comment = await self.naturalness.on_voice_state_update(member, before, after)
-
-        if comment:
-            # Find a text channel to send the comment
-            # Try to find the channel the bot is configured for, or the guild's system channel
-            guild = member.guild
-            target_channel = None
-
-            # Try to find a configured ambient channel
-            if Config.AMBIENT_CHANNELS:
-                for channel_id in Config.AMBIENT_CHANNELS:
-                    channel = guild.get_channel(channel_id)
-                    if channel:
-                        target_channel = channel
-                        break
-
-            # Fallback to system channel
-            if not target_channel:
-                target_channel = guild.system_channel
-
-            # Send comment
-            if target_channel:
-                try:
-                    await target_channel.send(comment)
-                    logger.debug(f"Environmental comment: {comment}")
-                except Exception as e:
-                    logger.error(f"Failed to send environmental comment: {e}")
 
     async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
         """Handle command errors."""
@@ -411,6 +526,21 @@ class OllamaBot(commands.Bot):
         """Cleanup when bot is shutting down."""
         logger.info("Shutting down bot...")
 
+        # Cancel all background tasks
+        if self.background_tasks:
+            logger.info(f"Cancelling {len(self.background_tasks)} background tasks...")
+            for task in self.background_tasks:
+                task.cancel()
+
+            # Wait for all tasks to complete cancellation
+            await asyncio.gather(*self.background_tasks, return_exceptions=True)
+            logger.info("All background tasks cancelled")
+
+        # Cleanup cog background tasks
+        chat_cog = self.get_cog("ChatCog")
+        if chat_cog and hasattr(chat_cog, 'cleanup_tasks'):
+            await chat_cog.cleanup_tasks()
+
         # Cleanup services
         if self.user_profiles:
             await self.user_profiles.stop_background_saver()
@@ -420,6 +550,9 @@ class OllamaBot(commands.Bot):
 
         if self.web_dashboard:
             await self.web_dashboard.stop()
+
+        if self.reminders_service:
+            await self.reminders_service.stop()
 
         await self.ollama.close()
 

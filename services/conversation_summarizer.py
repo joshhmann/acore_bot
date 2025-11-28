@@ -5,6 +5,7 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional
 import json
+import aiofiles
 
 from services.ollama import OllamaService
 from services.rag import RAGService
@@ -98,6 +99,10 @@ SUMMARY:"""
                 system_prompt="You are an expert at analyzing and summarizing conversations. "
                 "Create clear, structured summaries that capture the essence and key information.",
             )
+            
+            # Clean thinking process
+            from utils.response_validator import ResponseValidator
+            summary_text = ResponseValidator.clean_thinking_process(summary_text)
 
             # Create summary metadata
             summary_data = {
@@ -152,7 +157,7 @@ SUMMARY:"""
             content = "\n".join(content_parts)
 
             # Add to RAG system
-            success = self.rag.add_document(filename, content)
+            success = await self.rag.add_document(filename, content)
 
             if success:
                 logger.info(f"Saved conversation summary to RAG: {filename}")
@@ -182,8 +187,8 @@ SUMMARY:"""
             filename = f"summary_{channel_id}_{timestamp}.json"
             filepath = self.summary_dir / filename
 
-            with open(filepath, "w") as f:
-                json.dump(summary_data, f, indent=2)
+            async with aiofiles.open(filepath, "w") as f:
+                await f.write(json.dumps(summary_data, indent=2))
 
             logger.info(f"Saved summary to file: {filename}")
             return True
@@ -298,7 +303,7 @@ SUMMARY:"""
 
         return "\n".join(context_parts)
 
-    def list_summaries(self, channel_id: Optional[int] = None) -> List[Dict[str, any]]:
+    async def list_summaries(self, channel_id: Optional[int] = None) -> List[Dict[str, any]]:
         """List all stored conversation summaries.
 
         Args:
@@ -314,10 +319,12 @@ SUMMARY:"""
                 f"summary_{channel_id}_*.json" if channel_id else "summary_*.json"
             )
 
+            # Glob is synchronous but fast for directory listing. Reading files should be async.
             for summary_file in self.summary_dir.glob(pattern):
                 try:
-                    with open(summary_file, "r") as f:
-                        summary_data = json.load(f)
+                    async with aiofiles.open(summary_file, "r") as f:
+                        content = await f.read()
+                        summary_data = json.loads(content)
                         summaries.append(
                             {
                                 "filename": summary_file.name,

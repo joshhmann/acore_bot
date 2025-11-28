@@ -25,13 +25,28 @@ class TimeParser:
         (r'in\s+(\d+)\s*(?:hr|hour)s?', 'hours'),
         (r'in\s+(\d+)\s*(?:day)s?', 'days'),
         (r'in\s+(\d+)\s*(?:week)s?', 'weeks'),
+        (r'in\s+(\d+)\s*mo(?:nths?)?', 'months'),
+        (r'in\s+(\d+)\s*y(?:ears?)?', 'years'),
+        (r'in\s+(\d+)\s*(?:sec(?:ond)?s?)', 'seconds'),
+        (r'in\s+(\d+)\s*(?:ms|millisecond)s?', 'milliseconds'),
+        (r'in\s+(\d+)\s*(?:us|microsecond)s?', 'microseconds'),
+        # Text-based relative times
+        (r'in\s+half\s+an?\s+hour', 'half_hour'),
+        (r'in\s+an?\s+hour', 'one_hour'),
+        (r'in\s+a\s+min(?:ute)?', 'one_minute'),
+        (r'in\s+a\s+sec(?:ond)?', 'one_second'),
         # "X minutes/hours from now"
         (r'(\d+)\s*(?:min(?:ute)?s?)\s*(?:from now)?', 'minutes'),
         (r'(\d+)\s*(?:hr|hour)s?\s*(?:from now)?', 'hours'),
+        (r'(\d+)\s*(?:sec(?:ond)?s?)\s*(?:from now)?', 'seconds'),
         # Short forms
         (r'in\s+(\d+)m\b', 'minutes'),
         (r'in\s+(\d+)h\b', 'hours'),
         (r'in\s+(\d+)d\b', 'days'),
+        (r'in\s+(\d+)w\b', 'weeks'),
+        (r'in\s+(\d+)mo\b', 'months'),
+        (r'in\s+(\d+)y\b', 'years'),
+        (r'in\s+(\d+)s\b', 'seconds'),
     ]
 
     # Patterns for absolute times
@@ -40,6 +55,12 @@ class TimeParser:
         (r'at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', 'time'),
         # "tomorrow at 5pm"
         (r'tomorrow\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', 'tomorrow_time'),
+    ]
+
+    # Patterns for combined relative date + absolute time
+    COMBINED_PATTERNS = [
+        # "in 3 days at 5pm", "3 days from now at 5pm"
+        (r'(?:in\s+)?(\d+)\s*days?\s*(?:from now)?\s+at\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?', 'days_at_time'),
     ]
 
     @classmethod
@@ -55,7 +76,29 @@ class TimeParser:
         text = text.lower().strip()
         now = datetime.now()
 
-        # Try relative patterns first
+        # Try combined patterns first (most specific)
+        for pattern, ptype in cls.COMBINED_PATTERNS:
+            match = re.search(pattern, text)
+            if match:
+                groups = match.groups()
+                days = int(groups[0])
+                hour = int(groups[1])
+                minute = int(groups[2]) if groups[2] else 0
+                ampm = groups[3] if len(groups) > 3 else None
+
+                # Convert to 24-hour format
+                if ampm == 'pm' and hour != 12:
+                    hour += 12
+                elif ampm == 'am' and hour == 12:
+                    hour = 0
+                
+                # Calculate target date
+                target_date = now + timedelta(days=days)
+                
+                # Combine with target time
+                return target_date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+        # Try relative patterns
         for pattern, unit in cls.RELATIVE_PATTERNS:
             match = re.search(pattern, text)
             if match:
@@ -68,6 +111,26 @@ class TimeParser:
                     return now + timedelta(days=amount)
                 elif unit == 'weeks':
                     return now + timedelta(weeks=amount)
+                elif unit == 'months':
+                    return now + timedelta(days=amount * 30)
+                elif unit == 'years':
+                    return now + timedelta(days=amount * 365)
+                elif unit == 'seconds':
+                    return now + timedelta(seconds=amount)
+                elif unit == 'milliseconds':
+                    return now + timedelta(milliseconds=amount)
+                elif unit == 'microseconds':
+                    return now + timedelta(microseconds=amount)
+            
+            # Handle text-based units (no amount capture)
+            if unit == 'half_hour':
+                return now + timedelta(minutes=30)
+            elif unit == 'one_hour':
+                return now + timedelta(hours=1)
+            elif unit == 'one_minute':
+                return now + timedelta(minutes=1)
+            elif unit == 'one_second':
+                return now + timedelta(seconds=1)
 
         # Try absolute patterns
         for pattern, ptype in cls.ABSOLUTE_PATTERNS:
@@ -109,6 +172,10 @@ class TimeParser:
         """
         # Remove common time expressions
         cleaned = text
+
+        # Remove combined patterns
+        for pattern, _ in cls.COMBINED_PATTERNS:
+            cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
 
         # Remove relative time patterns
         for pattern, _ in cls.RELATIVE_PATTERNS:

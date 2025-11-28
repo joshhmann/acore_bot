@@ -392,6 +392,31 @@ class WebDashboard:
                     </div>
                 </div>
 
+                <!-- Metrics Section -->
+                <div class="grid" style="margin-top: 20px;">
+                    <div class="card">
+                        <h2>📊 Performance Metrics</h2>
+                        <div id="performance-metrics">Loading...</div>
+                    </div>
+
+                    <div class="card">
+                        <h2>💾 Cache Performance</h2>
+                        <div id="cache-metrics">Loading...</div>
+                    </div>
+                </div>
+
+                <div class="grid">
+                    <div class="card">
+                        <h2>👥 Activity Stats</h2>
+                        <div id="activity-metrics">Loading...</div>
+                    </div>
+
+                    <div class="card">
+                        <h2>⚠️ Error Monitoring</h2>
+                        <div id="error-metrics">Loading...</div>
+                    </div>
+                </div>
+
                 <div class="card" style="margin-bottom: 30px;">
                     <h2>Quick Actions</h2>
                     <div class="controls">
@@ -408,7 +433,7 @@ class WebDashboard:
                             <button class="tab-btn" onclick="showConfigTab('chat')">Chat</button>
                             <button class="tab-btn" onclick="showConfigTab('voice')">Voice</button>
                             <button class="tab-btn" onclick="showConfigTab('sounds')">🔊 Sounds</button>
-                            <button class="tab-btn" onclick="showConfigTab('ollama')">Ollama</button>
+                            <button class="tab-btn" onclick="showConfigTab('llm')">🧠 LLM Settings</button>
                         </div>
 
                         <div id="config-ambient" class="config-section active">
@@ -473,10 +498,19 @@ class WebDashboard:
                             <div class="config-field">
                                 <label>TTS Engine</label>
                                 <select id="TTS_ENGINE" onchange="markConfigDirty()">
-                                    <option value="kokoro">Kokoro</option>
                                     <option value="edge">Edge TTS</option>
+                                    <option value="kokoro">Kokoro</option>
+                                    <option value="supertonic">Supertonic</option>
                                 </select>
                             </div>
+
+                            <h3 style="margin-top: 15px; color: var(--accent-color); font-size: 0.9rem;">Edge TTS Settings</h3>
+                            <div class="config-field">
+                                <label>Edge Voice</label>
+                                <input type="text" id="DEFAULT_TTS_VOICE" onchange="markConfigDirty()">
+                            </div>
+
+                            <h3 style="margin-top: 15px; color: var(--accent-color); font-size: 0.9rem;">Kokoro Settings</h3>
                             <div class="config-field">
                                 <label>Kokoro Voice</label>
                                 <input type="text" id="KOKORO_VOICE" onchange="markConfigDirty()">
@@ -485,6 +519,22 @@ class WebDashboard:
                                 <label>Kokoro Speed</label>
                                 <input type="number" step="0.1" id="KOKORO_SPEED" onchange="markConfigDirty()">
                             </div>
+
+                            <h3 style="margin-top: 15px; color: var(--accent-color); font-size: 0.9rem;">Supertonic Settings</h3>
+                            <div class="config-field">
+                                <label>Supertonic Voice</label>
+                                <input type="text" id="SUPERTONIC_VOICE" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Supertonic Speed</label>
+                                <input type="number" step="0.05" id="SUPERTONIC_SPEED" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Supertonic Steps (1-20)</label>
+                                <input type="number" step="1" min="1" max="20" id="SUPERTONIC_STEPS" onchange="markConfigDirty()">
+                            </div>
+
+                            <h3 style="margin-top: 15px; color: var(--accent-color); font-size: 0.9rem;">RVC Voice Conversion</h3>
                             <div class="config-field">
                                 <label>RVC Enabled</label>
                                 <input type="checkbox" id="RVC_ENABLED" onchange="markConfigDirty()">
@@ -495,18 +545,63 @@ class WebDashboard:
                             </div>
                         </div>
 
-                        <div id="config-ollama" class="config-section">
+                        <div id="config-llm" class="config-section">
                             <div class="config-field">
-                                <label>Model</label>
+                                <label>LLM Provider</label>
+                                <select id="LLM_PROVIDER" onchange="markConfigDirty()">
+                                    <option value="ollama">Ollama (Local)</option>
+                                    <option value="openrouter">OpenRouter (Cloud)</option>
+                                </select>
+                            </div>
+
+                            <h3 style="margin-top: 15px; color: var(--accent-color); font-size: 0.9rem;">Ollama Settings</h3>
+                            <div class="config-field">
+                                <label>Local Model</label>
                                 <input type="text" id="OLLAMA_MODEL" onchange="markConfigDirty()">
                             </div>
+
+                            <h3 style="margin-top: 15px; color: var(--accent-color); font-size: 0.9rem;">OpenRouter Settings</h3>
                             <div class="config-field">
-                                <label>Temperature</label>
-                                <input type="number" step="0.01" id="OLLAMA_TEMPERATURE" onchange="markConfigDirty()">
+                                <label>API Key</label>
+                                <input type="password" id="OPENROUTER_API_KEY" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Cloud Model</label>
+                                <input type="text" id="OPENROUTER_MODEL" onchange="markConfigDirty()">
+                            </div>
+
+                            <h3 style="margin-top: 15px; color: var(--accent-color); font-size: 0.9rem;">Sampling Parameters</h3>
+                            <div class="config-field">
+                                <label>Temperature (0.0 - 2.0)</label>
+                                <input type="number" step="0.01" min="0" max="2" id="OLLAMA_TEMPERATURE" onchange="markConfigDirty()">
                             </div>
                             <div class="config-field">
                                 <label>Max Tokens</label>
                                 <input type="number" id="OLLAMA_MAX_TOKENS" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Top P (0.0 - 1.0)</label>
+                                <input type="number" step="0.01" min="0" max="1" id="LLM_TOP_P" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Frequency Penalty (-2.0 - 2.0)</label>
+                                <input type="number" step="0.01" min="-2" max="2" id="LLM_FREQUENCY_PENALTY" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Presence Penalty (-2.0 - 2.0)</label>
+                                <input type="number" step="0.01" min="-2" max="2" id="LLM_PRESENCE_PENALTY" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Repetition Penalty (0.0 - 2.0)</label>
+                                <input type="number" step="0.01" min="0" max="2" id="OLLAMA_REPEAT_PENALTY" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Min P (0.0 - 1.0)</label>
+                                <input type="number" step="0.01" min="0" max="1" id="OLLAMA_MIN_P" onchange="markConfigDirty()">
+                            </div>
+                            <div class="config-field">
+                                <label>Top K</label>
+                                <input type="number" step="1" id="OLLAMA_TOP_K" onchange="markConfigDirty()">
                             </div>
                         </div>
 
@@ -690,18 +785,112 @@ class WebDashboard:
                         // AI Config
                         document.getElementById('ai-config').innerHTML = `
                             <div class="stat">
-                                <span class="stat-label">Model</span>
-                                <span class="stat-value">${data.ollama_model}</span>
+                                <span class="stat-label">LLM Provider</span>
+                                <span class="stat-value">${data.llm_provider}</span>
                             </div>
                             <div class="stat">
-                                <span class="stat-label">TTS Engine</span>
+                                <span class="stat-label">Model</span>
+                                <span class="stat-value" style="font-size: 0.85rem;">${data.active_model}</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">TTS</span>
                                 <span class="stat-value">${data.tts_engine}</span>
+                            </div>
+                            <div class="stat">
+                                <span class="stat-label">Voice</span>
+                                <span class="stat-value" style="font-size: 0.85rem;">${data.tts_voice}</span>
                             </div>
                             <div class="stat">
                                 <span class="stat-label">RVC</span>
                                 <span class="stat-value ${data.rvc_enabled ? 'status-ok' : 'status-err'}">${data.rvc_enabled ? 'Enabled' : 'Disabled'}</span>
                             </div>
                         `;
+
+                        // Performance Metrics
+                        if (data.metrics && data.metrics.response_times) {
+                            const rt = data.metrics.response_times;
+                            document.getElementById('performance-metrics').innerHTML = `
+                                <div class="stat">
+                                    <span class="stat-label">Avg Response Time</span>
+                                    <span class="stat-value">${rt.avg > 0 ? rt.avg.toFixed(0) : '0'}ms</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">P95 Response Time</span>
+                                    <span class="stat-value">${rt.p95 > 0 ? rt.p95.toFixed(0) : '0'}ms</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Messages Processed</span>
+                                    <span class="stat-value">${data.metrics.active_stats.messages_processed}</span>
+                                </div>
+                            `;
+                        } else {
+                            document.getElementById('performance-metrics').innerHTML = '<div class="stat"><span class="stat-label">No metrics data yet</span></div>';
+                        }
+
+                        // Cache Metrics
+                        if (data.metrics && data.metrics.cache_stats) {
+                            const cache = data.metrics.cache_stats;
+                            const historyHitRate = cache.history_cache.hit_rate.toFixed(1);
+                            document.getElementById('cache-metrics').innerHTML = `
+                                <div class="stat">
+                                    <span class="stat-label">History Cache Hit Rate</span>
+                                    <span class="stat-value ${cache.history_cache.hit_rate > 80 ? 'status-ok' : cache.history_cache.hit_rate > 50 ? 'status-warn' : 'status-err'}">${historyHitRate}%</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Cache Hits</span>
+                                    <span class="stat-value">${cache.history_cache.hits}</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Cache Misses</span>
+                                    <span class="stat-value">${cache.history_cache.misses}</span>
+                                </div>
+                            `;
+                        } else {
+                            document.getElementById('cache-metrics').innerHTML = '<div class="stat"><span class="stat-label">No cache data yet</span></div>';
+                        }
+
+                        // Activity Metrics
+                        if (data.metrics && data.metrics.active_stats) {
+                            const activity = data.metrics.active_stats;
+                            document.getElementById('activity-metrics').innerHTML = `
+                                <div class="stat">
+                                    <span class="stat-label">Active Users</span>
+                                    <span class="stat-value">${activity.active_users}</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Active Channels</span>
+                                    <span class="stat-value">${activity.active_channels}</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Commands Executed</span>
+                                    <span class="stat-value">${activity.commands_executed}</span>
+                                </div>
+                            `;
+                        } else {
+                            document.getElementById('activity-metrics').innerHTML = '<div class="stat"><span class="stat-label">No activity data yet</span></div>';
+                        }
+
+                        // Error Metrics
+                        if (data.metrics && data.metrics.errors) {
+                            const errors = data.metrics.errors;
+                            const errorRateFormatted = errors.error_rate.toFixed(2);
+                            document.getElementById('error-metrics').innerHTML = `
+                                <div class="stat">
+                                    <span class="stat-label">Total Errors</span>
+                                    <span class="stat-value ${errors.total_errors === 0 ? 'status-ok' : errors.total_errors > 10 ? 'status-err' : 'status-warn'}">${errors.total_errors}</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Error Rate</span>
+                                    <span class="stat-value ${errors.error_rate === 0 ? 'status-ok' : errors.error_rate > 5 ? 'status-err' : 'status-warn'}">${errorRateFormatted}%</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Status</span>
+                                    <span class="stat-value ${errors.total_errors === 0 ? 'status-ok' : errors.total_errors > 10 ? 'status-err' : 'status-warn'}">${errors.total_errors === 0 ? 'Healthy' : errors.total_errors > 10 ? 'Issues Detected' : 'Minor Issues'}</span>
+                                </div>
+                            `;
+                        } else {
+                            document.getElementById('error-metrics').innerHTML = '<div class="stat"><span class="stat-label">No error data yet</span></div>';
+                        }
                         
                         document.getElementById('connection-status').className = 'status-ok';
                         document.getElementById('connection-status').innerText = 'Connected';
@@ -1196,10 +1385,29 @@ class WebDashboard:
 
     async def handle_status(self, request):
         uptime = time.time() - self.start_time
-        
+
         # Auto-reset status to Idle if no activity for 30 seconds
         if self.current_activity != "Idle" and time.time() - self.last_activity_time > 30:
             self.current_activity = "Idle"
+
+        # Determine active model based on LLM provider
+        if Config.LLM_PROVIDER == "openrouter":
+            active_model = Config.OPENROUTER_MODEL
+            provider_name = "OpenRouter"
+        else:
+            active_model = Config.OLLAMA_MODEL
+            provider_name = "Ollama"
+
+        # Determine TTS engine display name
+        tts_display = Config.TTS_ENGINE.capitalize()
+        if Config.TTS_ENGINE == "edge":
+            tts_voice = Config.DEFAULT_TTS_VOICE
+        elif Config.TTS_ENGINE == "kokoro":
+            tts_voice = Config.KOKORO_VOICE
+        elif Config.TTS_ENGINE == "supertonic":
+            tts_voice = Config.SUPERTONIC_VOICE
+        else:
+            tts_voice = "Unknown"
 
         status = {
             "uptime": uptime,
@@ -1207,13 +1415,30 @@ class WebDashboard:
             "guilds": len(self.bot.guilds),
             "users": sum(g.member_count for g in self.bot.guilds),
             "voice_clients": len(self.bot.voice_clients),
-            "ollama_model": Config.OLLAMA_MODEL,
-            "tts_engine": Config.TTS_ENGINE,
+            "llm_provider": provider_name,
+            "active_model": active_model,
+            "tts_engine": tts_display,
+            "tts_voice": tts_voice,
             "rvc_enabled": Config.RVC_ENABLED,
             # New fields
             "current_activity": self.current_activity,
             "activity_history": list(self.activity_history)
         }
+
+        # Add metrics if available
+        if hasattr(self.bot, 'metrics'):
+            metrics_summary = self.bot.metrics.get_summary()
+            status['metrics'] = {
+                'response_times': metrics_summary['response_times'],
+                'active_stats': metrics_summary['active_stats'],
+                'cache_stats': metrics_summary['cache_stats'],
+                'errors': {
+                    'total_errors': metrics_summary['errors']['total_errors'],
+                    'error_rate': metrics_summary['errors']['error_rate'],
+                },
+                'token_usage': metrics_summary['token_usage'],
+            }
+
         return web.json_response(status)
 
     async def handle_logs(self, request):
@@ -1282,6 +1507,60 @@ class WebDashboard:
                 Config.AMBIENT_MIN_INTERVAL = int(env_values["AMBIENT_MIN_INTERVAL"])
             if "AMBIENT_CHANCE" in env_values:
                 Config.AMBIENT_CHANCE = float(env_values["AMBIENT_CHANCE"])
+
+            # Reload chat settings
+            if "AUTO_REPLY_ENABLED" in env_values:
+                Config.AUTO_REPLY_ENABLED = env_values["AUTO_REPLY_ENABLED"].lower() == "true"
+            if "CHAT_HISTORY_MAX_MESSAGES" in env_values:
+                Config.CHAT_HISTORY_MAX_MESSAGES = int(env_values["CHAT_HISTORY_MAX_MESSAGES"])
+            if "CONVERSATION_TIMEOUT" in env_values:
+                Config.CONVERSATION_TIMEOUT = int(env_values["CONVERSATION_TIMEOUT"])
+
+            # Reload TTS settings
+            if "TTS_ENGINE" in env_values:
+                Config.TTS_ENGINE = env_values["TTS_ENGINE"]
+            if "DEFAULT_TTS_VOICE" in env_values:
+                Config.DEFAULT_TTS_VOICE = env_values["DEFAULT_TTS_VOICE"]
+            if "KOKORO_VOICE" in env_values:
+                Config.KOKORO_VOICE = env_values["KOKORO_VOICE"]
+            if "KOKORO_SPEED" in env_values:
+                Config.KOKORO_SPEED = float(env_values["KOKORO_SPEED"])
+            if "SUPERTONIC_VOICE" in env_values:
+                Config.SUPERTONIC_VOICE = env_values["SUPERTONIC_VOICE"]
+            if "SUPERTONIC_SPEED" in env_values:
+                Config.SUPERTONIC_SPEED = float(env_values["SUPERTONIC_SPEED"])
+            if "SUPERTONIC_STEPS" in env_values:
+                Config.SUPERTONIC_STEPS = int(env_values["SUPERTONIC_STEPS"])
+            if "RVC_ENABLED" in env_values:
+                Config.RVC_ENABLED = env_values["RVC_ENABLED"].lower() == "true"
+            if "DEFAULT_RVC_MODEL" in env_values:
+                Config.DEFAULT_RVC_MODEL = env_values["DEFAULT_RVC_MODEL"]
+
+            # Reload LLM settings
+            if "LLM_PROVIDER" in env_values:
+                Config.LLM_PROVIDER = env_values["LLM_PROVIDER"]
+            if "OLLAMA_MODEL" in env_values:
+                Config.OLLAMA_MODEL = env_values["OLLAMA_MODEL"]
+            if "OLLAMA_TEMPERATURE" in env_values:
+                Config.OLLAMA_TEMPERATURE = float(env_values["OLLAMA_TEMPERATURE"])
+            if "OLLAMA_MAX_TOKENS" in env_values:
+                Config.OLLAMA_MAX_TOKENS = int(env_values["OLLAMA_MAX_TOKENS"])
+            if "OPENROUTER_API_KEY" in env_values:
+                Config.OPENROUTER_API_KEY = env_values["OPENROUTER_API_KEY"]
+            if "OPENROUTER_MODEL" in env_values:
+                Config.OPENROUTER_MODEL = env_values["OPENROUTER_MODEL"]
+            if "LLM_FREQUENCY_PENALTY" in env_values:
+                Config.LLM_FREQUENCY_PENALTY = float(env_values["LLM_FREQUENCY_PENALTY"])
+            if "LLM_PRESENCE_PENALTY" in env_values:
+                Config.LLM_PRESENCE_PENALTY = float(env_values["LLM_PRESENCE_PENALTY"])
+            if "LLM_TOP_P" in env_values:
+                Config.LLM_TOP_P = float(env_values["LLM_TOP_P"])
+            if "OLLAMA_REPEAT_PENALTY" in env_values:
+                Config.OLLAMA_REPEAT_PENALTY = float(env_values["OLLAMA_REPEAT_PENALTY"])
+            if "OLLAMA_MIN_P" in env_values:
+                Config.OLLAMA_MIN_P = float(env_values["OLLAMA_MIN_P"])
+            if "OLLAMA_TOP_K" in env_values:
+                Config.OLLAMA_TOP_K = int(env_values["OLLAMA_TOP_K"])
 
             logger.info("Reloaded config from .env file")
         except Exception as e:
@@ -1360,15 +1639,28 @@ class WebDashboard:
                 },
                 "voice": {
                     "TTS_ENGINE": Config.TTS_ENGINE,
+                    "DEFAULT_TTS_VOICE": Config.DEFAULT_TTS_VOICE,
                     "KOKORO_VOICE": Config.KOKORO_VOICE,
                     "KOKORO_SPEED": Config.KOKORO_SPEED,
+                    "SUPERTONIC_VOICE": Config.SUPERTONIC_VOICE,
+                    "SUPERTONIC_SPEED": Config.SUPERTONIC_SPEED,
+                    "SUPERTONIC_STEPS": Config.SUPERTONIC_STEPS,
                     "RVC_ENABLED": Config.RVC_ENABLED,
                     "DEFAULT_RVC_MODEL": Config.DEFAULT_RVC_MODEL,
                 },
-                "ollama": {
+                "llm": {
+                    "LLM_PROVIDER": Config.LLM_PROVIDER,
                     "OLLAMA_MODEL": Config.OLLAMA_MODEL,
                     "OLLAMA_TEMPERATURE": Config.OLLAMA_TEMPERATURE,
                     "OLLAMA_MAX_TOKENS": Config.OLLAMA_MAX_TOKENS,
+                    "OPENROUTER_API_KEY": Config.OPENROUTER_API_KEY,
+                    "OPENROUTER_MODEL": Config.OPENROUTER_MODEL,
+                    "LLM_FREQUENCY_PENALTY": Config.LLM_FREQUENCY_PENALTY,
+                    "LLM_PRESENCE_PENALTY": Config.LLM_PRESENCE_PENALTY,
+                    "LLM_TOP_P": Config.LLM_TOP_P,
+                    "OLLAMA_REPEAT_PENALTY": Config.OLLAMA_REPEAT_PENALTY,
+                    "OLLAMA_MIN_P": Config.OLLAMA_MIN_P,
+                    "OLLAMA_TOP_K": Config.OLLAMA_TOP_K,
                 },
             }
             return web.json_response(config)

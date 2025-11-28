@@ -117,8 +117,9 @@ class MemoryManager:
 
                     if mtime < cutoff_time:
                         # Load and compress the history
-                        with open(history_file, "r") as f:
-                            history_data = json.load(f)
+                        async with aiofiles.open(history_file, "r") as f:
+                            content = await f.read()
+                            history_data = json.loads(content)
 
                         # Create archive filename with timestamp
                         archive_name = (
@@ -127,16 +128,16 @@ class MemoryManager:
                         archive_path = self.archive_dir / archive_name
 
                         # Save to archive
-                        with open(archive_path, "w") as f:
-                            json.dump(
+                        async with aiofiles.open(archive_path, "w") as f:
+                            await f.write(json.dumps(
                                 {
                                     "channel_id": history_file.stem,
                                     "archived_at": datetime.now().isoformat(),
                                     "original_modified": mtime.isoformat(),
                                     "messages": history_data,
                                 },
-                                f,
-                            )
+                                indent=2
+                            ))
 
                         original_size = history_file.stat().st_size
                         history_file.unlink()
@@ -242,15 +243,16 @@ class MemoryManager:
             return False
 
         try:
-            with open(history_file, "r") as f:
-                messages = json.load(f)
+            async with aiofiles.open(history_file, "r") as f:
+                content = await f.read()
+                messages = json.loads(content)
 
             if len(messages) > max_messages:
                 # Keep only the most recent messages
                 trimmed = messages[-max_messages:]
 
-                with open(history_file, "w") as f:
-                    json.dump(trimmed, f, indent=2)
+                async with aiofiles.open(history_file, "w") as f:
+                    await f.write(json.dumps(trimmed, indent=2))
 
                 logger.info(
                     f"Compressed history for channel {channel_id}: "

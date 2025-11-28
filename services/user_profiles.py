@@ -32,6 +32,11 @@ class UserProfileService:
 
         # In-memory cache of loaded profiles
         self.profiles: Dict[int, Dict] = {}
+        
+        # Indices for fast lookups
+        self.trait_index: Dict[str, set] = {}
+        self.interest_index: Dict[str, set] = {}
+        self._indices_built = False
 
         # AI service for automatic profile learning
         self.ollama = ollama_service
@@ -39,6 +44,7 @@ class UserProfileService:
         # Dirty profiles tracking for periodic saving
         self.dirty_profiles = set()
         self._save_task = None
+        self._index_task = None
 
         logger.info(f"User profile service initialized (dir: {self.profiles_dir})")
 
@@ -47,6 +53,10 @@ class UserProfileService:
         if self._save_task is None:
             self._save_task = asyncio.create_task(self._periodic_save_loop())
             logger.info("Started background profile saver")
+            
+        # Also start building indices in background
+        if self._index_task is None and not self._indices_built:
+            self._index_task = asyncio.create_task(self._build_indices())
 
     async def stop_background_saver(self):
         """Stop the background saver and flush pending changes."""
@@ -102,6 +112,55 @@ class UserProfileService:
             self.dirty_profiles.add(user_id)
             return False
 
+    async def _build_indices(self):
+        """Build in-memory indices from all profile files."""
+        logger.info("Building user profile indices...")
+        count = 0
+        try:
+            # Iterate over all profile files
+            for profile_file in self.profiles_dir.glob("user_*.json"):
+                try:
+                    async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
+                        content = await f.read()
+                        profile = json.loads(content)
+                        user_id = profile["user_id"]
+                        
+                        # Cache profile
+                        self.profiles[user_id] = profile
+                        
+                        # Update indices
+                        self._update_indices(user_id, profile)
+                        count += 1
+                except Exception as e:
+                    logger.error(f"Error indexing profile {profile_file}: {e}")
+            
+            self._indices_built = True
+            logger.info(f"Indexed {count} user profiles")
+            
+        except Exception as e:
+            logger.error(f"Failed to build profile indices: {e}")
+
+    def _update_indices(self, user_id: int, profile: Dict):
+        """Update indices for a single user.
+        
+        Args:
+            user_id: Discord user ID
+            profile: User profile dict
+        """
+        # Update trait index
+        for trait in profile.get("traits", []):
+            trait_lower = trait.lower()
+            if trait_lower not in self.trait_index:
+                self.trait_index[trait_lower] = set()
+            self.trait_index[trait_lower].add(user_id)
+            
+        # Update interest index
+        for interest in profile.get("interests", []):
+            interest_lower = interest.lower()
+            if interest_lower not in self.interest_index:
+                self.interest_index[interest_lower] = set()
+            self.interest_index[interest_lower].add(user_id)
+
     def _get_profile_file(self, user_id: int) -> Path:
         """Get the profile file path for a user.
 
@@ -132,6 +191,7 @@ class UserProfileService:
         if not profile_file.exists():
             profile = self._create_default_profile(user_id)
             self.profiles[user_id] = profile
+            self._update_indices(user_id, profile)
             return profile
 
         # Load from disk
@@ -140,12 +200,14 @@ class UserProfileService:
                 content = await f.read()
                 profile = json.loads(content)
                 self.profiles[user_id] = profile
+                self._update_indices(user_id, profile)
                 logger.debug(f"Loaded profile for user {user_id}")
                 return profile
         except Exception as e:
             logger.error(f"Failed to load profile for user {user_id}: {e}")
             profile = self._create_default_profile(user_id)
             self.profiles[user_id] = profile
+            self._update_indices(user_id, profile)
             return profile
 
     def _create_default_profile(self, user_id: int) -> Dict:
@@ -240,6 +302,7 @@ class UserProfileService:
 
         if interest.lower() not in [i.lower() for i in profile["interests"]]:
             profile["interests"].append(interest)
+            self._update_indices(user_id, profile)
             return await self.save_profile(user_id)
 
         return False  # Already exists
@@ -258,6 +321,7 @@ class UserProfileService:
 
         if trait.lower() not in [t.lower() for t in profile["traits"]]:
             profile["traits"].append(trait)
+            self._update_indices(user_id, profile)
             return await self.save_profile(user_id)
 
         return False
@@ -353,8 +417,18 @@ class UserProfileService:
         # Recent facts (last 5)
         if profile["facts"]:
             recent_facts = profile["facts"][-5:]
-            facts_str = "; ".join([f["fact"] for f in recent_facts])
-            context_parts.append(f"Known facts: {facts_str}")
+            # Handle both string facts and dict facts (in case of malformed data)
+            fact_strings = []
+            for f in recent_facts:
+                fact = f.get("fact", f) if isinstance(f, dict) else f
+                # Convert to string if it's still a dict (malformed data)
+                if isinstance(fact, dict):
+                    fact = str(fact.get("value", str(fact)))
+                if isinstance(fact, str) and fact.strip():
+                    fact_strings.append(fact)
+            if fact_strings:
+                facts_str = "; ".join(fact_strings)
+                context_parts.append(f"Known facts: {facts_str}")
 
         # Preferences
         if profile["preferences"]:
@@ -382,21 +456,31 @@ class UserProfileService:
         """
         matching_users = []
         trait_lower = trait.lower()
+        
+        # Use index if available
+        if trait_lower in self.trait_index:
+            return list(self.trait_index[trait_lower])
+            
+        # Fallback to scanning if indices not built yet (should be rare)
+        if not self._indices_built:
+             # Load all profiles
+            for profile_file in self.profiles_dir.glob("user_*.json"):
+                try:
+                    async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
+                        content = await f.read()
+                        profile = json.loads(content)
+                        
+                        # Update cache while we're at it
+                        self.profiles[profile["user_id"]] = profile
+                        self._update_indices(profile["user_id"], profile)
 
-        # Load all profiles
-        for profile_file in self.profiles_dir.glob("user_*.json"):
-            try:
-                async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
-                    content = await f.read()
-                    profile = json.loads(content)
+                        # Check traits
+                        user_traits = [t.lower() for t in profile.get("traits", [])]
+                        if trait_lower in user_traits:
+                            matching_users.append(profile["user_id"])
 
-                    # Check traits
-                    user_traits = [t.lower() for t in profile.get("traits", [])]
-                    if trait_lower in user_traits:
-                        matching_users.append(profile["user_id"])
-
-            except Exception as e:
-                logger.error(f"Error searching profile {profile_file}: {e}")
+                except Exception as e:
+                    logger.error(f"Error searching profile {profile_file}: {e}")
 
         return matching_users
 
@@ -411,19 +495,29 @@ class UserProfileService:
         """
         matching_users = []
         interest_lower = interest.lower()
+        
+        # Use index if available
+        if interest_lower in self.interest_index:
+            return list(self.interest_index[interest_lower])
 
-        for profile_file in self.profiles_dir.glob("user_*.json"):
-            try:
-                async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
-                    content = await f.read()
-                    profile = json.loads(content)
+        # Fallback to scanning if indices not built yet
+        if not self._indices_built:
+            for profile_file in self.profiles_dir.glob("user_*.json"):
+                try:
+                    async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
+                        content = await f.read()
+                        profile = json.loads(content)
+                        
+                        # Update cache
+                        self.profiles[profile["user_id"]] = profile
+                        self._update_indices(profile["user_id"], profile)
 
-                    user_interests = [i.lower() for i in profile.get("interests", [])]
-                    if interest_lower in user_interests:
-                        matching_users.append(profile["user_id"])
+                        user_interests = [i.lower() for i in profile.get("interests", [])]
+                        if interest_lower in user_interests:
+                            matching_users.append(profile["user_id"])
 
-            except Exception as e:
-                logger.error(f"Error searching profile {profile_file}: {e}")
+                except Exception as e:
+                    logger.error(f"Error searching profile {profile_file}: {e}")
 
         return matching_users
 
@@ -437,16 +531,21 @@ class UserProfileService:
             Formatted string describing known users
         """
         all_profiles = []
-
-        for profile_file in self.profiles_dir.glob("user_*.json"):
-            try:
-                async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
-                    content = await f.read()
-                    profile = json.loads(content)
-                    if profile["interaction_count"] > 0:
-                        all_profiles.append(profile)
-            except Exception as e:
-                logger.error(f"Error loading profile {profile_file}: {e}")
+        
+        if self._indices_built:
+            # Use cached profiles
+            all_profiles = list(self.profiles.values())
+        else:
+            # Fallback to reading files
+            for profile_file in self.profiles_dir.glob("user_*.json"):
+                try:
+                    async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
+                        content = await f.read()
+                        profile = json.loads(content)
+                        if profile["interaction_count"] > 0:
+                            all_profiles.append(profile)
+                except Exception as e:
+                    logger.error(f"Error loading profile {profile_file}: {e}")
 
         if not all_profiles:
             return "No user profiles available yet."
@@ -527,7 +626,8 @@ Extract ONLY information that is clearly stated or strongly implied. Return a JS
   "interests": [],     // Topics they're interested in: ["gaming", "Halo", "anime", "coding", etc.]
   "facts": [],         // Specific facts: ["Plays Halo 3", "Favorite color is blue", etc.]
   "preferences": {{}},  // Key-value pairs: {{"favorite_game": "Halo 3", "timezone": "PST"}}
-  "memorable_quote": null  // If user said something genuinely funny/clever/interesting, include it. Otherwise null.
+  "memorable_quote": null,  // If user said something genuinely funny/clever/interesting, include it. Otherwise null.
+  "behavioral_instruction": null  // IMPORTANT: If the user is telling the bot HOW to behave or respond (e.g., "when you see X, say Y", "always greet them with Z", "call them by nickname"), extract the EXACT instruction here.
 }}
 
 RULES:
@@ -537,7 +637,8 @@ RULES:
 - Interests should be nouns/topics
 - Facts should be complete statements
 - memorable_quote: Only for genuinely funny, witty, or uniquely interesting statements
-- If nothing can be extracted, return empty arrays/objects
+- **behavioral_instruction**: Look for phrases like "when you see", "always say", "greet with", "call them", "respond with", "remember to". If found, extract the FULL instruction EXACTLY as stated.
+- If nothing can be extracted, return empty arrays/objects/null
 - Return ONLY valid JSON, no other text
 
 JSON:"""
@@ -613,6 +714,44 @@ JSON:"""
                 if len(profile["memorable_quotes"]) > 20:
                     profile["memorable_quotes"] = profile["memorable_quotes"][-20:]
                 updated = True
+
+            # Extract behavioral instructions (e.g., "when you see X, say Y")
+            if extracted.get("behavioral_instruction"):
+                instruction = extracted["behavioral_instruction"]
+                
+                # Check if this instruction is about another user (contains "when you see", "for @user", etc.)
+                # We'll store it in the MENTIONED user's profile, not the speaker's
+                import re
+                
+                # Try to extract mentioned user IDs from the original message
+                mention_pattern = r'<@!?(\d+)>'
+                mentioned_ids = re.findall(mention_pattern, user_message)
+                
+                if mentioned_ids:
+                    # Store instruction in the MENTIONED user's profile
+                    for mentioned_id_str in mentioned_ids:
+                        mentioned_id = int(mentioned_id_str)
+                        mentioned_profile = await self.load_profile(mentioned_id)
+                        
+                        fact_entry = {
+                            "fact": f"When you see this user: {instruction}",
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "source": "behavioral_instruction",
+                        }
+                        mentioned_profile["facts"].append(fact_entry)
+                        await self.save_profile(mentioned_id)
+                        logger.info(f"Learned behavioral instruction for mentioned user {mentioned_id}: {instruction}")
+                        updated = True
+                else:
+                    # No mention found, store in speaker's profile as before
+                    fact_entry = {
+                        "fact": f"When you see {username}: {instruction}",
+                        "timestamp": datetime.utcnow().isoformat(),
+                        "source": "behavioral_instruction",
+                    }
+                    profile["facts"].append(fact_entry)
+                    updated = True
+                    logger.info(f"Learned behavioral instruction for user {user_id}: {instruction}")
 
             # Save if anything was learned
             if updated:
