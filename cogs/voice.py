@@ -61,26 +61,27 @@ class VoiceCog(commands.Cog):
             )
             return
 
+        await interaction.response.defer(ephemeral=True)
         channel = interaction.user.voice.channel
 
         try:
             async with self.voice_clients_lock:
                 if interaction.guild.id in self.voice_clients:
-                    await interaction.response.send_message(
-                        "✅ Already connected to a voice channel!", ephemeral=True
+                    await interaction.followup.send(
+                        "✅ Already connected to a voice channel!"
                     )
                     return
 
                 voice_client = await channel.connect(cls=voice_recv.VoiceRecvClient)
                 self.voice_clients[interaction.guild.id] = voice_client
 
-            await interaction.response.send_message(
-                format_success(f"Joined **{channel.name}**!"), ephemeral=True
+            await interaction.followup.send(
+                format_success(f"Joined **{channel.name}**!")
             )
 
         except Exception as e:
             logger.error(f"Failed to join voice channel: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
+            await interaction.followup.send(format_error(e))
 
     @app_commands.command(name="leave", description="Leave voice channel")
     async def leave(self, interaction: discord.Interaction):
@@ -89,12 +90,13 @@ class VoiceCog(commands.Cog):
         Args:
             interaction: Discord interaction
         """
+        await interaction.response.defer(ephemeral=True)
         guild_id = interaction.guild.id
 
         async with self.voice_clients_lock:
             if guild_id not in self.voice_clients:
-                await interaction.response.send_message(
-                    "❌ Not connected to any voice channel!", ephemeral=True
+                await interaction.followup.send(
+                    "❌ Not connected to any voice channel!"
                 )
                 return
 
@@ -103,13 +105,13 @@ class VoiceCog(commands.Cog):
 
         try:
             await voice_client.disconnect()
-            await interaction.response.send_message(
-                format_success("Disconnected from voice channel!"), ephemeral=True
+            await interaction.followup.send(
+                format_success("Disconnected from voice channel!")
             )
 
         except Exception as e:
             logger.error(f"Failed to leave voice channel: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
+            await interaction.followup.send(format_error(e))
 
     @app_commands.command(name="speak", description="Generate speech and play in voice channel")
     @app_commands.describe(text="Text to speak")

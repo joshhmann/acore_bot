@@ -35,6 +35,8 @@ class Config:
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
     OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "nousresearch/hermes-3-llama-3.1-405b")
     OPENROUTER_URL: str = os.getenv("OPENROUTER_URL", "https://openrouter.ai/api/v1")
+    OPENROUTER_TIMEOUT: int = int(os.getenv("OPENROUTER_TIMEOUT", "180"))  # API timeout in seconds
+    OPENROUTER_STREAM_TIMEOUT: int = int(os.getenv("OPENROUTER_STREAM_TIMEOUT", "180"))  # Streaming timeout in seconds
 
     # Chat
     CLEAN_THINKING_OUTPUT: bool = os.getenv("CLEAN_THINKING_OUTPUT", "true").lower() == "true"
@@ -82,7 +84,7 @@ class Config:
     WEB_SEARCH_MAX_RESULTS: int = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "3"))
 
     # Voice/TTS
-    TTS_ENGINE: str = os.getenv("TTS_ENGINE", "edge")  # "edge", "kokoro", or "supertonic"
+    TTS_ENGINE: str = os.getenv("TTS_ENGINE", "edge")  # "edge", "kokoro", "kokoro_api", or "supertonic"
 
     # Edge TTS Settings
     DEFAULT_TTS_VOICE: str = os.getenv("DEFAULT_TTS_VOICE", "en-US-AriaNeural")
@@ -92,6 +94,7 @@ class Config:
     # Kokoro TTS Settings
     KOKORO_VOICE: str = os.getenv("KOKORO_VOICE", "am_adam")
     KOKORO_SPEED: float = float(os.getenv("KOKORO_SPEED", "1.0"))
+    KOKORO_API_URL: str = os.getenv("KOKORO_API_URL", "http://localhost:8880")  # Kokoro-FastAPI URL
     KOKORO_VOICE_CHIEF: str = os.getenv("KOKORO_VOICE_CHIEF", "am_onyx")
     KOKORO_VOICE_ARBY: str = os.getenv("KOKORO_VOICE_ARBY", "bm_george")
 
@@ -137,13 +140,22 @@ class Config:
     AUTO_SUMMARIZE_THRESHOLD: int = int(os.getenv("AUTO_SUMMARIZE_THRESHOLD", "30"))  # Messages before auto-summarize
     STORE_SUMMARIES_IN_RAG: bool = os.getenv("STORE_SUMMARIES_IN_RAG", "true").lower() == "true"
 
-    # Voice Activity Detection (Whisper STT)
+    # Voice Activity Detection (STT)
+    STT_ENGINE: str = os.getenv("STT_ENGINE", "whisper")  # "whisper" or "parakeet"
+
+    # Whisper STT Settings
     WHISPER_ENABLED: bool = os.getenv("WHISPER_ENABLED", "false").lower() == "true"
     WHISPER_MODEL_SIZE: str = os.getenv("WHISPER_MODEL_SIZE", "base")  # tiny, base, small, medium, large
     WHISPER_DEVICE: str = os.getenv("WHISPER_DEVICE", "auto")  # auto, cpu, cuda
     WHISPER_LANGUAGE: str = os.getenv("WHISPER_LANGUAGE", "en")
     WHISPER_SILENCE_THRESHOLD: float = float(os.getenv("WHISPER_SILENCE_THRESHOLD", "1.0"))
     MAX_RECORDING_DURATION: int = int(os.getenv("MAX_RECORDING_DURATION", "30"))
+
+    # Parakeet STT Settings
+    PARAKEET_ENABLED: bool = os.getenv("PARAKEET_ENABLED", "false").lower() == "true"
+    PARAKEET_MODEL: str = os.getenv("PARAKEET_MODEL", "nvidia/parakeet-tdt-0.6b-v3")
+    PARAKEET_DEVICE: str = os.getenv("PARAKEET_DEVICE", "auto")  # auto, cpu, cuda
+    PARAKEET_LANGUAGE: str = os.getenv("PARAKEET_LANGUAGE", "en")  # Auto-detects among 25 European languages
 
     # Enhanced Voice Listener Settings
     VOICE_ENERGY_THRESHOLD: int = int(os.getenv("VOICE_ENERGY_THRESHOLD", "500"))  # Audio energy threshold for VAD
@@ -210,6 +222,31 @@ class Config:
     # Natural Language Understanding
     INTENT_RECOGNITION_ENABLED: bool = os.getenv("INTENT_RECOGNITION_ENABLED", "true").lower() == "true"
     NATURAL_LANGUAGE_REMINDERS: bool = os.getenv("NATURAL_LANGUAGE_REMINDERS", "true").lower() == "true"
+
+    # Notes
+    NOTES_ENABLED: bool = os.getenv("NOTES_ENABLED", "true").lower() == "true"
+
+    # Logging Configuration
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO").upper()  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+    LOG_TO_FILE: bool = os.getenv("LOG_TO_FILE", "true").lower() == "true"
+    LOG_FILE_PATH: str = os.getenv("LOG_FILE_PATH", "logs/bot.log")
+    LOG_MAX_BYTES: int = int(os.getenv("LOG_MAX_BYTES", str(10 * 1024 * 1024)))  # 10MB default
+    LOG_BACKUP_COUNT: int = int(os.getenv("LOG_BACKUP_COUNT", "5"))  # Keep 5 backup files
+
+    # Performance Logging
+    LOG_PERFORMANCE: bool = os.getenv("LOG_PERFORMANCE", "true").lower() == "true"
+    LOG_LLM_REQUESTS: bool = os.getenv("LOG_LLM_REQUESTS", "true").lower() == "true"
+    LOG_TTS_REQUESTS: bool = os.getenv("LOG_TTS_REQUESTS", "true").lower() == "true"
+
+    # Metrics Configuration
+    METRICS_ENABLED: bool = os.getenv("METRICS_ENABLED", "true").lower() == "true"
+    METRICS_SAVE_INTERVAL_MINUTES: int = int(os.getenv("METRICS_SAVE_INTERVAL_MINUTES", "60"))  # Default: hourly
+    METRICS_RETENTION_DAYS: int = int(os.getenv("METRICS_RETENTION_DAYS", "30"))  # Keep 30 days
+
+    # Performance Optimization Settings
+    USE_STREAMING_FOR_LONG_RESPONSES: bool = os.getenv("USE_STREAMING_FOR_LONG_RESPONSES", "true").lower() == "true"
+    STREAMING_TOKEN_THRESHOLD: int = int(os.getenv("STREAMING_TOKEN_THRESHOLD", "300"))  # Use streaming if > 300 tokens
+    DYNAMIC_MAX_TOKENS: bool = os.getenv("DYNAMIC_MAX_TOKENS", "false").lower() == "true"  # Adjust max_tokens based on query
 
     @classmethod
     def validate(cls) -> bool:

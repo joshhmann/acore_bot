@@ -106,7 +106,7 @@ class EnhancedVoiceListener:
 
     def __init__(
         self,
-        whisper_stt,
+        stt_service,
         silence_threshold: float = 2.0,  # Seconds of silence before transcribing
         energy_threshold: int = 500,      # Audio energy threshold for speech detection
         bot_trigger_words: list = None,   # Words that trigger bot response
@@ -114,12 +114,13 @@ class EnhancedVoiceListener:
         """Initialize enhanced voice listener.
 
         Args:
-            whisper_stt: WhisperSTTService instance
+            stt_service: STT service instance (WhisperSTTService or ParakeetSTTService)
             silence_threshold: Seconds of silence before auto-transcribing
             energy_threshold: Energy level to detect speech vs silence
             bot_trigger_words: Keywords that trigger bot response
         """
-        self.whisper = whisper_stt
+        self.stt = stt_service
+        self.whisper = stt_service  # Backwards compatibility
         self.silence_threshold = silence_threshold
         self.energy_threshold = energy_threshold
 
@@ -322,14 +323,19 @@ class EnhancedVoiceListener:
                     sink.clear_buffers()
                     return
 
-                # Convert and write to WAV file
-                converted_audio = self._convert_audio_for_whisper(raw_audio)
-                self._write_wav_file(audio_file, converted_audio)
+                # Convert and write to WAV file (offload to thread)
+                loop = asyncio.get_running_loop()
+                bytes_written = await loop.run_in_executor(
+                    None, 
+                    self._process_audio_sync, 
+                    raw_audio, 
+                    audio_file
+                )
 
                 # Clear buffers for next segment
                 sink.clear_buffers()
 
-                logger.info(f"Wrote {len(converted_audio)} bytes to {audio_file}")
+                logger.info(f"Wrote {bytes_written} bytes to {audio_file}")
             else:
                 # Fallback: check if file exists (legacy path)
                 if not audio_file.exists() or audio_file.stat().st_size == 0:
@@ -395,6 +401,20 @@ class EnhancedVoiceListener:
 
         except Exception as e:
             logger.error(f"Error in auto-transcribe: {e}")
+
+    def _process_audio_sync(self, raw_audio: bytes, audio_file: Path) -> int:
+        """Process audio and write to file synchronously (run in executor).
+        
+        Args:
+            raw_audio: Raw PCM audio
+            audio_file: Output file path
+            
+        Returns:
+            Number of bytes written
+        """
+        converted_audio = self._convert_audio_for_whisper(raw_audio)
+        self._write_wav_file(audio_file, converted_audio)
+        return len(converted_audio)
 
     def should_bot_respond(self, transcription: str) -> bool:
         """Determine if bot should respond based on transcription.

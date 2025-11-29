@@ -226,13 +226,19 @@ class RemindersService:
                     data = json.load(f)
                     # Convert string dates back to datetime
                     for rid, reminder in data.items():
-                        reminder['trigger_time'] = datetime.fromisoformat(reminder['trigger_time'])
-                        reminder['created_at'] = datetime.fromisoformat(reminder['created_at'])
-                        self.reminders[rid] = reminder
+                        try:
+                            reminder['trigger_time'] = datetime.fromisoformat(reminder['trigger_time'])
+                            reminder['created_at'] = datetime.fromisoformat(reminder['created_at'])
+                            self.reminders[rid] = reminder
+                        except (ValueError, KeyError) as e:
+                            logger.error(f"Skipping invalid reminder {rid}: {e}")
+                            
                 logger.info(f"Loaded {len(self.reminders)} reminders from disk")
             except Exception as e:
                 logger.error(f"Failed to load reminders: {e}")
-                self.reminders = {}
+                # Don't wipe existing reminders on file read error
+                if not self.reminders:
+                    self.reminders = {}
 
     def _save_reminders(self):
         """Save reminders to disk."""

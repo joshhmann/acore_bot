@@ -12,6 +12,12 @@ except ImportError:
     KOKORO_AVAILABLE = False
 
 try:
+    from services.kokoro_api_client import KokoroAPIClient
+    KOKORO_API_AVAILABLE = True
+except ImportError:
+    KOKORO_API_AVAILABLE = False
+
+try:
     from services.supertonic_tts import SupertonicTTSService
     SUPERTONIC_AVAILABLE = True
 except ImportError:
@@ -31,6 +37,7 @@ class TTSService:
         volume: str = "+0%",
         kokoro_voice: str = "am_adam",
         kokoro_speed: float = 1.0,
+        kokoro_api_url: Optional[str] = None,
         supertonic_voice: str = "M1",
         supertonic_steps: int = 5,
         supertonic_speed: float = 1.05
@@ -38,12 +45,13 @@ class TTSService:
         """Initialize TTS service.
 
         Args:
-            engine: TTS engine to use ("edge", "kokoro", or "supertonic")
+            engine: TTS engine to use ("edge", "kokoro", "kokoro_api", or "supertonic")
             default_voice: Default Edge TTS voice to use
             rate: Speech rate adjustment for Edge TTS (e.g., "+50%", "-20%")
             volume: Volume adjustment for Edge TTS (e.g., "+50%", "-20%")
             kokoro_voice: Default Kokoro voice to use
             kokoro_speed: Kokoro speech speed multiplier
+            kokoro_api_url: Kokoro-FastAPI URL (e.g., "http://localhost:8880")
             supertonic_voice: Default Supertonic voice (M1, M2, F1, F2)
             supertonic_steps: Supertonic denoising steps (higher = better quality)
             supertonic_speed: Supertonic speech speed multiplier
@@ -54,11 +62,26 @@ class TTSService:
         self.volume = volume
         self.kokoro_voice = kokoro_voice
         self.kokoro_speed = kokoro_speed
+        self.kokoro_api_url = kokoro_api_url
         self.supertonic_voice = supertonic_voice
         self.supertonic_steps = supertonic_steps
         self.supertonic_speed = supertonic_speed
 
-        # Initialize Kokoro if requested
+        # Initialize Kokoro API client if requested
+        self.kokoro_api: Optional[KokoroAPIClient] = None
+        if self.engine == "kokoro_api":
+            if KOKORO_API_AVAILABLE and kokoro_api_url:
+                self.kokoro_api = KokoroAPIClient(
+                    api_url=kokoro_api_url,
+                    default_voice=kokoro_voice,
+                    speed=kokoro_speed
+                )
+                logger.info(f"Kokoro API client initialized (URL: {kokoro_api_url}, voice: {kokoro_voice})")
+            else:
+                logger.warning("Kokoro API client not available or URL not provided, falling back to Edge TTS")
+                self.engine = "edge"
+
+        # Initialize Kokoro (in-process) if requested
         self.kokoro: Optional[KokoroTTSService] = None
         if self.engine == "kokoro":
             if KOKORO_AVAILABLE:
@@ -156,7 +179,18 @@ class TTSService:
                 )
                 return Path(audio_path)
 
-            # Use Kokoro TTS
+            # Use Kokoro API
+            elif self.engine == "kokoro_api" and self.kokoro_api:
+                kokoro_voice = voice or self.kokoro_voice
+                kokoro_speed = speed or self.kokoro_speed
+                return await self.kokoro_api.generate(
+                    text=cleaned_text,
+                    output_file=output_path,
+                    voice=kokoro_voice,
+                    speed=kokoro_speed
+                )
+
+            # Use Kokoro TTS (in-process)
             elif self.engine == "kokoro" and self.kokoro:
                 kokoro_voice = voice or self.kokoro_voice
                 kokoro_speed = speed or self.kokoro_speed

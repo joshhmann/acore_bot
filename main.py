@@ -27,6 +27,7 @@ from services.memory_manager import MemoryManager
 from services.conversation_summarizer import ConversationSummarizer
 from services.rag import RAGService
 from services.whisper_stt import WhisperSTTService, VoiceActivityDetector
+from services.parakeet_stt import ParakeetSTTService
 from services.enhanced_voice_listener import EnhancedVoiceListener
 from utils.helpers import ChatHistoryManager
 from cogs.chat import ChatCog
@@ -36,10 +37,12 @@ from services.web_dashboard import WebDashboard
 from services.ambient_mode import AmbientMode
 from services.naturalness import NaturalnessService
 from services.reminders import RemindersService
+from services.notes import NotesService
 from services.proactive_callbacks import ProactiveCallbacksSystem
 from services.curiosity_system import CuriositySystem
 from services.pattern_learner import PatternLearner
 from cogs.reminders import RemindersCog
+from cogs.notes import NotesCog
 from services.web_search import WebSearchService
 from services.trivia import TriviaService
 from cogs.trivia import TriviaCog
@@ -50,15 +53,43 @@ from services.enhanced_tools import EnhancedToolSystem
 from services.metrics import MetricsService
 
 # Setup logging
+# Configure logging with rotating file handler
+from logging.handlers import RotatingFileHandler
+
+# Create logs directory if it doesn't exist
+log_path = Path(Config.LOG_FILE_PATH)
+log_path.parent.mkdir(parents=True, exist_ok=True)
+
+# Set up handlers
+handlers = [logging.StreamHandler(sys.stdout)]
+if Config.LOG_TO_FILE:
+    file_handler = RotatingFileHandler(
+        Config.LOG_FILE_PATH,
+        maxBytes=Config.LOG_MAX_BYTES,
+        backupCount=Config.LOG_BACKUP_COUNT
+    )
+    handlers.append(file_handler)
+
 logging.basicConfig(
-    level=logging.INFO,
+    level=getattr(logging, Config.LOG_LEVEL, logging.INFO),
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler("bot.log"),
-    ],
+    handlers=handlers,
 )
 logger = logging.getLogger(__name__)
+
+# Suppress noisy logs from third-party libraries (unless in DEBUG mode)
+if Config.LOG_LEVEL != "DEBUG":
+    logging.getLogger("transformers").setLevel(logging.WARNING)
+    logging.getLogger("nemo_logger").setLevel(logging.WARNING)
+    logging.getLogger("nemo").setLevel(logging.WARNING)
+    logging.getLogger("torch").setLevel(logging.WARNING)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("asyncio").setLevel(logging.WARNING)
+    logging.getLogger("discord").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+# Log the logging configuration
+logger.info(f"Logging configured: Level={Config.LOG_LEVEL}, File={Config.LOG_TO_FILE}, Path={Config.LOG_FILE_PATH}")
 
 
 class OllamaBot(commands.Bot):
@@ -101,6 +132,8 @@ class OllamaBot(commands.Bot):
                 frequency_penalty=Config.LLM_FREQUENCY_PENALTY,
                 presence_penalty=Config.LLM_PRESENCE_PENALTY,
                 top_p=Config.LLM_TOP_P,
+                timeout=Config.OPENROUTER_TIMEOUT,
+                stream_timeout=Config.OPENROUTER_STREAM_TIMEOUT,
             )
             logger.info(f"Using OpenRouter Provider with model: {Config.OPENROUTER_MODEL}")
         else:
@@ -122,6 +155,7 @@ class OllamaBot(commands.Bot):
             volume=Config.TTS_VOLUME,
             kokoro_voice=Config.KOKORO_VOICE,
             kokoro_speed=Config.KOKORO_SPEED,
+            kokoro_api_url=Config.KOKORO_API_URL,
             supertonic_voice=Config.SUPERTONIC_VOICE,
             supertonic_steps=Config.SUPERTONIC_STEPS,
             supertonic_speed=Config.SUPERTONIC_SPEED,
@@ -183,18 +217,47 @@ class OllamaBot(commands.Bot):
             )
             logger.info("Conversation summarizer initialized")
 
-        # Initialize Whisper STT if enabled
+        # Initialize STT (Speech-to-Text) services
         self.whisper = None
+        self.parakeet = None
+        self.stt_service = None  # The active STT service
         self.voice_activity_detector = None
         self.enhanced_voice_listener = None
-        if Config.WHISPER_ENABLED:
+
+        # Smart STT Initialization: Only load the selected engine to save VRAM
+        if Config.STT_ENGINE == "parakeet" and Config.PARAKEET_ENABLED:
+            logger.info("Initializing Parakeet STT (Primary)...")
+            self.parakeet = ParakeetSTTService(
+                model_name=Config.PARAKEET_MODEL,
+                device=Config.PARAKEET_DEVICE,
+                language=Config.PARAKEET_LANGUAGE,
+            )
+            if self.parakeet.is_available():
+                self.stt_service = self.parakeet
+                logger.info(f"Using Parakeet as primary STT engine (model: {Config.PARAKEET_MODEL})")
+            else:
+                logger.warning("Parakeet STT failed to initialize. Falling back to Whisper if enabled.")
+                self.parakeet = None
+
+        # Fallback or Primary Whisper Initialization
+        if (not self.stt_service and Config.WHISPER_ENABLED) or (Config.STT_ENGINE == "whisper" and Config.WHISPER_ENABLED):
+            logger.info("Initializing Whisper STT...")
             self.whisper = WhisperSTTService(
                 model_size=Config.WHISPER_MODEL_SIZE,
                 device=Config.WHISPER_DEVICE,
                 language=Config.WHISPER_LANGUAGE,
             )
             if self.whisper.is_available():
-                # Legacy voice activity detector (for backwards compatibility)
+                self.stt_service = self.whisper
+                logger.info(f"Using Whisper as STT engine (model: {Config.WHISPER_MODEL_SIZE})")
+            else:
+                logger.warning("Whisper STT not available - install with: pip install faster-whisper")
+                self.whisper = None
+
+        # Initialize voice listeners if we have an STT service
+        if self.stt_service:
+            # Legacy voice activity detector (for backwards compatibility with Whisper)
+            if self.whisper:
                 self.voice_activity_detector = VoiceActivityDetector(
                     whisper_stt=self.whisper,
                     temp_dir=Config.TEMP_DIR,
@@ -202,18 +265,16 @@ class OllamaBot(commands.Bot):
                     max_recording_duration=Config.MAX_RECORDING_DURATION,
                 )
 
-                # Enhanced voice listener with smart detection
-                trigger_words = [w.strip() for w in Config.VOICE_BOT_TRIGGER_WORDS.split(",")]
-                self.enhanced_voice_listener = EnhancedVoiceListener(
-                    whisper_stt=self.whisper,
-                    silence_threshold=Config.WHISPER_SILENCE_THRESHOLD,
-                    energy_threshold=Config.VOICE_ENERGY_THRESHOLD,
-                    bot_trigger_words=trigger_words,
-                )
+            # Enhanced voice listener with smart detection (works with both engines)
+            trigger_words = [w.strip() for w in Config.VOICE_BOT_TRIGGER_WORDS.split(",")]
+            self.enhanced_voice_listener = EnhancedVoiceListener(
+                stt_service=self.stt_service,
+                silence_threshold=Config.WHISPER_SILENCE_THRESHOLD,
+                energy_threshold=Config.VOICE_ENERGY_THRESHOLD,
+                bot_trigger_words=trigger_words,
+            )
 
-                logger.info(f"Whisper STT initialized with enhanced voice listener (model: {Config.WHISPER_MODEL_SIZE})")
-            else:
-                logger.warning("Whisper STT not available - install with: pip install faster-whisper")
+            logger.info(f"Enhanced voice listener initialized with {Config.STT_ENGINE} engine")
 
         # Initialize Web Dashboard
         self.web_dashboard = WebDashboard(self)
@@ -229,6 +290,12 @@ class OllamaBot(commands.Bot):
         if Config.REMINDERS_ENABLED:
             self.reminders_service = RemindersService(self)
             logger.info("Reminders service initialized")
+
+        # Initialize Notes Service
+        self.notes_service = None
+        if Config.NOTES_ENABLED:
+            self.notes_service = NotesService(self)
+            logger.info("Notes service initialized")
 
         # Initialize Web Search Service
         self.web_search = None
@@ -382,6 +449,11 @@ class OllamaBot(commands.Bot):
             await self.add_cog(RemindersCog(self, self.reminders_service))
             logger.info("Loaded RemindersCog")
 
+        # Load NotesCog
+        if self.notes_service:
+            await self.add_cog(NotesCog(self, self.notes_service))
+            logger.info("Loaded NotesCog")
+
         # Load TriviaCog
         if self.trivia_service:
             await self.add_cog(TriviaCog(self, self.trivia_service))
@@ -394,11 +466,16 @@ class OllamaBot(commands.Bot):
         await self.load_extension("cogs.character_commands")  # AI-First character system
         await self.load_extension("cogs.profile_commands")
         await self.load_extension("cogs.search_commands")
+        await self.load_extension("cogs.intent_commands")  # Custom intent management
 
         # Load EventListenersCog for natural reactions
         from cogs.event_listeners import EventListenersCog
         await self.add_cog(EventListenersCog(self))
         logger.info("Loaded EventListenersCog")
+
+        # Load SystemCog
+        await self.load_extension("cogs.system")
+        logger.info("Loaded SystemCog")
 
         # Sync commands (for slash commands)
         await self.tree.sync()
@@ -443,6 +520,25 @@ class OllamaBot(commands.Bot):
                 name="/chat | /speak",
             )
         )
+
+        # Start metrics auto-save (configurable interval)
+        if Config.METRICS_ENABLED:
+            try:
+                # In DEBUG mode, save more frequently (every 10 minutes) for easier analysis
+                if Config.LOG_LEVEL == "DEBUG":
+                    interval_minutes = 10
+                    logger.info("DEBUG mode detected: Metrics will save every 10 minutes for detailed analysis")
+                else:
+                    interval_minutes = Config.METRICS_SAVE_INTERVAL_MINUTES
+
+                interval_hours = interval_minutes / 60.0
+                metrics_task = self.metrics.start_auto_save(interval_hours=interval_hours)
+                self.background_tasks.add(metrics_task)
+                logger.info(f"Metrics auto-save started (every {interval_minutes} minutes)")
+            except Exception as e:
+                logger.error(f"Failed to start metrics auto-save: {e}")
+        else:
+            logger.info("Metrics auto-save disabled via config")
 
         logger.info("Bot is ready!")
 

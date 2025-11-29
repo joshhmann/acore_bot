@@ -16,6 +16,8 @@ from services.ollama import OllamaService
 from services.intent_recognition import IntentRecognitionService, ConversationalResponder
 from services.intent_handler import IntentHandler
 from services.naturalness import NaturalnessEnhancer
+from services.streaming_tts import StreamingTTSProcessor, StreamMultiplexer
+from services.response_optimizer import ResponseOptimizer
 from utils.helpers import (
     ChatHistoryManager,
     chunk_message,
@@ -27,6 +29,7 @@ from utils.helpers import (
 )
 from utils.persona_loader import PersonaLoader
 from utils.system_context import SystemContextProvider
+from utils.response_validator import ResponseValidator
 
 logger = logging.getLogger(__name__)
 
@@ -791,6 +794,10 @@ Answer ONLY "yes" or "no"."""
         # Start response time tracking
         import time
         start_time = time.time()
+
+        # Track if streaming TTS was used (defined here for scope)
+        use_streaming_tts = False
+
         # Helper for sending messages (handling interaction vs channel)
         async def send_response(content, ephemeral=False):
             if interaction:
@@ -1167,6 +1174,28 @@ Answer ONLY "yes" or "no"."""
             if self.naturalness:
                 self.naturalness.log_action("chat", f"User: {str(user.name)}")
 
+            # Optimize response parameters based on query complexity
+            if Config.DYNAMIC_MAX_TOKENS:
+                optimization = ResponseOptimizer.optimize_request_params(
+                    message_content,
+                    base_params={'max_tokens': Config.OLLAMA_MAX_TOKENS or 500},
+                    enable_dynamic_tokens=True,
+                    streaming_threshold=Config.STREAMING_TOKEN_THRESHOLD
+                )
+                optimal_max_tokens = optimization['max_tokens']
+                optimization_info = optimization.get('_optimization_info', {})
+
+                # Override streaming decision if optimizer suggests
+                if 'use_streaming' in optimization_info:
+                    should_stream = optimization_info['use_streaming']
+                    logger.debug(
+                        f"Optimizer suggests streaming: {should_stream} "
+                        f"(estimated {optimal_max_tokens} tokens)"
+                    )
+            else:
+                optimal_max_tokens = Config.OLLAMA_MAX_TOKENS or 500
+                should_stream = Config.RESPONSE_STREAMING_ENABLED
+
             # If we found a recent image, process it with vision
             if recent_image_url and Config.VISION_ENABLED:
                 try:
@@ -1186,42 +1215,169 @@ Answer ONLY "yes" or "no"."""
                             prompt=vision_message,
                             images=[image_base64],
                             system_prompt=context_injected_prompt,
-                            model=Config.VISION_MODEL
+                            model=Config.VISION_MODEL,
+                            max_tokens=optimal_max_tokens
                         )
-                        
+
                         logger.info("Successfully processed recent image with vision")
                     else:
                         # Fallback to text-only if download failed
-                        response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
+                        response = await self.ollama.chat(
+                            history,
+                            system_prompt=context_injected_prompt,
+                            max_tokens=optimal_max_tokens
+                        )
                 except Exception as e:
                     logger.error(f"Vision processing failed for recent image: {e}")
                     # Fallback to text-only
-                    response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
+                    response = await self.ollama.chat(
+                        history,
+                        system_prompt=context_injected_prompt,
+                        max_tokens=optimal_max_tokens
+                    )
             else:
-                # Regular text-only chat - Get AI response with streaming if enabled
-                if Config.RESPONSE_STREAMING_ENABLED:
+                # Regular text-only chat
+                
+                # 1. Use Agentic Tools (ReAct) if available
+                # Note: Streaming is currently disabled for agentic tools to prevent showing tool calls to users
+                if self.agentic_tools:
+                    async def llm_generate(conv):
+                        # Ollama chat expects messages list; system prompt already in conv
+                        return await self.ollama.chat(conv, system_prompt=None)
+
+                    response = await self.agentic_tools.process_with_tools(
+                        llm_generate_func=llm_generate,
+                        user_message=message_content,
+                        system_prompt=context_injected_prompt,
+                        max_iterations=3,
+                    )
+
+                # 2. Fallback to Standard Streaming (if enabled)
+                elif should_stream:
                     response = ""
                     response_message = None
                     last_update = time.time()
 
-                    async for chunk in self.ollama.chat_stream(history, system_prompt=context_injected_prompt):
-                        response += chunk
+                    # Check if we should use streaming TTS (bot in voice + voice feature enabled)
+                    voice_client = channel.guild.voice_client if channel.guild else None
+                    use_streaming_tts = (
+                        Config.AUTO_REPLY_WITH_VOICE and
+                        voice_client and
+                        voice_client.is_connected() and
+                        not voice_client.is_playing()
+                    )
 
-                        # Update message periodically to avoid rate limits
-                        current_time = time.time()
-                        if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
-                            if interaction:
-                                if not response_message:
-                                    response_message = await interaction.followup.send(response[:2000])
-                                else:
-                                    try:
-                                        await response_message.edit(content=response[:2000])
-                                    except discord.HTTPException:
-                                        pass  # Rate limit hit, skip this update
-                            # Note: We don't stream edits to regular messages as it's spammy/rate-limited
-                            # We only send final for non-interaction messages usually, or maybe 1-2 updates
-                            
-                            last_update = current_time
+                    if use_streaming_tts:
+                        # Create streaming TTS processor
+                        voice_cog = self.bot.get_cog("VoiceCog")
+                        if voice_cog:
+                            streaming_tts = StreamingTTSProcessor(
+                                voice_cog.tts,
+                                voice_cog.rvc if hasattr(voice_cog, 'rvc') else None
+                            )
+
+                            # Analyze sentiment for voice modulation
+                            sentiment = self._analyze_sentiment(message_content)
+                            kokoro_speed = 1.0
+                            edge_rate = "+0%"
+
+                            if sentiment == "positive":
+                                kokoro_speed = 1.1
+                                edge_rate = "+10%"
+                            elif sentiment == "negative":
+                                kokoro_speed = 0.9
+                                edge_rate = "-10%"
+
+                            # Create multiplexer for single LLM stream
+                            llm_stream = self.ollama.chat_stream(
+                                history,
+                                system_prompt=context_injected_prompt,
+                                max_tokens=optimal_max_tokens
+                            )
+                            multiplexer = StreamMultiplexer(llm_stream)
+
+                            # Create consumers
+                            text_stream = multiplexer.create_consumer()
+                            tts_stream = multiplexer.create_consumer()
+
+                            # Process text updates
+                            async def process_text_updates():
+                                nonlocal response, response_message, last_update
+
+                                async for chunk in text_stream:
+                                    response += chunk
+
+                                    # Update message periodically
+                                    current_time = time.time()
+                                    if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
+                                        if interaction:
+                                            if not response_message:
+                                                response_message = await interaction.followup.send(response[:2000])
+                                            else:
+                                                try:
+                                                    await response_message.edit(content=response[:2000])
+                                                except discord.HTTPException:
+                                                    pass
+
+                                        last_update = current_time
+
+                            # Run text updates and TTS in parallel
+                            await asyncio.gather(
+                                process_text_updates(),
+                                streaming_tts.process_stream(
+                                    tts_stream,
+                                    voice_client,
+                                    speed=kokoro_speed,
+                                    rate=edge_rate
+                                )
+                            )
+
+                            logger.info("Parallel streaming TTS completed")
+                        else:
+                            # Fallback if voice cog not available
+                            async for chunk in self.ollama.chat_stream(
+                                history,
+                                system_prompt=context_injected_prompt,
+                                max_tokens=optimal_max_tokens
+                            ):
+                                response += chunk
+
+                                current_time = time.time()
+                                if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
+                                    if interaction:
+                                        if not response_message:
+                                            response_message = await interaction.followup.send(response[:2000])
+                                        else:
+                                            try:
+                                                await response_message.edit(content=response[:2000])
+                                            except discord.HTTPException:
+                                                pass
+
+                                    last_update = current_time
+                    else:
+                        # Standard text-only streaming (no voice or voice disabled)
+                        async for chunk in self.ollama.chat_stream(
+                            history,
+                            system_prompt=context_injected_prompt,
+                            max_tokens=optimal_max_tokens
+                        ):
+                            response += chunk
+
+                            # Update message periodically to avoid rate limits
+                            current_time = time.time()
+                            if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
+                                if interaction:
+                                    if not response_message:
+                                        response_message = await interaction.followup.send(response[:2000])
+                                    else:
+                                        try:
+                                            await response_message.edit(content=response[:2000])
+                                        except discord.HTTPException:
+                                            pass  # Rate limit hit, skip this update
+                                # Note: We don't stream edits to regular messages as it's spammy/rate-limited
+                                # We only send final for non-interaction messages usually, or maybe 1-2 updates
+
+                                last_update = current_time
 
                     # Send final update if needed
                     if interaction and response_message:
@@ -1234,24 +1390,16 @@ Answer ONLY "yes" or "no"."""
                     else:
                         # For non-interaction, send the final response
                         # (Streaming to channel.send is not implemented here to avoid spam/ratelimits)
-                        pass
+                        if response:
+                            await channel.send(response[:2000])
+                
+                # 3. Standard Non-Streaming Fallback
                 else:
-                    # Non-streaming fallback
-                    response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
-
-            # Validate response and fix hallucinations (e.g., wrong times)
-            from utils.response_validator import ResponseValidator
-            # Use agentic tool system to generate response with possible tool calls
-            async def llm_generate(conv):
-                # Ollama chat expects messages list; system prompt already in conv
-                return await self.ollama.chat(conv, system_prompt=None)
-
-            response = await self.agentic_tools.process_with_tools(
-                llm_generate_func=llm_generate,
-                user_message=message_content,
-                system_prompt=context_injected_prompt,
-                max_iterations=3,
-            )
+                    response = await self.ollama.chat(
+                        history,
+                        system_prompt=context_injected_prompt,
+                        max_tokens=optimal_max_tokens
+                    )
 
             # Validate and clean response (remove thinking tags, fix hallucinations)
             response = ResponseValidator.validate_response(response)
@@ -1349,7 +1497,8 @@ Answer ONLY "yes" or "no"."""
                 )
 
             # Also speak in voice channel if bot is connected and feature is enabled
-            if Config.AUTO_REPLY_WITH_VOICE:
+            # Skip if streaming TTS was already used
+            if Config.AUTO_REPLY_WITH_VOICE and not (Config.RESPONSE_STREAMING_ENABLED and use_streaming_tts):
                 # Only generate TTS if actually in a voice channel
                 voice_client = channel.guild.voice_client if channel.guild else None
                 if voice_client and voice_client.is_connected():

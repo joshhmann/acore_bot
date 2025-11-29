@@ -806,10 +806,38 @@ class WebDashboard:
                             </div>
                         `;
 
-                        // Performance Metrics
-                        if (data.metrics && data.metrics.response_times) {
+                        // Performance Metrics - Enhanced with LLM stats
+                        let perfHTML = '';
+
+                        // LLM Performance (OpenRouter/Ollama specific)
+                        if (data.llm_performance) {
+                            const llm = data.llm_performance;
+                            perfHTML += `
+                                <div class="stat">
+                                    <span class="stat-label">Last Response Time</span>
+                                    <span class="stat-value ${llm.last_response_time_seconds > 10 ? 'status-err' : llm.last_response_time_seconds > 5 ? 'status-warn' : 'status-ok'}">${llm.last_response_time_seconds}s (${llm.last_response_time_ms}ms)</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Tokens/Second (TPS)</span>
+                                    <span class="stat-value ${llm.last_tps < 15 ? 'status-err' : llm.last_tps < 30 ? 'status-warn' : 'status-ok'}">${llm.last_tps.toFixed(1)}</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Avg Response Time</span>
+                                    <span class="stat-value">${llm.average_response_time_seconds}s (${llm.average_response_time_ms}ms)</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Total Requests</span>
+                                    <span class="stat-value">${llm.total_requests}</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-label">Total Tokens Generated</span>
+                                    <span class="stat-value">${llm.total_tokens_generated.toLocaleString()}</span>
+                                </div>
+                            `;
+                        } else if (data.metrics && data.metrics.response_times) {
+                            // Fallback to general metrics
                             const rt = data.metrics.response_times;
-                            document.getElementById('performance-metrics').innerHTML = `
+                            perfHTML += `
                                 <div class="stat">
                                     <span class="stat-label">Avg Response Time</span>
                                     <span class="stat-value">${rt.avg > 0 ? rt.avg.toFixed(0) : '0'}ms</span>
@@ -824,8 +852,10 @@ class WebDashboard:
                                 </div>
                             `;
                         } else {
-                            document.getElementById('performance-metrics').innerHTML = '<div class="stat"><span class="stat-label">No metrics data yet</span></div>';
+                            perfHTML = '<div class="stat"><span class="stat-label">No performance data yet</span><span class="stat-value">-</span></div>';
                         }
+
+                        document.getElementById('performance-metrics').innerHTML = perfHTML;
 
                         // Cache Metrics
                         if (data.metrics && data.metrics.cache_stats) {
@@ -1438,6 +1468,14 @@ class WebDashboard:
                 },
                 'token_usage': metrics_summary['token_usage'],
             }
+
+        # Add OpenRouter/Ollama performance stats
+        if hasattr(self.bot, 'ollama') and hasattr(self.bot.ollama, 'get_performance_stats'):
+            try:
+                perf_stats = self.bot.ollama.get_performance_stats()
+                status['llm_performance'] = perf_stats
+            except Exception as e:
+                logger.debug(f"Could not get LLM performance stats: {e}")
 
         return web.json_response(status)
 

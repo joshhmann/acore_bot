@@ -5,6 +5,8 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import asyncio
+import json
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +14,30 @@ logger = logging.getLogger(__name__)
 class MetricsService:
     """Service for tracking bot metrics and analytics."""
 
-    def __init__(self):
-        """Initialize metrics service."""
-        # Response time tracking (rolling window of last 100 responses)
-        self.response_times = deque(maxlen=100)
+    def __init__(self, data_dir: Optional[Path] = None):
+        """Initialize metrics service.
+
+        Args:
+            data_dir: Directory to store metrics logs
+        """
+        # Set up metrics data directory
+        if data_dir is None:
+            from config import Config
+            data_dir = Config.DATA_DIR / "metrics"
+
+        self.metrics_dir = Path(data_dir)
+        self.metrics_dir.mkdir(parents=True, exist_ok=True)
+
+        # Check if DEBUG mode for enhanced logging
+        from config import Config
+        self.debug_mode = Config.LOG_LEVEL == "DEBUG"
+
+        # Response time tracking (rolling window of last 100 responses in INFO, 500 in DEBUG)
+        max_history = 500 if self.debug_mode else 100
+        self.response_times = deque(maxlen=max_history)
+
+        # DEBUG MODE: Detailed request log (last 100 requests with full details)
+        self.detailed_requests = deque(maxlen=100) if self.debug_mode else None
 
         # Token usage tracking
         self.token_usage = {
@@ -72,13 +94,23 @@ class MetricsService:
         logger.info("Metrics service initialized")
 
     # Response time tracking
-    def record_response_time(self, duration_ms: float):
+    def record_response_time(self, duration_ms: float, details: Optional[Dict] = None):
         """Record a response time.
 
         Args:
             duration_ms: Response time in milliseconds
+            details: Optional detailed information (used in DEBUG mode)
         """
         self.response_times.append(duration_ms)
+
+        # In DEBUG mode, record detailed request info
+        if self.debug_mode and self.detailed_requests is not None and details:
+            request_log = {
+                'timestamp': datetime.now().isoformat(),
+                'duration_ms': duration_ms,
+                **details  # Include all provided details
+            }
+            self.detailed_requests.append(request_log)
 
     def get_response_time_stats(self) -> Dict:
         """Get response time statistics.
@@ -324,7 +356,7 @@ class MetricsService:
         """
         uptime = datetime.now() - self.start_time
 
-        return {
+        summary = {
             'uptime_seconds': int(uptime.total_seconds()),
             'uptime_formatted': str(uptime).split('.')[0],  # Remove microseconds
             'response_times': self.get_response_time_stats(),
@@ -334,7 +366,15 @@ class MetricsService:
             'cache_stats': self.get_cache_stats(),
             'service_metrics': self.get_service_metrics(),
             'hourly_trends': self.get_hourly_trends(),
+            'debug_mode': self.debug_mode,
         }
+
+        # Include detailed request log in DEBUG mode
+        if self.debug_mode and self.detailed_requests is not None:
+            summary['detailed_requests'] = list(self.detailed_requests)
+            summary['detailed_request_count'] = len(self.detailed_requests)
+
+        return summary
 
     # Helper context manager for timing operations
     class Timer:
@@ -372,3 +412,148 @@ class MetricsService:
                 pass
         """
         return self.Timer(self)
+
+    # Metrics persistence
+    def save_metrics_to_file(self, filename: Optional[str] = None):
+        """Save current metrics to a JSON file.
+
+        Args:
+            filename: Optional custom filename. If None, uses timestamp.
+        """
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"metrics_{timestamp}.json"
+
+        filepath = self.metrics_dir / filename
+
+        try:
+            # Get complete metrics summary
+            metrics_data = self.get_summary()
+
+            # Add metadata
+            metrics_data['saved_at'] = datetime.now().isoformat()
+            metrics_data['version'] = '1.0'
+
+            # Save to file
+            with open(filepath, 'w') as f:
+                json.dump(metrics_data, f, indent=2, default=str)
+
+            logger.info(f"Metrics saved to {filepath}")
+            return filepath
+
+        except Exception as e:
+            logger.error(f"Failed to save metrics: {e}")
+            return None
+
+    def save_hourly_snapshot(self):
+        """Save hourly metrics snapshot.
+
+        Creates a file named metrics_YYYYMMDD_HH.json
+        """
+        timestamp = datetime.now().strftime("%Y%m%d_%H")
+        filename = f"hourly_{timestamp}.json"
+        return self.save_metrics_to_file(filename)
+
+    def save_daily_summary(self):
+        """Save daily metrics summary.
+
+        Creates a file named metrics_YYYYMMDD.json
+        """
+        timestamp = datetime.now().strftime("%Y%m%d")
+        filename = f"daily_{timestamp}.json"
+        return self.save_metrics_to_file(filename)
+
+    def cleanup_old_metrics(self, days_to_keep: int = 30):
+        """Clean up old metrics files.
+
+        Args:
+            days_to_keep: Number of days of metrics to keep (default: 30)
+        """
+        try:
+            cutoff_date = datetime.now() - timedelta(days=days_to_keep)
+            deleted = 0
+
+            for file in self.metrics_dir.glob("*.json"):
+                # Check file modification time
+                file_time = datetime.fromtimestamp(file.stat().st_mtime)
+                if file_time < cutoff_date:
+                    file.unlink()
+                    deleted += 1
+                    logger.debug(f"Deleted old metrics file: {file.name}")
+
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old metrics files")
+
+        except Exception as e:
+            logger.error(f"Failed to cleanup metrics: {e}")
+
+    def start_auto_save(self, interval_hours: int = 1):
+        """Start automatic metrics saving task.
+
+        Args:
+            interval_hours: Hours between saves (default: 1)
+
+        Returns:
+            Async task
+        """
+        async def auto_save_loop():
+            while True:
+                try:
+                    await asyncio.sleep(interval_hours * 3600)
+                    self.save_hourly_snapshot()
+
+                    # Daily cleanup at midnight
+                    now = datetime.now()
+                    if now.hour == 0:
+                        self.save_daily_summary()
+                        # Use configured retention period
+                        from config import Config
+                        self.cleanup_old_metrics(days_to_keep=Config.METRICS_RETENTION_DAYS)
+
+                except Exception as e:
+                    logger.error(f"Error in auto-save loop: {e}")
+
+        return asyncio.create_task(auto_save_loop())
+
+    def load_metrics_from_file(self, filename: str) -> Optional[Dict]:
+        """Load metrics from a file.
+
+        Args:
+            filename: Filename to load
+
+        Returns:
+            Metrics dictionary or None
+        """
+        filepath = self.metrics_dir / filename
+
+        try:
+            with open(filepath, 'r') as f:
+                data = json.load(f)
+            logger.info(f"Loaded metrics from {filepath}")
+            return data
+
+        except Exception as e:
+            logger.error(f"Failed to load metrics from {filename}: {e}")
+            return None
+
+    def list_saved_metrics(self) -> List[Dict]:
+        """List all saved metrics files.
+
+        Returns:
+            List of dicts with filename, size, and timestamp
+        """
+        metrics_files = []
+
+        for file in sorted(self.metrics_dir.glob("*.json"), reverse=True):
+            try:
+                stat = file.stat()
+                metrics_files.append({
+                    'filename': file.name,
+                    'size_bytes': stat.st_size,
+                    'size_kb': round(stat.st_size / 1024, 2),
+                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                })
+            except Exception as e:
+                logger.warning(f"Failed to stat {file}: {e}")
+
+        return metrics_files
