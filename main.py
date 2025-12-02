@@ -468,6 +468,11 @@ class OllamaBot(commands.Bot):
         await self.load_extension("cogs.search_commands")
         await self.load_extension("cogs.intent_commands")  # Custom intent management
 
+        # Load Interactive Cogs
+        await self.load_extension("cogs.game_helper")
+        await self.load_extension("cogs.games")
+        await self.load_extension("cogs.help")
+
         # Load EventListenersCog for natural reactions
         from cogs.event_listeners import EventListenersCog
         await self.add_cog(EventListenersCog(self))

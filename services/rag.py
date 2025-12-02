@@ -57,6 +57,10 @@ class RAGService:
     async def _initialize_vector_store(self):
         """Initialize ChromaDB and embedding model."""
         try:
+            # Force disable telemetry before import
+            import os
+            os.environ["ANONYMIZED_TELEMETRY"] = "False"
+            
             import chromadb
             from sentence_transformers import SentenceTransformer
 

@@ -66,6 +66,7 @@ class Config:
     RAG_DOCUMENTS_PATH: str = os.getenv("RAG_DOCUMENTS_PATH", "./data/documents")
     RAG_TOP_K: int = int(os.getenv("RAG_TOP_K", "3"))
     RAG_IN_CHAT: bool = os.getenv("RAG_IN_CHAT", "true").lower() == "true"  # Use RAG context in conversations
+    ANONYMIZED_TELEMETRY: bool = os.getenv("ANONYMIZED_TELEMETRY", "false").lower() == "true"
 
     # MCP (Model Context Protocol) - ARCHIVED (service never implemented)
     # MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "false").lower() == "true"

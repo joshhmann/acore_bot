@@ -218,6 +218,77 @@ class ChatCog(commands.Cog):
 
         return content
 
+    def _restore_mentions(self, content: str, guild: discord.Guild) -> str:
+        """Convert @Username mentions back to <@user_id> for Discord.
+        
+        This ensures that when the LLM outputs @Username, it gets converted to
+        a proper Discord mention tag that is clickable.
+        
+        Args:
+            content: Message content with @Username mentions
+            guild: Discord guild to get member list from
+            
+        Returns:
+            Content with @Username replaced by <@user_id>
+        """
+        if not guild or not content:
+            return content
+            
+        # Get all members and sort by name length (descending) to prevent partial matches
+        # e.g., "Rob" inside "Robert"
+        members = sorted(guild.members, key=lambda m: len(m.display_name), reverse=True)
+        
+        for member in members:
+            # Skip bots
+            if member.bot:
+                continue
+                
+            # Try display name first (server nickname)
+            display_name = member.display_name
+            content = content.replace(f"@{display_name}", f"<@{member.id}>")
+            
+            # Also try global username if different from display name
+            if member.name != display_name:
+                content = content.replace(f"@{member.name}", f"<@{member.id}>")
+                
+        return content
+
+    def _clean_for_tts(self, content: str, guild: discord.Guild) -> str:
+        """Clean content for TTS by replacing mentions with natural names.
+        
+        This ensures that TTS pronounces "Username" instead of reading out
+        "less than at one two three four five..."
+        
+        Args:
+            content: Message content with <@user_id> or @Username mentions
+            guild: Discord guild to get member list from
+            
+        Returns:
+            Content with mentions replaced by natural names
+        """
+        if not guild or not content:
+            return content
+            
+        # First, replace <@user_id> with display names
+        for member in guild.members:
+            # Skip bots
+            if member.bot:
+                continue
+                
+            # Replace <@ID> with display name
+            mention_pattern = f"<@{member.id}>"
+            content = content.replace(mention_pattern, member.display_name)
+            
+            # Also handle <@!ID> format (mobile mentions)
+            mention_pattern_mobile = f"<@!{member.id}>"
+            content = content.replace(mention_pattern_mobile, member.display_name)
+        
+        # Second, remove @ symbols from any remaining @Username patterns
+        # This handles cases where LLM outputs @Username
+        content = re.sub(r'@([A-Za-z0-9_]+)', r'\1', content)
+        
+        return content
+
     def _analyze_sentiment(self, text: str) -> str:
         """Simple sentiment analysis heuristic."""
         text = text.lower()
@@ -1311,11 +1382,13 @@ Answer ONLY "yes" or "no"."""
                                     current_time = time.time()
                                     if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
                                         if interaction:
+                                            # Apply mention conversion for Discord display
+                                            display_text = self._restore_mentions(response, guild) if guild else response
                                             if not response_message:
-                                                response_message = await interaction.followup.send(response[:2000])
+                                                response_message = await interaction.followup.send(display_text[:2000])
                                             else:
                                                 try:
-                                                    await response_message.edit(content=response[:2000])
+                                                    await response_message.edit(content=display_text[:2000])
                                                 except discord.HTTPException:
                                                     pass
 
@@ -1345,11 +1418,13 @@ Answer ONLY "yes" or "no"."""
                                 current_time = time.time()
                                 if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
                                     if interaction:
+                                        # Apply mention conversion for Discord display
+                                        display_text = self._restore_mentions(response, guild) if guild else response
                                         if not response_message:
-                                            response_message = await interaction.followup.send(response[:2000])
+                                            response_message = await interaction.followup.send(display_text[:2000])
                                         else:
                                             try:
-                                                await response_message.edit(content=response[:2000])
+                                                await response_message.edit(content=display_text[:2000])
                                             except discord.HTTPException:
                                                 pass
 
@@ -1367,11 +1442,13 @@ Answer ONLY "yes" or "no"."""
                             current_time = time.time()
                             if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
                                 if interaction:
+                                    # Apply mention conversion for Discord display
+                                    display_text = self._restore_mentions(response, guild) if guild else response
                                     if not response_message:
-                                        response_message = await interaction.followup.send(response[:2000])
+                                        response_message = await interaction.followup.send(display_text[:2000])
                                     else:
                                         try:
-                                            await response_message.edit(content=response[:2000])
+                                            await response_message.edit(content=display_text[:2000])
                                         except discord.HTTPException:
                                             pass  # Rate limit hit, skip this update
                                 # Note: We don't stream edits to regular messages as it's spammy/rate-limited
@@ -1381,18 +1458,20 @@ Answer ONLY "yes" or "no"."""
 
                     # Send final update if needed
                     if interaction and response_message:
+                        # Apply mention conversion for final Discord display
+                        display_text = self._restore_mentions(response, guild) if guild else response
                         try:
-                            await response_message.edit(content=response[:2000])
+                            await response_message.edit(content=display_text[:2000])
                         except discord.HTTPException:
                             pass
                     elif interaction:
-                        await interaction.followup.send(response[:2000])
-                    else:
-                        # For non-interaction, send the final response
-                        # (Streaming to channel.send is not implemented here to avoid spam/ratelimits)
-                        if response:
-                            await channel.send(response[:2000])
+                        # Apply mention conversion for final Discord display
+                        display_text = self._restore_mentions(response, guild) if guild else response
+                        await interaction.followup.send(display_text[:2000])
+                    # Note: For non-interaction, the final response will be sent later
+                    # after mention conversion (see lines below after response processing)
                 
+
                 # 3. Standard Non-Streaming Fallback
                 else:
                     response = await self.ollama.chat(
@@ -1415,6 +1494,18 @@ Answer ONLY "yes" or "no"."""
 
             # Clean up response (remove trailing backslashes, extra whitespace)
             response = response.rstrip('\\').rstrip()
+
+            # Create separate versions for Discord and TTS
+            # Discord version: Convert @Username to <@user_id> for clickable mentions
+            # TTS version: Convert <@user_id> to Username for natural pronunciation
+            guild = channel.guild if hasattr(channel, 'guild') else None
+            if guild:
+                discord_response = self._restore_mentions(response, guild)
+                tts_response = self._clean_for_tts(response, guild)
+            else:
+                # No guild context (DMs), use original response
+                discord_response = response
+                tts_response = response
 
             # Update mood based on interaction
             if self.naturalness and Config.MOOD_UPDATE_FROM_INTERACTIONS:
@@ -1462,14 +1553,16 @@ Answer ONLY "yes" or "no"."""
                     username=str(user.name),
                     user_id=user.id
                 )
-                await self.history.add_message(channel_id, "assistant", response)
+                # Use discord_response for history (with proper mention tags)
+                await self.history.add_message(channel_id, "assistant", discord_response)
 
             # Start a conversation session
             await self._start_session(channel_id, user.id)
 
             # Send response (handle long messages) - only if not streaming
             if not Config.RESPONSE_STREAMING_ENABLED:
-                chunks = await chunk_message(response)
+                # Use discord_response for Discord (with proper mention tags)
+                chunks = await chunk_message(discord_response)
                 for i, chunk in enumerate(chunks):
                     if i == 0:
                         await send_response(chunk)
@@ -1478,7 +1571,8 @@ Answer ONLY "yes" or "no"."""
             elif not interaction:
                 # If streaming was enabled but we are in non-interaction mode, we haven't sent the final message yet
                 # (because we skipped streaming updates to channel)
-                chunks = await chunk_message(response)
+                # Use discord_response for Discord (with proper mention tags)
+                chunks = await chunk_message(discord_response)
                 for i, chunk in enumerate(chunks):
                     await channel.send(chunk)
 
@@ -1502,7 +1596,9 @@ Answer ONLY "yes" or "no"."""
                 # Only generate TTS if actually in a voice channel
                 voice_client = channel.guild.voice_client if channel.guild else None
                 if voice_client and voice_client.is_connected():
-                    await self._speak_response_in_voice(channel.guild, response)
+                    # Use tts_response for natural pronunciation (without mention tags)
+                    await self._speak_response_in_voice(channel.guild, tts_response)
+
 
             # Record metrics for successful response
             if hasattr(self.bot, 'metrics'):

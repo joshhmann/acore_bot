@@ -127,7 +127,8 @@ class EnhancedVoiceListener:
         # Default trigger words (bot, assistant, hey, question)
         self.bot_trigger_words = bot_trigger_words or [
             "bot", "assistant", "arby", "hey", "help", "question", "tell me", "what",
-            "can you", "could you", "would you", "will you", "how", "why", "when", "where", "who"
+            "can you", "could you", "would you", "will you", "how", "why", "when", "where", "who",
+            "dagoth", "ur", "lord", "god", "sharmat", "dreamer"
         ]
 
         # Active listening sessions per guild
@@ -424,6 +425,8 @@ class EnhancedVoiceListener:
         2. Check for @mentions (at Arby, add Arby, etc.)
         3. Check if it's a question (ends with ?)
         4. Check for command-like phrases (tell me, show me, etc.)
+        5. Check for conversational statements (I'm, We're, etc.)
+        6. Check for substantial sentences (> 4 words)
 
         Args:
             transcription: Transcribed text
@@ -444,6 +447,8 @@ class EnhancedVoiceListener:
             r'\bat\s+arby\b',     # "at Arby"
             r'\badd\s+arby\b',    # "add Arby" (common mishear)
             r'\bat\s+r\.?b\.?\b', # "at R.B."
+            r'\bdagoth\b',        # "Dagoth"
+            r'\bdaddy\b',         # "Daddy" (common nickname for Dagoth Ur)
         ]
         import re
         for pattern in mention_patterns:
@@ -456,7 +461,7 @@ class EnhancedVoiceListener:
             logger.info(f"Question detected: {transcription}")
             return True
 
-        # 3. Check for imperative phrases
+        # 4. Check for imperative phrases
         imperative_phrases = [
             "tell me", "show me", "give me", "help me",
             "explain", "describe", "what is", "how do",
@@ -467,12 +472,23 @@ class EnhancedVoiceListener:
             logger.info(f"Imperative phrase detected: {transcription}")
             return True
 
-        # 4. REMOVED: Conversational starts (too aggressive)
-        # The bot should only respond when explicitly addressed, not to all conversation
+        # 5. Check for conversational statements (I'm, We're, etc.)
+        conversational_starts = [
+            "i am", "i'm", "i think", "i feel", "i want",
+            "we are", "we're", "my", "this is", "that is", "it is", "it's"
+        ]
+        
+        word_count = len(transcription.split())
+        
+        if word_count >= 3 and any(text_lower.startswith(start) for start in conversational_starts):
+            logger.info(f"Conversational statement detected: {transcription}")
+            return True
 
-        # 5. REMOVED: Length heuristic (too aggressive)
-        # Don't respond to every 4+ word sentence - people are just talking!
-        # Only respond when explicitly addressed (trigger words, questions, @mentions, etc.)
+        # 6. Check for substantial sentences (general conversation)
+        # If it's a decent length sentence, assume it's part of conversation
+        if word_count >= 5:
+            logger.info(f"Substantial sentence detected ({word_count} words): {transcription}")
+            return True
 
         # Otherwise, stay quiet
         logger.info(f"No response trigger in: {transcription}")
