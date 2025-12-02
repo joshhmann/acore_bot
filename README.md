@@ -277,18 +277,28 @@ MCP_SERVER_PATH=/path/to/mcp/server
 
 ## 📚 Documentation
 
+### 🎯 Start Here
+- **[FEATURES.md](FEATURES.md)** - Complete feature list with implementation status
+- **[FEATURE_ROADMAP.md](FEATURE_ROADMAP.md)** - Planned features and bundles
+- **[Quick Start](docs/setup/QUICK_START.md)** - 5-minute setup guide
+
 ### Setup Guides
-- [Quick Start](docs/setup/QUICK_START.md) - 5-minute setup guide
 - [VM Setup](docs/setup/VM_SETUP.md) - Complete Linux VM deployment
 - [Service Scripts](docs/setup/SERVICE_SCRIPTS.md) - systemd service installation
 - [RVC WebUI Setup](docs/setup/RVC_WEBUI_SETUP.md) - Voice conversion setup
+- [Voice Setup Summary](docs/setup/VOICE_SETUP_SUMMARY.md) - Complete voice pipeline
 
-### Features
+### Feature Guides
+- [Naturalness](docs/features/NATURALNESS.md) - Ambient mode, mood system, proactive engagement
 - [Affection System](docs/features/AFFECTION_SYSTEM.md) - Relationship tracking
-- [User Profile Auto-Learning](docs/features/USER_PROFILE_AUTO_LEARNING.md) - AI memory
+- [User Profiles](docs/features/USER_PROFILE_AUTO_LEARNING.md) - AI memory & learning
 - [Voice Features](docs/features/VOICE_FEATURES.md) - TTS and RVC pipeline
-- [Kokoro Auto-Download](docs/features/KOKORO_AUTO_DOWNLOAD.md) - Automatic model setup
-- [Persona Switching](docs/features/PERSONA_SWITCHING.md) - Multiple personalities
+- [Conversation Sessions](docs/features/CONVERSATION_SESSIONS.md) - Memory management
+- [Web Search](docs/features/WEB_SEARCH.md) - Internet search integration
+
+### Performance & Monitoring
+- [Performance Guide](docs/PERFORMANCE.md) - Optimization and tuning
+- [Monitoring Guide](docs/MONITORING.md) - Logging, metrics, and debugging
 
 ## 🐛 Troubleshooting
 

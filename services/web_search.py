@@ -5,7 +5,8 @@ import aiohttp
 from urllib.parse import quote_plus
 import asyncio
 from ddgs import DDGS
-from services.query_optimizer import get_query_optimizer
+# Query optimizer removed - feature was never fully integrated
+# from services.query_optimizer import get_query_optimizer
 import re
 
 logger = logging.getLogger(__name__)
@@ -34,8 +35,8 @@ class WebSearchService:
         self.session: Optional[aiohttp.ClientSession] = None
         self.use_optimizer = use_optimizer
 
-        # Initialize query optimizer
-        self.optimizer = get_query_optimizer() if use_optimizer else None
+        # Query optimizer disabled - service removed
+        self.optimizer = None  # Feature removed
 
         logger.info(f"Web search service initialized (engine: {self.engine}, optimizer: {use_optimizer})")
 

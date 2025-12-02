@@ -645,14 +645,15 @@ class NaturalnessService:
         # Import mood and self-awareness systems
         try:
             from services.mood_system import MoodSystem
-            from services.self_awareness import SelfAwarenessSystem
+            # self_awareness and rhythm_matching removed - features were incomplete
+            # from services.self_awareness import SelfAwarenessSystem
             from services.environmental_awareness import EnvironmentalAwareness
-            from services.rhythm_matching import ConversationalRhythmMatcher
+            # from services.rhythm_matching import ConversationalRhythmMatcher
 
             self.mood = MoodSystem()
-            self.self_awareness = SelfAwarenessSystem()
+            self.self_awareness = None  # Feature removed
             self.environmental = EnvironmentalAwareness(bot)
-            self.rhythm = ConversationalRhythmMatcher()
+            self.rhythm = None  # Feature removed
             logger.info("All naturalness systems loaded (mood, self-awareness, environmental, rhythm)")
         except Exception as e:
             logger.warning(f"Could not load naturalness systems: {e}")

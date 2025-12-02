@@ -16,8 +16,10 @@ from services.ollama import OllamaService
 from services.intent_recognition import IntentRecognitionService, ConversationalResponder
 from services.intent_handler import IntentHandler
 from services.naturalness import NaturalnessEnhancer
-from services.streaming_tts import StreamingTTSProcessor, StreamMultiplexer
-from services.response_optimizer import ResponseOptimizer
+# StreamingTTS feature temporarily disabled - service removed during cleanup
+# from services.streaming_tts import StreamingTTSProcessor, StreamMultiplexer
+# Response optimizer removed - feature was never fully integrated
+# from services.response_optimizer import ResponseOptimizer
 from utils.helpers import (
     ChatHistoryManager,
     chunk_message,
@@ -1245,27 +1247,27 @@ Answer ONLY "yes" or "no"."""
             if self.naturalness:
                 self.naturalness.log_action("chat", f"User: {str(user.name)}")
 
-            # Optimize response parameters based on query complexity
-            if Config.DYNAMIC_MAX_TOKENS:
-                optimization = ResponseOptimizer.optimize_request_params(
-                    message_content,
-                    base_params={'max_tokens': Config.OLLAMA_MAX_TOKENS or 500},
-                    enable_dynamic_tokens=True,
-                    streaming_threshold=Config.STREAMING_TOKEN_THRESHOLD
-                )
-                optimal_max_tokens = optimization['max_tokens']
-                optimization_info = optimization.get('_optimization_info', {})
-
-                # Override streaming decision if optimizer suggests
-                if 'use_streaming' in optimization_info:
-                    should_stream = optimization_info['use_streaming']
-                    logger.debug(
-                        f"Optimizer suggests streaming: {should_stream} "
-                        f"(estimated {optimal_max_tokens} tokens)"
-                    )
-            else:
-                optimal_max_tokens = Config.OLLAMA_MAX_TOKENS or 500
-                should_stream = Config.RESPONSE_STREAMING_ENABLED
+            # Response optimization disabled - service removed
+            # if Config.DYNAMIC_MAX_TOKENS:
+            #     optimization = ResponseOptimizer.optimize_request_params(
+            #         message_content,
+            #         base_params={'max_tokens': Config.OLLAMA_MAX_TOKENS or 500},
+            #         enable_dynamic_tokens=True,
+            #         streaming_threshold=Config.STREAMING_TOKEN_THRESHOLD
+            #     )
+            #     optimal_max_tokens = optimization['max_tokens']
+            #     optimization_info = optimization.get('_optimization_info', {})
+            #
+            #     # Override streaming decision if optimizer suggests
+            #     if 'use_streaming' in optimization_info:
+            #         should_stream = optimization_info['use_streaming']
+            #         logger.debug(
+            #             f"Optimizer suggests streaming: {should_stream} "
+            #             f"(estimated {optimal_max_tokens} tokens)"
+            #         )
+            # Use default values since optimizer is disabled
+            optimal_max_tokens = Config.OLLAMA_MAX_TOKENS or 500
+            should_stream = Config.RESPONSE_STREAMING_ENABLED
 
             # If we found a recent image, process it with vision
             if recent_image_url and Config.VISION_ENABLED:

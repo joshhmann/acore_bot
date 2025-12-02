@@ -30,14 +30,14 @@ This document outlines planned features for the bot, grouped by theme for easier
 **Bundle: Making the Bot Feel Alive**
 
 ### Quick Wins (Completed!)
-- [x] Reaction responses (emoji reactions to messages)
-- [x] Respond to reactions on bot messages
-- [x] Activity awareness (game/streaming detection)
+- [~] Reaction responses (emoji reactions to messages) - Code exists but unclear if working
+- [~] Respond to reactions on bot messages - Code exists but unclear if working
+- [~] Activity awareness (game/streaming detection) - Code exists but appears incomplete
 - [x] Response variations (multiple phrasings)
 
 ### Deeper Naturalness
 - [x] Conversational memory (reference past conversations naturally - via summarization)
-- [ ] Mood persistence (bot mood shifts with interactions)
+- [~] Mood persistence (bot mood shifts with interactions) - Code exists but not loaded/active
 - [x] Natural timing (variable response delays)
 - [x] Inside jokes / relationship building (via user profiles & affection system)
 
@@ -60,6 +60,7 @@ Features that make the bot more aware of its environment and users.
 Features for understanding and generating different media types.
 
 - [x] Image understanding (vision model integration - gemma3:4b)
+- [x] Game Helper (vision-based game assistance) - cogs/game_helper.py
 - [ ] Image generation (Stable Diffusion/ComfyUI integration)
 - [ ] File analysis (PDFs, documents)
 - [ ] Screenshot/image reactions
@@ -70,8 +71,8 @@ Features for understanding and generating different media types.
 
 Features for richer social interactions.
 
-- [ ] Persona system (switch between personalities)
-- [ ] Mood persistence (bot mood affected by conversations)
+- [x] Persona system (switch between personalities) - services/persona_system.py
+- [~] Mood persistence (bot mood affected by conversations) - Code exists but not active
 - [ ] Voice emotion detection (analyze tone/pitch)
 
 ---
@@ -81,10 +82,10 @@ Features for richer social interactions.
 Practical helper features.
 
 - [x] Reminders system ("remind me in 2 hours")
-- [ ] Code execution sandbox (Python/JS snippets)
+- [x] Note-taking per user - services/notes.py, cogs/notes.py
 - [x] Web search integration
+- [ ] Code execution sandbox (Python/JS snippets)
 - [ ] Calculator/unit conversion
-- [ ] Note-taking per user
 
 ---
 

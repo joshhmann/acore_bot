@@ -14,7 +14,8 @@ from services.tts import TTSService
 from services.rvc_unified import UnifiedRVCService
 from services.enhanced_voice_listener import EnhancedVoiceListener
 from services.voice_commands import VoiceCommandParser, CommandType
-from services.sound_effects import get_sound_effects_service
+# Sound effects service removed - feature was never fully integrated
+# from services.sound_effects import get_sound_effects_service
 from utils.helpers import format_error, format_success, format_info
 
 logger = logging.getLogger(__name__)
@@ -955,31 +956,14 @@ class VoiceCog(commands.Cog):
             logger.error(f"STT status command failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="reload_sounds", description="Reload sound effects configuration")
-    async def reload_sounds(self, interaction: discord.Interaction):
-        """Reload sound effects from config file.
+    # Sound effects commands disabled - service was removed
+    # @app_commands.command(name="reload_sounds", description="Reload sound effects configuration")
+    # async def reload_sounds(self, interaction: discord.Interaction):
+    #     """Reload sound effects from config file."""
+    #     await interaction.response.send_message("❌ Sound effects feature is currently disabled", ephemeral=True)
 
-        Args:
-            interaction: Discord interaction
-        """
-        await interaction.response.defer(ephemeral=True, thinking=True)
-
-        try:
-            sound_effects = await get_sound_effects_service()
-            await sound_effects.reload_config()
-
-            await interaction.followup.send(
-                format_success(f"Reloaded {len(sound_effects.effects)} sound effects"),
-                ephemeral=True,
-            )
-            logger.info(f"Sound effects config reloaded by {interaction.user}")
-
-        except Exception as e:
-            logger.error(f"Reload sounds command failed: {e}")
-            await interaction.followup.send(format_error(e), ephemeral=True)
-
-    @app_commands.command(name="list_sounds", description="Show all available sound effects")
-    async def list_sounds(self, interaction: discord.Interaction):
+    # @app_commands.command(name="list_sounds", description="Show all available sound effects")
+    async def list_sounds_disabled(self, interaction: discord.Interaction):
         """List all available sound effects and their triggers.
 
         Args:
@@ -1026,8 +1010,8 @@ class VoiceCog(commands.Cog):
             logger.error(f"List sounds command failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="toggle_sounds", description="Enable or disable sound effects")
-    async def toggle_sounds(self, interaction: discord.Interaction):
+    # @app_commands.command(name="toggle_sounds", description="Enable or disable sound effects")
+    async def toggle_sounds_disabled(self, interaction: discord.Interaction):
         """Toggle sound effects on/off.
 
         Args:

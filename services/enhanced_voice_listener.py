@@ -12,7 +12,7 @@ import struct
 import discord
 from discord.ext import voice_recv
 from services.transcription_fixer import get_transcription_fixer
-from services.sound_effects import get_sound_effects_service
+# Sound effects service removed - was never fully integrated
 
 logger = logging.getLogger(__name__)
 
@@ -377,17 +377,8 @@ class EnhancedVoiceListener:
                     # Don't process this as a command - just interrupt
                     return
 
-            # Check for sound effect triggers
-            try:
-                sound_effects = await get_sound_effects_service()
-                matching_effect = sound_effects.find_matching_effect(transcription)
-
-                if matching_effect:
-                    if voice_client:
-                        logger.info(f"Sound effect triggered: {matching_effect.name} by '{transcription}'")
-                        await sound_effects.play_effect(matching_effect, voice_client)
-            except Exception as e:
-                logger.error(f"Error playing sound effect: {e}")
+            # Sound effects feature removed (service was never fully integrated)
+            # Future: Could re-implement sound effects if needed
 
             # Callback for transcription
             if session["on_transcription"]:

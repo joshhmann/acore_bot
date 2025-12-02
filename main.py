@@ -285,6 +285,16 @@ class OllamaBot(commands.Bot):
             self.naturalness = NaturalnessService(self)
             logger.info("Naturalness service initialized (reactions, activity awareness, natural timing)")
 
+        # Initialize Mood System
+        self.mood_system = None
+        if Config.MOOD_SYSTEM_ENABLED:
+            from services.mood_system import MoodSystem
+            self.mood_system = MoodSystem()
+            # Connect mood system to naturalness if both are enabled
+            if self.naturalness:
+                self.naturalness.mood = self.mood_system
+            logger.info("Mood system initialized (dynamic emotional states)")
+
         # Initialize Reminders Service
         self.reminders_service = None
         if Config.REMINDERS_ENABLED:

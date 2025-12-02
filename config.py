@@ -187,6 +187,7 @@ class Config:
 
     # Naturalness Settings
     NATURALNESS_ENABLED: bool = os.getenv("NATURALNESS_ENABLED", "true").lower() == "true"
+    MOOD_SYSTEM_ENABLED: bool = os.getenv("MOOD_SYSTEM_ENABLED", "false").lower() == "true"  # Dynamic mood states
     REACTIONS_ENABLED: bool = os.getenv("REACTIONS_ENABLED", "true").lower() == "true"
     REACTIONS_CHANCE_MULTIPLIER: float = float(os.getenv("REACTIONS_CHANCE_MULTIPLIER", "1.0"))  # Multiplier for reaction chances
     ACTIVITY_AWARENESS_ENABLED: bool = os.getenv("ACTIVITY_AWARENESS_ENABLED", "true").lower() == "true"

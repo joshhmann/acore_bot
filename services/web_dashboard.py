@@ -9,7 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from collections import deque
 from dotenv import dotenv_values, set_key
-from services.sound_effects import get_sound_effects_service
+# Sound effects service removed - feature was never fully integrated
+# from services.sound_effects import get_sound_effects_service
 
 logger = logging.getLogger(__name__)
 
@@ -1764,8 +1765,10 @@ class WebDashboard:
 
     async def handle_get_sounds(self, request):
         """Get all sound effects and their config."""
+        # Sound effects feature disabled
+        return web.json_response({"error": "Sound effects feature is currently disabled"}, status=501)
         try:
-            sound_service = await get_sound_effects_service()
+            pass  # sound_service = await get_sound_effects_service()
 
             # Get all effects with their details
             effects = []
@@ -1792,6 +1795,7 @@ class WebDashboard:
 
     async def handle_upload_sound(self, request):
         """Handle sound file upload."""
+        return web.json_response({"error": "Sound effects feature is currently disabled"}, status=501)
         try:
             reader = await request.multipart()
 
@@ -1846,6 +1850,7 @@ class WebDashboard:
 
     async def handle_update_sound_config(self, request):
         """Update sound effects configuration."""
+        return web.json_response({"error": "Sound effects feature is currently disabled"}, status=501)
         try:
             data = await request.json()
 
@@ -1907,6 +1912,7 @@ class WebDashboard:
 
     async def handle_delete_sound(self, request):
         """Delete a sound effect."""
+        return web.json_response({"error": "Sound effects feature is currently disabled"}, status=501)
         try:
             data = await request.json()
             name = data.get('name')
@@ -1961,6 +1967,7 @@ class WebDashboard:
 
     async def handle_toggle_sounds(self, request):
         """Toggle sound effects on/off."""
+        return web.json_response({"error": "Sound effects feature is currently disabled"}, status=501)
         try:
             sound_service = await get_sound_effects_service()
             sound_service.enabled = not sound_service.enabled
