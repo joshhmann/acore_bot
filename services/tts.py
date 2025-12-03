@@ -1,5 +1,4 @@
-"""Text-to-Speech service supporting Edge TTS, Kokoro TTS, and Supertonic TTS."""
-import edge_tts
+"""Text-to-Speech service supporting Kokoro TTS and Supertonic TTS."""
 import logging
 from pathlib import Path
 from typing import Optional
@@ -27,14 +26,11 @@ logger = logging.getLogger(__name__)
 
 
 class TTSService:
-    """Service for text-to-speech generation using Edge TTS, Kokoro TTS, or Supertonic TTS."""
+    """Service for text-to-speech generation using Kokoro TTS or Supertonic TTS."""
 
     def __init__(
         self,
-        engine: str = "edge",
-        default_voice: str = "en-US-AriaNeural",
-        rate: str = "+0%",
-        volume: str = "+0%",
+        engine: str = "kokoro_api",
         kokoro_voice: str = "am_adam",
         kokoro_speed: float = 1.0,
         kokoro_api_url: Optional[str] = None,
@@ -45,10 +41,7 @@ class TTSService:
         """Initialize TTS service.
 
         Args:
-            engine: TTS engine to use ("edge", "kokoro", "kokoro_api", or "supertonic")
-            default_voice: Default Edge TTS voice to use
-            rate: Speech rate adjustment for Edge TTS (e.g., "+50%", "-20%")
-            volume: Volume adjustment for Edge TTS (e.g., "+50%", "-20%")
+            engine: TTS engine to use ("kokoro", "kokoro_api", or "supertonic")
             kokoro_voice: Default Kokoro voice to use
             kokoro_speed: Kokoro speech speed multiplier
             kokoro_api_url: Kokoro-FastAPI URL (e.g., "http://localhost:8880")
@@ -57,9 +50,6 @@ class TTSService:
             supertonic_speed: Supertonic speech speed multiplier
         """
         self.engine = engine.lower()
-        self.default_voice = default_voice
-        self.rate = rate
-        self.volume = volume
         self.kokoro_voice = kokoro_voice
         self.kokoro_speed = kokoro_speed
         self.kokoro_api_url = kokoro_api_url
@@ -78,8 +68,7 @@ class TTSService:
                 )
                 logger.info(f"Kokoro API client initialized (URL: {kokoro_api_url}, voice: {kokoro_voice})")
             else:
-                logger.warning("Kokoro API client not available or URL not provided, falling back to Edge TTS")
-                self.engine = "edge"
+                raise RuntimeError("Kokoro API client not available or URL not provided. Set KOKORO_API_URL in config.")
 
         # Initialize Kokoro (in-process) if requested
         self.kokoro: Optional[KokoroTTSService] = None
@@ -92,11 +81,9 @@ class TTSService:
                 if self.kokoro.is_available():
                     logger.info(f"Kokoro TTS initialized (voice: {kokoro_voice})")
                 else:
-                    logger.warning("Kokoro TTS not available, falling back to Edge TTS")
-                    self.engine = "edge"
+                    raise RuntimeError("Kokoro TTS models not available. Check installation.")
             else:
-                logger.warning("Kokoro TTS module not found, falling back to Edge TTS")
-                self.engine = "edge"
+                raise RuntimeError("Kokoro TTS module not found. Install with: pip install kokoro-onnx")
 
         # Initialize Supertonic if requested
         self.supertonic: Optional[SupertonicTTSService] = None
@@ -111,23 +98,18 @@ class TTSService:
                     if self.supertonic.is_available():
                         logger.info(f"Supertonic TTS initialized (voice: {supertonic_voice}, steps: {supertonic_steps}, speed: {supertonic_speed})")
                     else:
-                        logger.warning("Supertonic TTS not available, falling back to Edge TTS")
-                        self.engine = "edge"
+                        raise RuntimeError("Supertonic TTS not available. Check installation.")
                 except Exception as e:
                     logger.error(f"Failed to initialize Supertonic TTS: {e}")
-                    logger.warning("Falling back to Edge TTS")
-                    self.engine = "edge"
+                    raise RuntimeError(f"Supertonic TTS initialization failed: {e}")
             else:
-                logger.warning("Supertonic TTS module not found, falling back to Edge TTS")
-                self.engine = "edge"
+                raise RuntimeError("Supertonic TTS module not found. Check installation.")
 
     async def generate(
         self,
         text: str,
         output_path: Path,
         voice: Optional[str] = None,
-        rate: Optional[str] = None,
-        volume: Optional[str] = None,
         speed: Optional[float] = None,
         steps: Optional[int] = None,
     ) -> Path:
@@ -137,8 +119,6 @@ class TTSService:
             text: Text to convert to speech
             output_path: Path to save audio file
             voice: Voice to use (depends on engine)
-            rate: Speech rate for Edge TTS (defaults to self.rate)
-            volume: Volume level for Edge TTS (defaults to self.volume)
             speed: Speed multiplier for Kokoro/Supertonic TTS
             steps: Denoising steps for Supertonic TTS (higher = better quality)
 
@@ -201,34 +181,45 @@ class TTSService:
                     speed=kokoro_speed
                 )
 
-            # Use Edge TTS (default)
+            # No valid TTS engine configured
             else:
-                communicate = edge_tts.Communicate(
-                    cleaned_text,
-                    voice=voice or self.default_voice,
-                    rate=rate or self.rate,
-                    volume=volume or self.volume,
-                )
-
-                await communicate.save(str(output_path))
-                logger.info(f"Generated TTS audio: {output_path}")
-                return output_path
+                raise RuntimeError(f"No valid TTS engine configured. Current engine: {self.engine}")
 
         except Exception as e:
             logger.error(f"TTS generation failed: {e}")
             raise Exception(f"Failed to generate speech: {e}")
 
     async def list_voices(self) -> list:
-        """List all available voices.
+        """List all available voices for the current TTS engine.
 
         Returns:
-            List of voice info dicts
+            List of voice info dicts (engine-specific format)
         """
-        try:
-            voices = await edge_tts.list_voices()
-            return voices
-        except Exception as e:
-            logger.error(f"Failed to list voices: {e}")
+        if self.engine == "kokoro_api" and self.kokoro_api:
+            # Kokoro API doesn't have a list_voices endpoint
+            # Return static list of known voices
+            return [
+                {"name": "af_adam", "description": "American Male (Adam)"},
+                {"name": "af_bella", "description": "American Female (Bella)"},
+                {"name": "af_nicole", "description": "American Female (Nicole)"},
+                {"name": "af_sarah", "description": "American Female (Sarah)"},
+                {"name": "am_adam", "description": "American Male (Adam - Alt)"},
+                {"name": "am_michael", "description": "American Male (Michael)"},
+                {"name": "bf_emma", "description": "British Female (Emma)"},
+                {"name": "bf_isabella", "description": "British Female (Isabella)"},
+                {"name": "bm_george", "description": "British Male (George)"},
+                {"name": "bm_lewis", "description": "British Male (Lewis)"},
+            ]
+        elif self.engine == "supertonic":
+            # Supertonic voices
+            return [
+                {"name": "M1", "description": "Male Voice 1"},
+                {"name": "M2", "description": "Male Voice 2"},
+                {"name": "F1", "description": "Female Voice 1"},
+                {"name": "F2", "description": "Female Voice 2"},
+            ]
+        else:
+            logger.warning(f"list_voices() not implemented for engine: {self.engine}")
             return []
 
     async def get_voices_by_language(self, language_code: str) -> list:
@@ -240,8 +231,12 @@ class TTSService:
         Returns:
             List of matching voice info dicts
         """
-        all_voices = await self.list_voices()
-        return [v for v in all_voices if v["Locale"].startswith(language_code)]
+        # Current engines (Kokoro, Supertonic) only support English
+        if language_code.startswith("en"):
+            return await self.list_voices()
+        else:
+            logger.warning(f"Language '{language_code}' not supported by {self.engine}")
+            return []
 
     def get_voice_info(self) -> dict:
         """Get information about the current default voice.
@@ -262,10 +257,14 @@ class TTSService:
                 "voice": self.kokoro_voice,
                 "speed": self.kokoro_speed,
             }
+        elif self.engine == "kokoro_api":
+            return {
+                "engine": "kokoro_api",
+                "voice": self.kokoro_voice,
+                "speed": self.kokoro_speed,
+            }
         else:
             return {
-                "engine": "edge",
-                "voice": self.default_voice,
-                "rate": self.rate,
-                "volume": self.volume,
+                "engine": self.engine,
+                "error": "Unknown TTS engine",
             }

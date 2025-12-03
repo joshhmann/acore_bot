@@ -1,7 +1,7 @@
 """Direct HTTP client for RVC-WebUI (bypassing Gradio Client issues)."""
 import asyncio
 import logging
-import requests
+import aiohttp
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -24,7 +24,18 @@ class RVCHTTPClient:
         """
         self.base_url = base_url.rstrip("/")
         self.default_model = default_model
-        self.session = requests.Session()
+        self.session: Optional[aiohttp.ClientSession] = None
+
+    async def _ensure_session(self):
+        """Ensure HTTP session is initialized."""
+        if not self.session:
+            self.session = aiohttp.ClientSession()
+
+    async def close(self):
+        """Close HTTP session."""
+        if self.session:
+            await self.session.close()
+            self.session = None
 
     async def health_check(self) -> bool:
         """Check if RVC-WebUI is running.
@@ -32,9 +43,13 @@ class RVCHTTPClient:
         Returns:
             True if healthy, False otherwise
         """
+        await self._ensure_session()
         try:
-            response = self.session.get(f"{self.base_url}/config", timeout=5)
-            return response.status_code == 200
+            async with self.session.get(
+                f"{self.base_url}/config",
+                timeout=aiohttp.ClientTimeout(total=5)
+            ) as response:
+                return response.status == 200
         except Exception as e:
             logger.error(f"Health check failed: {e}")
             return False
@@ -86,17 +101,18 @@ class RVCHTTPClient:
                 "session_hash": f"rvc_{int(time.time())}"
             }
 
-            load_response = self.session.post(
+            await self._ensure_session()
+            async with self.session.post(
                 f"{self.base_url}/api/infer_change_voice",
                 json=load_payload,
-                timeout=30
-            )
-
-            if load_response.status_code != 200:
-                logger.error(f"Failed to load model: HTTP {load_response.status_code}")
-                logger.error(f"Response: {load_response.text[:500]}")
-            else:
-                logger.info(f"Model loaded successfully: {model}")
+                timeout=aiohttp.ClientTimeout(total=30)
+            ) as load_response:
+                if load_response.status != 200:
+                    response_text = await load_response.text()
+                    logger.error(f"Failed to load model: HTTP {load_response.status}")
+                    logger.error(f"Response: {response_text[:500]}")
+                else:
+                    logger.info(f"Model loaded successfully: {model}")
 
             # Step 2: Copy input file to temp folder for RVC processing
             rvc_temp = Config.TEMP_DIR / "rvc"
@@ -275,88 +291,98 @@ class RVCHTTPClient:
         }
 
         # Try the /api/infer_convert endpoint
+        await self._ensure_session()
         try:
-            response = self.session.post(
+            async with self.session.post(
                 f"{self.base_url}/api/infer_convert",
                 json=payload,
-                timeout=120
-            )
-            
-            if response.status_code != 200:
-                logger.warning(f"RVC conversion with index failed: HTTP {response.status_code}")
+                timeout=aiohttp.ClientTimeout(total=120)
+            ) as response:
+                response_status = response.status
+                response_text = await response.text()
+
+            if response_status != 200:
+                logger.warning(f"RVC conversion with index failed: HTTP {response_status}")
                 # Fallback: try without index
                 logger.info("Retrying without index file...")
                 payload["data"][5] = ""  # Clear index path
-                
-                response = self.session.post(
+
+                async with self.session.post(
                     f"{self.base_url}/api/infer_convert",
                     json=payload,
-                    timeout=120
-                )
+                    timeout=aiohttp.ClientTimeout(total=120)
+                ) as retry_response:
+                    response_status = retry_response.status
+                    response_text = await retry_response.text()
+
+            logger.info(f"Response status: {response_status}")
+            logger.info(f"Response text: {response_text[:500]}")
+
+            if response_status == 200:
+                result = json.loads(response_text)
+                logger.info(f"Result: {result}")
+
+                # Extract output file path from result
+                if "data" in result and len(result["data"]) >= 2:
+                    output_info = result["data"][1]
+                    logger.info(f"Output info: {output_info}")
+
+                    # The output might be a dict with 'name' key or a direct path
+                    output_file_path = None
+                    if isinstance(output_info, dict) and "name" in output_info:
+                        output_file_path = output_info["name"]
+                    elif isinstance(output_info, str):
+                        output_file_path = output_info
+
+                    if output_file_path:
+                        # Copy directly from filesystem with proper delay for file writing
+                        try:
+                            # Fix: Ensure output_file_path is string before creating Path
+                            source_path = Path(str(output_file_path))
+
+                            # Wait for file to be fully written (Gradio may still be writing)
+                            logger.info(f"Waiting for RVC output file: {output_file_path}")
+                            await asyncio.sleep(0.5)
+
+                            # Try multiple times with increasing delays
+                            max_attempts = 5
+                            for attempt in range(max_attempts):
+                                if source_path.exists():
+                                    # Check if file has content
+                                    file_size = source_path.stat().st_size
+                                    if file_size > 0:
+                                        # Copy the file (fix: ensure paths are strings)
+                                        await asyncio.to_thread(
+                                            shutil.copy2,
+                                            str(source_path),
+                                            str(output_path)
+                                        )
+                                        logger.info(f"RVC conversion successful: {output_path} ({file_size} bytes)")
+                                        return output_path
+                                    else:
+                                        logger.warning(f"RVC output file is empty, attempt {attempt + 1}/{max_attempts}")
+                                else:
+                                    logger.warning(f"RVC output file not found, attempt {attempt + 1}/{max_attempts}")
+
+                                # Wait before retry
+                                if attempt < max_attempts - 1:
+                                    await asyncio.sleep(0.3)
+
+                            logger.error(f"RVC output file not ready after {max_attempts} attempts")
+                        except Exception as e:
+                            logger.error(f"Failed to copy RVC output: {e}")
+                            import traceback
+                            logger.error(f"Traceback: {traceback.format_exc()}")
+                    else:
+                        logger.error(f"No output file path in response")
+                else:
+                    logger.error(f"Unexpected result format: {result}")
+
         except Exception as e:
             logger.error(f"Request failed: {e}")
             raise
 
-        logger.info(f"Response status: {response.status_code}")
-        logger.info(f"Response text: {response.text[:500]}")
-
-        if response.status_code == 200:
-            result = response.json()
-            logger.info(f"Result: {result}")
-
-            # Extract output file path from result
-            if "data" in result and len(result["data"]) >= 2:
-                output_info = result["data"][1]
-                logger.info(f"Output info: {output_info}")
-
-                # The output might be a dict with 'name' key or a direct path
-                output_file_path = None
-                if isinstance(output_info, dict) and "name" in output_info:
-                    output_file_path = output_info["name"]
-                elif isinstance(output_info, str):
-                    output_file_path = output_info
-
-                if output_file_path:
-                    # Copy directly from filesystem with proper delay for file writing
-                    try:
-                        source_path = Path(output_file_path)
-
-                        # Wait for file to be fully written (Gradio may still be writing)
-                        logger.info(f"Waiting for RVC output file: {output_file_path}")
-                        await asyncio.sleep(0.5)
-
-                        # Try multiple times with increasing delays
-                        max_attempts = 5
-                        for attempt in range(max_attempts):
-                            if source_path.exists():
-                                # Check if file has content
-                                file_size = source_path.stat().st_size
-                                if file_size > 0:
-                                    # Copy the file
-                                    import shutil
-                                    shutil.copy2(source_path, output_path)
-                                    logger.info(f"RVC conversion successful: {output_path} ({file_size} bytes)")
-                                    return output_path
-                                else:
-                                    logger.warning(f"RVC output file is empty, attempt {attempt + 1}/{max_attempts}")
-                            else:
-                                logger.warning(f"RVC output file not found, attempt {attempt + 1}/{max_attempts}")
-
-                            # Wait before retry
-                            if attempt < max_attempts - 1:
-                                await asyncio.sleep(0.3)
-
-                        logger.error(f"RVC output file not ready after {max_attempts} attempts")
-                    except Exception as e:
-                        logger.error(f"Failed to copy RVC output: {e}")
-                        import traceback
-                        logger.error(f"Traceback: {traceback.format_exc()}")
-                else:
-                    logger.error(f"No output file path in response")
-            else:
-                logger.error(f"Unexpected result format: {result}")
-
-        raise Exception(f"RVC conversion failed - HTTP {response.status_code}")
+        raise Exception(f"RVC conversion failed - HTTP {response_status}")
 
     def is_available(self) -> bool:
         """Check if client is configured.

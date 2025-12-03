@@ -85,12 +85,7 @@ class Config:
     WEB_SEARCH_MAX_RESULTS: int = int(os.getenv("WEB_SEARCH_MAX_RESULTS", "3"))
 
     # Voice/TTS
-    TTS_ENGINE: str = os.getenv("TTS_ENGINE", "edge")  # "edge", "kokoro", "kokoro_api", or "supertonic"
-
-    # Edge TTS Settings
-    DEFAULT_TTS_VOICE: str = os.getenv("DEFAULT_TTS_VOICE", "en-US-AriaNeural")
-    TTS_RATE: str = os.getenv("TTS_RATE", "+0%")
-    TTS_VOLUME: str = os.getenv("TTS_VOLUME", "+0%")
+    TTS_ENGINE: str = os.getenv("TTS_ENGINE", "kokoro_api")  # "kokoro", "kokoro_api", or "supertonic"
 
     # Kokoro TTS Settings
     KOKORO_VOICE: str = os.getenv("KOKORO_VOICE", "am_adam")
@@ -249,6 +244,11 @@ class Config:
     USE_STREAMING_FOR_LONG_RESPONSES: bool = os.getenv("USE_STREAMING_FOR_LONG_RESPONSES", "true").lower() == "true"
     STREAMING_TOKEN_THRESHOLD: int = int(os.getenv("STREAMING_TOKEN_THRESHOLD", "300"))  # Use streaming if > 300 tokens
     DYNAMIC_MAX_TOKENS: bool = os.getenv("DYNAMIC_MAX_TOKENS", "false").lower() == "true"  # Adjust max_tokens based on query
+
+    # LLM Response Caching
+    LLM_CACHE_ENABLED: bool = os.getenv("LLM_CACHE_ENABLED", "true").lower() == "true"  # Cache LLM responses to reduce API calls
+    LLM_CACHE_MAX_SIZE: int = int(os.getenv("LLM_CACHE_MAX_SIZE", "1000"))  # Maximum cached responses (LRU eviction)
+    LLM_CACHE_TTL_SECONDS: int = int(os.getenv("LLM_CACHE_TTL_SECONDS", "3600"))  # Cache entry lifetime (1 hour default)
 
     @classmethod
     def validate(cls) -> bool:

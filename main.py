@@ -3,7 +3,7 @@
 
 A simple, clean Discord bot that:
 - Uses Ollama for AI-powered conversations
-- Generates speech with TTS (Edge TTS or Kokoro)
+- Generates speech with TTS (Kokoro or Supertonic)
 - Applies voice conversion with RVC
 - Plays audio in Discord voice channels
 - Manages memory and storage automatically
@@ -150,9 +150,6 @@ class OllamaBot(commands.Bot):
 
         self.tts = TTSService(
             engine=Config.TTS_ENGINE,
-            default_voice=Config.DEFAULT_TTS_VOICE,
-            rate=Config.TTS_RATE,
-            volume=Config.TTS_VOLUME,
             kokoro_voice=Config.KOKORO_VOICE,
             kokoro_speed=Config.KOKORO_SPEED,
             kokoro_api_url=Config.KOKORO_API_URL,

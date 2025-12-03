@@ -10,7 +10,6 @@ dependencies = [
     "ddgs>=9.9.0",
     "discord-py[voice]>=2.3.0",
     "discord-ext-voice-recv>=0.5.0a",
-    "edge-tts>=6.1.0",
     "faster-whisper>=1.2.1",
     "kokoro-onnx>=0.4.9",
     "librosa>=0.10.0",

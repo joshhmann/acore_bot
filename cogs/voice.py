@@ -274,8 +274,12 @@ class VoiceCog(commands.Cog):
             # Build voice info string based on engine
             if tts_info.get('engine') == 'kokoro':
                 voice_details = f"**{tts_info['voice']}**\nEngine: Kokoro\nSpeed: {tts_info.get('speed', 1.0)}x"
+            elif tts_info.get('engine') == 'kokoro_api':
+                voice_details = f"**{tts_info['voice']}**\nEngine: Kokoro API\nSpeed: {tts_info.get('speed', 1.0)}x"
+            elif tts_info.get('engine') == 'supertonic':
+                voice_details = f"**{tts_info['voice']}**\nEngine: Supertonic\nSpeed: {tts_info.get('speed', 1.05)}x\nSteps: {tts_info.get('steps', 5)}"
             else:
-                voice_details = f"**{tts_info['voice']}**\nEngine: Edge TTS\nRate: {tts_info.get('rate', '+0%')}, Volume: {tts_info.get('volume', '+0%')}"
+                voice_details = f"**{tts_info.get('engine', 'Unknown')}**\nEngine: Unknown"
 
             embed.add_field(
                 name="Current TTS Voice",
@@ -330,9 +334,18 @@ class VoiceCog(commands.Cog):
 
                 self.tts.kokoro_voice = voice
                 engine_name = "Kokoro"
+            elif Config.TTS_ENGINE == "kokoro_api":
+                self.tts.kokoro_voice = voice
+                engine_name = "Kokoro API"
+            elif Config.TTS_ENGINE == "supertonic":
+                self.tts.supertonic_voice = voice
+                engine_name = "Supertonic"
             else:
-                self.tts.default_voice = voice
-                engine_name = "Edge TTS"
+                await interaction.response.send_message(
+                    f"❌ Unknown TTS engine: **{Config.TTS_ENGINE}**",
+                    ephemeral=True
+                )
+                return
 
             await interaction.response.send_message(
                 format_success(f"Default {engine_name} voice changed to: **{voice}**"),
@@ -414,7 +427,7 @@ class VoiceCog(commands.Cog):
             # Check if Kokoro is available
             if not hasattr(self.tts, 'kokoro') or not self.tts.kokoro:
                 await interaction.followup.send(
-                    "❌ Kokoro TTS is not available. The bot is configured to use Edge TTS.",
+                    f"❌ Kokoro TTS (local) is not available. The bot is configured to use: {Config.TTS_ENGINE}",
                     ephemeral=True,
                 )
                 return

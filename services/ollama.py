@@ -5,6 +5,7 @@ import json
 from typing import List, Dict, Optional, AsyncGenerator
 
 from config import Config
+from services.llm_cache import LLMCache
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,13 @@ class OllamaService:
         self.presence_penalty = presence_penalty
         self.top_p = top_p
         self.session: Optional[aiohttp.ClientSession] = None
+
+        # Initialize LLM response cache
+        self.cache = LLMCache(
+            max_size=Config.LLM_CACHE_MAX_SIZE,
+            ttl_seconds=Config.LLM_CACHE_TTL_SECONDS,
+            enabled=Config.LLM_CACHE_ENABLED
+        )
 
     async def initialize(self):
         """Initialize the HTTP session."""
@@ -107,6 +115,18 @@ class OllamaService:
         # Clean messages to remove extra metadata fields
         messages = self._clean_messages(messages)
 
+        # Check cache first
+        temp = temperature or self.temperature
+        cached_response = self.cache.get(
+            messages=messages,
+            model=self.model,
+            temperature=temp,
+            system_prompt=system_prompt
+        )
+        if cached_response:
+            logger.debug(f"Returning cached response for Ollama chat (model: {self.model})")
+            return cached_response
+
         # Prepend system message if provided
         if system_prompt:
             messages = [{"role": "system", "content": system_prompt}] + messages
@@ -136,7 +156,18 @@ class OllamaService:
                     raise Exception(f"Ollama API error ({resp.status}): {error_text}")
 
                 data = await resp.json()
-                return data["message"]["content"]
+                response = data["message"]["content"]
+
+                # Cache the response
+                self.cache.set(
+                    messages=messages,
+                    model=self.model,
+                    temperature=temp,
+                    response=response,
+                    system_prompt=system_prompt
+                )
+
+                return response
 
         except aiohttp.ClientError as e:
             logger.error(f"Ollama request failed: {e}")
@@ -337,3 +368,16 @@ class OllamaService:
         except Exception as e:
             logger.error(f"Failed to list models: {e}")
             return []
+
+    def get_cache_stats(self) -> Dict:
+        """Get LLM cache statistics.
+
+        Returns:
+            Dictionary with cache statistics
+        """
+        return self.cache.get_stats()
+
+    def clear_cache(self):
+        """Clear the LLM response cache."""
+        self.cache.clear()
+        logger.info("Ollama LLM cache cleared")

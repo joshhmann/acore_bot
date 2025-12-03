@@ -7,6 +7,7 @@ import time
 from typing import List, Dict, Optional, AsyncGenerator
 
 from config import Config
+from services.llm_cache import LLMCache
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +70,13 @@ class OpenRouterService:
         self.total_tokens_generated = 0
         self.average_response_time = 0.0
 
+        # Initialize LLM response cache
+        self.cache = LLMCache(
+            max_size=Config.LLM_CACHE_MAX_SIZE,
+            ttl_seconds=Config.LLM_CACHE_TTL_SECONDS,
+            enabled=Config.LLM_CACHE_ENABLED
+        )
+
     async def initialize(self):
         """Initialize the HTTP session."""
         if not self.session:
@@ -117,6 +125,20 @@ class OpenRouterService:
 
         # Clean messages
         messages = self._clean_messages(messages)
+
+        # Check cache first
+        temp = temperature or self.temperature
+        max_tok = max_tokens or self.max_tokens
+        cached_response = self.cache.get(
+            messages=messages,
+            model=self.model,
+            temperature=temp,
+            system_prompt=system_prompt,
+            max_tokens=max_tok
+        )
+        if cached_response:
+            logger.debug(f"Returning cached response for OpenRouter chat (model: {self.model})")
+            return cached_response
 
         # Prepend system message if provided
         if system_prompt:
@@ -184,7 +206,19 @@ class OpenRouterService:
                     f"Total: {total_tokens}"
                 )
 
-                return data["choices"][0]["message"]["content"]
+                response = data["choices"][0]["message"]["content"]
+
+                # Cache the response
+                self.cache.set(
+                    messages=messages,
+                    model=self.model,
+                    temperature=temp,
+                    response=response,
+                    system_prompt=system_prompt,
+                    max_tokens=max_tok
+                )
+
+                return response
 
         except asyncio.TimeoutError:
             elapsed = time.time() - start_time
@@ -432,3 +466,16 @@ class OpenRouterService:
             "total_tokens_generated": self.total_tokens_generated,
             "model": self.model,
         }
+
+    def get_cache_stats(self) -> Dict:
+        """Get LLM cache statistics.
+
+        Returns:
+            Dictionary with cache statistics
+        """
+        return self.cache.get_stats()
+
+    def clear_cache(self):
+        """Clear the LLM response cache."""
+        self.cache.clear()
+        logger.info("OpenRouter LLM cache cleared")
