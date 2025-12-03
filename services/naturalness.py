@@ -431,8 +431,10 @@ Return ONLY the emoji character, nothing else."""
                 await message.add_reaction(random.choice(fallback_emojis))
                 self.reacted_messages.add(message.id)
                 return True
-            except:
-                pass
+            except (discord.Forbidden, discord.HTTPException) as e:
+                logger.debug(f"Could not add fallback reaction: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error adding fallback reaction: {e}")
 
         return False
 

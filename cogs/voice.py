@@ -14,8 +14,6 @@ from services.tts import TTSService
 from services.rvc_unified import UnifiedRVCService
 from services.enhanced_voice_listener import EnhancedVoiceListener
 from services.voice_commands import VoiceCommandParser, CommandType
-# Sound effects service removed - feature was never fully integrated
-# from services.sound_effects import get_sound_effects_service
 from utils.helpers import format_error, format_success, format_info
 
 logger = logging.getLogger(__name__)
@@ -1113,6 +1111,29 @@ class VoiceCog(commands.Cog):
                 logger.info(f"Cleaned up audio file: {audio_file}")
         except Exception as e:
             logger.error(f"Failed to cleanup audio file: {e}")
+
+    @commands.Cog.listener()
+    async def on_guild_remove(self, guild: discord.Guild):
+        """Clean up voice client when bot is removed from a guild.
+
+        This prevents memory leaks from orphaned voice client references.
+
+        Args:
+            guild: The guild the bot was removed from
+        """
+        async with self.voice_clients_lock:
+            if guild.id in self.voice_clients:
+                try:
+                    # Disconnect if still connected
+                    voice_client = self.voice_clients[guild.id]
+                    if voice_client.is_connected():
+                        await voice_client.disconnect()
+
+                    # Remove from tracking
+                    del self.voice_clients[guild.id]
+                    logger.info(f"Cleaned up voice client for removed guild: {guild.name} ({guild.id})")
+                except Exception as e:
+                    logger.error(f"Error cleaning up voice client for guild {guild.id}: {e}")
 
 
 async def setup(bot: commands.Bot):

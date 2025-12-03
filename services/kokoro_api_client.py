@@ -55,11 +55,16 @@ class KokoroAPIClient:
                 try:
                     async with session.get(f"{self.api_url}/health", timeout=aiohttp.ClientTimeout(total=2)) as resp:
                         return resp.status == 200
-                except:
+                except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                    logger.debug(f"Health check failed: {e}")
+                    return False
+                except Exception as e:
+                    logger.warning(f"Unexpected error during health check: {e}")
                     return False
 
             return asyncio.run(check())
-        except:
+        except Exception as e:
+            logger.error(f"Failed to run health check: {e}")
             return False
 
     def get_voices(self) -> list[str]:

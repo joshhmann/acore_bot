@@ -54,13 +54,15 @@ class MetricsService:
             'recent_errors': deque(maxlen=20),  # Last 20 errors with timestamps
         }
 
-        # Active tracking
+        # Active tracking (reset hourly to prevent unbounded growth)
         self.active_stats = {
             'active_users': set(),
             'active_channels': set(),
             'messages_processed': 0,
             'commands_executed': 0,
         }
+        self._last_active_reset = datetime.now()
+        self._reset_task: Optional[asyncio.Task] = None
 
         # Cache hit rates
         self.cache_stats = {
@@ -514,6 +516,42 @@ class MetricsService:
                     logger.error(f"Error in auto-save loop: {e}")
 
         return asyncio.create_task(auto_save_loop())
+
+    def start_hourly_reset(self):
+        """Start background task to reset active stats hourly (prevents memory leak).
+
+        Returns:
+            The background task
+        """
+        if self._reset_task and not self._reset_task.done():
+            logger.warning("Hourly reset task already running")
+            return self._reset_task
+
+        async def hourly_reset_loop():
+            """Reset active user/channel sets every hour to prevent unbounded growth."""
+            while True:
+                try:
+                    await asyncio.sleep(3600)  # 1 hour
+
+                    # Log stats before reset
+                    user_count = len(self.active_stats['active_users'])
+                    channel_count = len(self.active_stats['active_channels'])
+                    logger.info(
+                        f"Hourly active stats reset: {user_count} users, "
+                        f"{channel_count} channels in last hour"
+                    )
+
+                    # Reset unbounded sets
+                    self.active_stats['active_users'].clear()
+                    self.active_stats['active_channels'].clear()
+                    self._last_active_reset = datetime.now()
+
+                except Exception as e:
+                    logger.error(f"Error in hourly reset loop: {e}")
+
+        self._reset_task = asyncio.create_task(hourly_reset_loop())
+        logger.info("Started hourly active stats reset task")
+        return self._reset_task
 
     def load_metrics_from_file(self, filename: str) -> Optional[Dict]:
         """Load metrics from a file.

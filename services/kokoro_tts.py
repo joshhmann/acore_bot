@@ -72,25 +72,59 @@ class KokoroTTSService:
         self.default_voice = default_voice
         self.speed = speed
         self.kokoro: Optional[Kokoro] = None
+        self._model_ready = asyncio.Event()
+        self._loading_task: Optional[asyncio.Task] = None
+        self._load_failed = False
 
         if not KOKORO_AVAILABLE:
             logger.warning("Kokoro TTS not available. Install with: pip install kokoro-onnx")
+            self._load_failed = True
             return
 
-        # Check if model files exist, download if missing
-        if not self.model_path.exists() or not self.voices_path.exists():
-            logger.info("Kokoro model files not found, attempting to download...")
-            if not self._download_models():
-                logger.error("Failed to download Kokoro models")
-                return
+        # Start lazy loading in background (don't block __init__)
+        logger.info("Kokoro TTS service created. Models will be loaded on first use.")
 
-        # Initialize Kokoro
-        try:
-            self.kokoro = Kokoro(str(self.model_path), str(self.voices_path))
-            logger.info(f"Kokoro TTS initialized with voice: {default_voice}")
-        except Exception as e:
-            logger.error(f"Failed to initialize Kokoro TTS: {e}")
-            self.kokoro = None
+    async def _lazy_load_model(self):
+        """Download and load Kokoro models in background (non-blocking).
+
+        This is called automatically on first use.
+        """
+        if self._model_ready.is_set() or self._load_failed:
+            return
+
+        # Prevent multiple simultaneous loading attempts
+        if self._loading_task and not self._loading_task.done():
+            await self._loading_task
+            return
+
+        async def _do_load():
+            try:
+                logger.info("Starting Kokoro model lazy load...")
+
+                # Download models if needed (in executor to avoid blocking)
+                if not self.model_path.exists() or not self.voices_path.exists():
+                    logger.info("Kokoro model files not found, downloading in background...")
+                    success = await asyncio.to_thread(self._download_models)
+                    if not success:
+                        logger.error("Failed to download Kokoro models")
+                        self._load_failed = True
+                        return
+
+                # Initialize Kokoro (in executor to avoid blocking)
+                logger.info("Loading Kokoro model...")
+                self.kokoro = await asyncio.to_thread(
+                    Kokoro, str(self.model_path), str(self.voices_path)
+                )
+                logger.info(f"Kokoro TTS loaded successfully with voice: {self.default_voice}")
+                self._model_ready.set()
+
+            except Exception as e:
+                logger.error(f"Failed to lazy load Kokoro TTS: {e}", exc_info=True)
+                self._load_failed = True
+                self.kokoro = None
+
+        self._loading_task = asyncio.create_task(_do_load())
+        await self._loading_task
 
     def is_available(self) -> bool:
         """Check if Kokoro TTS is available and ready.
@@ -100,12 +134,16 @@ class KokoroTTSService:
         """
         return KOKORO_AVAILABLE and self.kokoro is not None
 
-    def get_voices(self) -> list[str]:
+    async def get_voices(self) -> list[str]:
         """Get list of available voices.
 
         Returns:
             List of voice names
         """
+        # Trigger lazy loading if needed
+        if not self._load_failed:
+            await self._lazy_load_model()
+
         if not self.is_available():
             return []
 
@@ -165,6 +203,10 @@ class KokoroTTSService:
         Raises:
             RuntimeError: If Kokoro is not available or generation fails
         """
+        # Trigger lazy loading and wait for model to be ready
+        if not self._load_failed:
+            await self._lazy_load_model()
+
         if not self.is_available():
             raise RuntimeError("Kokoro TTS is not available")
 

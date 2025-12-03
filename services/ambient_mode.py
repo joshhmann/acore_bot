@@ -5,7 +5,7 @@ import random
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
 from dataclasses import dataclass, field
-from collections import deque
+from collections import deque, OrderedDict
 
 from config import Config
 
@@ -42,7 +42,8 @@ class AmbientMode:
         self.persona_system = persona_system
         self.compiled_persona = compiled_persona
         self.callbacks_system = callbacks_system
-        self.channel_states: Dict[int, ChannelState] = {}
+        self.channel_states: OrderedDict[int, ChannelState] = OrderedDict()
+        self.max_channels = 500  # Maximum channels to track (prevents unbounded memory growth)
         self.running = False
         self._task = None
 
@@ -85,7 +86,7 @@ class AmbientMode:
         logger.info("Ambient mode initialized")
 
     def get_state(self, channel_id: int) -> ChannelState:
-        """Get or create channel state.
+        """Get or create channel state with LRU eviction.
 
         Args:
             channel_id: Discord channel ID
@@ -93,8 +94,19 @@ class AmbientMode:
         Returns:
             ChannelState for the channel
         """
-        if channel_id not in self.channel_states:
-            self.channel_states[channel_id] = ChannelState()
+        # If channel exists, move it to end (most recently used)
+        if channel_id in self.channel_states:
+            self.channel_states.move_to_end(channel_id)
+            return self.channel_states[channel_id]
+
+        # Create new state
+        # Evict oldest channel if we're at capacity
+        if len(self.channel_states) >= self.max_channels:
+            oldest_channel_id, _ = self.channel_states.popitem(last=False)
+            logger.debug(f"Evicted channel {oldest_channel_id} from ambient mode cache (LRU)")
+
+        # Add new channel state (at end = most recent)
+        self.channel_states[channel_id] = ChannelState()
         return self.channel_states[channel_id]
 
     async def start(self):

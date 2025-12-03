@@ -550,6 +550,11 @@ class OllamaBot(commands.Bot):
                 metrics_task = self.metrics.start_auto_save(interval_hours=interval_hours)
                 self.background_tasks.add(metrics_task)
                 logger.info(f"Metrics auto-save started (every {interval_minutes} minutes)")
+
+                # Start hourly reset to prevent memory leak from unbounded active user/channel sets
+                reset_task = self.metrics.start_hourly_reset()
+                self.background_tasks.add(reset_task)
+                logger.info("Metrics hourly reset started (prevents memory leak)")
             except Exception as e:
                 logger.error(f"Failed to start metrics auto-save: {e}")
         else:

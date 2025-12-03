@@ -5,6 +5,7 @@ from discord.ext import commands
 import logging
 from typing import Optional, Dict
 from pathlib import Path
+from datetime import datetime, timedelta
 import uuid
 import time
 import json
@@ -16,10 +17,6 @@ from services.ollama import OllamaService
 from services.intent_recognition import IntentRecognitionService, ConversationalResponder
 from services.intent_handler import IntentHandler
 from services.naturalness import NaturalnessEnhancer
-# StreamingTTS feature temporarily disabled - service removed during cleanup
-# from services.streaming_tts import StreamingTTSProcessor, StreamMultiplexer
-# Response optimizer removed - feature was never fully integrated
-# from services.response_optimizer import ResponseOptimizer
 from utils.helpers import (
     ChatHistoryManager,
     chunk_message,
@@ -144,10 +141,11 @@ class ChatCog(commands.Cog):
             self.intent_handler = IntentHandler(bot)
             logger.info("Intent recognition enabled - bot can now understand natural language commands")
 
-        # AI-powered message batching
-        from services.message_batcher import MessageBatcher
-        self.message_batcher = MessageBatcher(bot, ollama)
-        logger.info("AI-powered message batching initialized")
+        # AI-powered message batching - feature removed during cleanup
+        # from services.message_batcher import MessageBatcher
+        # self.message_batcher = MessageBatcher(bot, ollama)
+        # logger.info("AI-powered message batching initialized")
+        self.message_batcher = None
         # Agentic tool system (ReAct pattern)
         from services.agentic_tools import AgenticToolSystem
         self.agentic_tools = AgenticToolSystem()
@@ -598,12 +596,10 @@ JSON only:"""
 
     async def check_and_handle_message(self, message: discord.Message) -> bool:
         """Check if message should be handled as chat and process it.
-        
+
         Returns:
             True if message was handled, False otherwise.
         """
-        from datetime import datetime, timedelta
-        
         # Ignore self, bots, and system messages
         logger.debug(f"check_and_handle_message: msg_id={message.id}, author={message.author.name} (bot={message.author.bot}), content='{message.content[:50]}'")
         if message.author.bot or message.is_system():
@@ -660,8 +656,10 @@ JSON only:"""
                     should_respond = True
                     response_reason = "reply_to_bot"
                     suggested_style = "conversational"
-            except:
-                pass
+            except (discord.NotFound, discord.HTTPException) as e:
+                logger.debug(f"Could not fetch referenced message: {e}")
+            except Exception as e:
+                logger.warning(f"Unexpected error fetching referenced message: {e}")
                 
         # 3. Name trigger (ALWAYS respond)
         if not should_respond:
@@ -838,7 +836,11 @@ Answer ONLY "yes" or "no"."""
                     )
 
             # Add message to batcher - AI will decide when to respond
-            await self.message_batcher.add_message(message, respond_callback)
+            if self.message_batcher:
+                await self.message_batcher.add_message(message, respond_callback)
+            else:
+                # Message batching disabled - respond immediately
+                await respond_callback(message.content, message)
             return True
             
         return False
