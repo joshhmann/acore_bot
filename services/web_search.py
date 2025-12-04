@@ -4,6 +4,7 @@ from typing import List, Dict, Optional, Tuple
 import aiohttp
 from urllib.parse import quote_plus
 import asyncio
+import time
 from ddgs import DDGS
 # Query optimizer removed - feature was never fully integrated
 # from services.query_optimizer import get_query_optimizer
@@ -34,6 +35,10 @@ class WebSearchService:
         self.google_cx_id = google_cx_id
         self.session: Optional[aiohttp.ClientSession] = None
         self.use_optimizer = use_optimizer
+
+        # Rate limiting
+        self.last_request_time = 0
+        self.min_delay = 2.0  # 2 seconds between requests
 
         # Query optimizer disabled - service removed
         self.optimizer = None  # Feature removed
@@ -123,6 +128,12 @@ class WebSearchService:
         Returns:
             List of search result dicts with title, snippet, url
         """
+        # Enforce rate limiting
+        elapsed = time.time() - self.last_request_time
+        if elapsed < self.min_delay:
+            await asyncio.sleep(self.min_delay - elapsed)
+        self.last_request_time = time.time()
+
         if not self.session:
             await self.initialize()
 

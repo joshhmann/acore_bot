@@ -6,6 +6,7 @@ from typing import List, Dict, Optional, AsyncGenerator
 
 from config import Config
 from services.llm_cache import LLMCache
+from services.rate_limiter import RateLimiter
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,13 @@ class OllamaService:
         self.presence_penalty = presence_penalty
         self.top_p = top_p
         self.session: Optional[aiohttp.ClientSession] = None
+
+        # Initialize Rate Limiter
+        # Limits concurrent requests to avoid OOM and rate limits API calls
+        self.rate_limiter = RateLimiter(
+            max_concurrent=5,  # Max 5 parallel generations
+            requests_per_minute=60  # Max 60 requests per minute
+        )
 
         # Initialize LLM response cache
         self.cache = LLMCache(
@@ -149,25 +157,26 @@ class OllamaService:
         }
 
         try:
-            url = f"{self.host}/api/chat"
-            async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"Ollama API error ({resp.status}): {error_text}")
+            async with self.rate_limiter.acquire():
+                url = f"{self.host}/api/chat"
+                async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        raise Exception(f"Ollama API error ({resp.status}): {error_text}")
 
-                data = await resp.json()
-                response = data["message"]["content"]
+                    data = await resp.json()
+                    response = data["message"]["content"]
 
-                # Cache the response
-                self.cache.set(
-                    messages=messages,
-                    model=self.model,
-                    temperature=temp,
-                    response=response,
-                    system_prompt=system_prompt
-                )
+                    # Cache the response
+                    self.cache.set(
+                        messages=messages,
+                        model=self.model,
+                        temperature=temp,
+                        response=response,
+                        system_prompt=system_prompt
+                    )
 
-                return response
+                    return response
 
         except aiohttp.ClientError as e:
             logger.error(f"Ollama request failed: {e}")
@@ -223,26 +232,27 @@ class OllamaService:
         }
 
         try:
-            url = f"{self.host}/api/chat"
-            async with self.session.post(
-                url, json=payload, timeout=aiohttp.ClientTimeout(total=120)
-            ) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"Ollama API error ({resp.status}): {error_text}")
+            async with self.rate_limiter.acquire():
+                url = f"{self.host}/api/chat"
+                async with self.session.post(
+                    url, json=payload, timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        raise Exception(f"Ollama API error ({resp.status}): {error_text}")
 
-                # Stream response chunks
-                async for line in resp.content:
-                    if line:
-                        try:
-                            chunk = json.loads(line)
-                            if "message" in chunk and "content" in chunk["message"]:
-                                content = chunk["message"]["content"]
-                                if content:
-                                    yield content
-                        except json.JSONDecodeError:
-                            # Skip invalid JSON lines
-                            continue
+                    # Stream response chunks
+                    async for line in resp.content:
+                        if line:
+                            try:
+                                chunk = json.loads(line)
+                                if "message" in chunk and "content" in chunk["message"]:
+                                    content = chunk["message"]["content"]
+                                    if content:
+                                        yield content
+                            except json.JSONDecodeError:
+                                # Skip invalid JSON lines
+                                continue
 
         except aiohttp.ClientError as e:
             logger.error(f"Ollama streaming request failed: {e}")
@@ -316,14 +326,15 @@ class OllamaService:
         }
 
         try:
-            url = f"{self.host}/api/chat"
-            async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
-                if resp.status != 200:
-                    error_text = await resp.text()
-                    raise Exception(f"Ollama Vision API error ({resp.status}): {error_text}")
+            async with self.rate_limiter.acquire():
+                url = f"{self.host}/api/chat"
+                async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                    if resp.status != 200:
+                        error_text = await resp.text()
+                        raise Exception(f"Ollama Vision API error ({resp.status}): {error_text}")
 
-                data = await resp.json()
-                return data["message"]["content"]
+                    data = await resp.json()
+                    return data["message"]["content"]
 
         except aiohttp.ClientError as e:
             logger.error(f"Ollama vision request failed: {e}")
