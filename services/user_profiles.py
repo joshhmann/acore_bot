@@ -6,6 +6,9 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime
 import asyncio
 import aiofiles
+import pickle
+import os
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +22,9 @@ class UserProfileService:
     - Provide user context to the AI for personalized responses
     - Allow bot to reference users by their characteristics
     """
+
+    INDEX_VERSION = 1
+    INDEX_CACHE_FILE = "_index_cache.pkl"
 
     def __init__(self, profiles_dir: Path, ollama_service=None):
         """Initialize user profile service.
@@ -54,9 +60,9 @@ class UserProfileService:
             self._save_task = asyncio.create_task(self._periodic_save_loop())
             logger.info("Started background profile saver")
             
-        # Also start building indices in background
+        # Also start building/loading indices in background
         if self._index_task is None and not self._indices_built:
-            self._index_task = asyncio.create_task(self._build_indices())
+            self._index_task = asyncio.create_task(self._load_or_build_indices())
 
     async def stop_background_saver(self):
         """Stop the background saver and flush pending changes."""
@@ -91,8 +97,19 @@ class UserProfileService:
         self.dirty_profiles.clear()
         
         logger.debug(f"Flushing {len(dirty_ids)} dirty profiles...")
-        for user_id in dirty_ids:
-            await self._flush_profile(user_id)
+
+        # Parallel save with concurrency limit
+        semaphore = asyncio.Semaphore(10)
+
+        async def save_with_limit(user_id):
+            async with semaphore:
+                await self._flush_profile(user_id)
+
+        # Use asyncio.gather for parallel saving
+        await asyncio.gather(
+            *[save_with_limit(uid) for uid in dirty_ids],
+            return_exceptions=True
+        )
 
     async def _flush_profile(self, user_id: int) -> bool:
         """Internal method to write profile to disk immediately."""
@@ -112,9 +129,61 @@ class UserProfileService:
             self.dirty_profiles.add(user_id)
             return False
 
+    async def _load_or_build_indices(self):
+        """Load indices from cache or build from scratch."""
+        cache_path = self.profiles_dir / self.INDEX_CACHE_FILE
+
+        # Try to load cached indices
+        if cache_path.exists():
+            try:
+                logger.info(f"Loading profile indices from cache: {cache_path}")
+                # Use to_thread for pickle loading as it can be CPU intensive
+                def load_pickle():
+                    with open(cache_path, "rb") as f:
+                        return pickle.load(f)
+
+                cache_data = await asyncio.to_thread(load_pickle)
+
+                if cache_data.get("version") == self.INDEX_VERSION:
+                    self.trait_index = cache_data["trait_index"]
+                    self.interest_index = cache_data["interest_index"]
+                    self._indices_built = True
+                    logger.info("Successfully loaded profile indices from cache")
+                    return
+                else:
+                    logger.info(f"Index cache version mismatch (got {cache_data.get('version')}, expected {self.INDEX_VERSION})")
+            except Exception as e:
+                logger.warning(f"Failed to load index cache: {e}")
+
+        # Build indices from scratch
+        await self._build_indices()
+
+        # Save to cache
+        await self._save_index_cache()
+
+    async def _save_index_cache(self):
+        """Save indices to pickle cache."""
+        try:
+            cache_path = self.profiles_dir / self.INDEX_CACHE_FILE
+            cache_data = {
+                "version": self.INDEX_VERSION,
+                "trait_index": self.trait_index,
+                "interest_index": self.interest_index,
+                "timestamp": time.time()
+            }
+
+            def save_pickle():
+                with open(cache_path, "wb") as f:
+                    pickle.dump(cache_data, f)
+
+            await asyncio.to_thread(save_pickle)
+            logger.debug("Saved profile index cache")
+        except Exception as e:
+            logger.error(f"Failed to save index cache: {e}")
+
     async def _build_indices(self):
         """Build in-memory indices from all profile files."""
-        logger.info("Building user profile indices...")
+        logger.info("Building user profile indices from disk...")
         count = 0
         try:
             # Iterate over all profile files

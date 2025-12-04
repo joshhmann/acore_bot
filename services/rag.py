@@ -41,6 +41,10 @@ class RAGService:
         self.collection = None
         self.embedding_model = None
 
+        # Cache for embeddings to avoid recomputing for identical queries
+        self.embedding_cache = {}
+        self.cache_max_size = 500
+
         # Create directories
         self.documents_path.mkdir(parents=True, exist_ok=True)
         self.vector_store_path.mkdir(parents=True, exist_ok=True)
@@ -262,7 +266,26 @@ class RAGService:
         """Perform vector similarity search."""
         try:
             # Generate query embedding
-            query_embedding = self.embedding_model.encode([query])[0].tolist()
+            # Note: We need to use asyncio.run or similar if calling async from sync method,
+            # but usually this method is called from search which is sync.
+            # However, for performance we should make search async or use asyncio.run here.
+            # But making search async requires changing interface.
+            # For now, we'll keep it sync but blocking if not refactored fully.
+            # Actually, `search` is synchronous in interface but we can assume we are in async context?
+            # Wait, `get_context` calls `search` synchronously.
+            # The plan suggested making `_get_embedding` async.
+            # But since `search` is synchronous, we cannot await `_get_embedding`.
+
+            # Let's check if we can check cache synchronously here.
+
+            if query in self.embedding_cache:
+                query_embedding = self.embedding_cache[query]
+            else:
+                query_embedding = self.embedding_model.encode([query])[0].tolist()
+                self.embedding_cache[query] = query_embedding
+                if len(self.embedding_cache) > self.cache_max_size:
+                    oldest_key = next(iter(self.embedding_cache))
+                    del self.embedding_cache[oldest_key]
 
             # Build where filter
             where_filter = None
