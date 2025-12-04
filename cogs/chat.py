@@ -1,4 +1,5 @@
 """Chat cog for Ollama-powered conversations."""
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -14,7 +15,10 @@ import asyncio
 
 from config import Config
 from services.ollama import OllamaService
-from services.intent_recognition import IntentRecognitionService, ConversationalResponder
+from services.intent_recognition import (
+    IntentRecognitionService,
+    ConversationalResponder,
+)
 from services.intent_handler import IntentHandler
 from services.naturalness import NaturalnessEnhancer
 from utils.helpers import (
@@ -53,6 +57,7 @@ class ChatCog(commands.Cog):
         callbacks_system=None,
         curiosity_system=None,
         pattern_learner=None,
+        llm_fallback=None,
     ):
         """Initialize chat cog.
 
@@ -72,9 +77,11 @@ class ChatCog(commands.Cog):
             callbacks_system: Proactive callbacks system for topic memory (optional)
             curiosity_system: Curiosity system for follow-up questions (optional)
             pattern_learner: Pattern learner for user adaptation (optional)
+            llm_fallback: LLM fallback manager for resilient model switching (optional)
         """
         self.bot = bot
         self.ollama = ollama
+        self.llm_fallback = llm_fallback
         self.history = history_manager
         self.user_profiles = user_profiles
         self.summarizer = summarizer
@@ -98,6 +105,7 @@ class ChatCog(commands.Cog):
         # Conversational callbacks
         try:
             from services.conversational_callbacks import ConversationalCallbacks
+
             self.callbacks = ConversationalCallbacks(history_manager, summarizer)
             logger.info("Conversational callbacks initialized")
         except Exception as e:
@@ -123,7 +131,9 @@ class ChatCog(commands.Cog):
         # Track active conversation sessions per channel
         # Format: {channel_id: {"user_id": user_id, "last_activity": timestamp}}
         self.active_sessions: Dict[int, Dict] = {}
-        self.active_sessions_lock = asyncio.Lock()  # Protect active_sessions from race conditions
+        self.active_sessions_lock = (
+            asyncio.Lock()
+        )  # Protect active_sessions from race conditions
 
         # Track last response time per channel (for conversation context)
         # Limit size to prevent memory leak
@@ -139,17 +149,54 @@ class ChatCog(commands.Cog):
         if Config.INTENT_RECOGNITION_ENABLED:
             self.intent_recognition = IntentRecognitionService()
             self.intent_handler = IntentHandler(bot)
-            logger.info("Intent recognition enabled - bot can now understand natural language commands")
+            logger.info(
+                "Intent recognition enabled - bot can now understand natural language commands"
+            )
 
         # AI-powered message batching - feature removed during cleanup
         # from services.message_batcher import MessageBatcher
         # self.message_batcher = MessageBatcher(bot, ollama)
         # logger.info("AI-powered message batching initialized")
         self.message_batcher = None
+
         # Agentic tool system (ReAct pattern)
         from services.agentic_tools import AgenticToolSystem
+
         self.agentic_tools = AgenticToolSystem()
         logger.info("Agentic tool system initialized")
+
+    async def _llm_chat(
+        self, messages, system_prompt=None, temperature=None, max_tokens=None
+    ):
+        """Wrapper for LLM chat that uses fallback if enabled.
+
+        Args:
+            messages: Chat messages
+            system_prompt: Optional system prompt
+            temperature: Temperature override
+            max_tokens: Max tokens override
+
+        Returns:
+            LLM response text
+        """
+        if self.llm_fallback:
+            # Use fallback system (automatic model switching on failure)
+            response, model_used = await self.llm_fallback.chat_with_fallback(
+                llm_service=self.ollama,
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+            return response
+        else:
+            # Direct call to LLM service (no fallback)
+            return await self.ollama.chat(
+                messages=messages,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
 
     def _cleanup_response_time_tracker(self):
         """Clean up old entries from response time tracker to prevent memory leak."""
@@ -157,7 +204,9 @@ class ChatCog(commands.Cog):
             # Sort by timestamp (oldest first) and remove oldest entries
             sorted_items = sorted(self._last_response_time.items(), key=lambda x: x[1])
             # Keep only the most recent entries
-            entries_to_remove = len(self._last_response_time) - self._max_response_time_entries
+            entries_to_remove = (
+                len(self._last_response_time) - self._max_response_time_entries
+            )
             for channel_id, _ in sorted_items[:entries_to_remove]:
                 del self._last_response_time[channel_id]
             logger.debug(f"Cleaned up {entries_to_remove} old response time entries")
@@ -180,14 +229,18 @@ class ChatCog(commands.Cog):
     async def cleanup_tasks(self):
         """Cancel all background tasks (called on shutdown)."""
         if self._background_tasks:
-            logger.info(f"Cancelling {len(self._background_tasks)} ChatCog background tasks...")
+            logger.info(
+                f"Cancelling {len(self._background_tasks)} ChatCog background tasks..."
+            )
             for task in self._background_tasks:
                 task.cancel()
             # Wait for all to complete
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             logger.info("ChatCog background tasks cancelled")
 
-    def _replace_mentions_with_names(self, content: str, message: discord.Message) -> str:
+    def _replace_mentions_with_names(
+        self, content: str, message: discord.Message
+    ) -> str:
         """Replace user mention IDs with readable usernames.
 
         Args:
@@ -209,7 +262,9 @@ class ChatCog(commands.Cog):
             # Replace <@user_id> with @username
             mention_pattern = f"<@{user.id}>"
             # Use display_name for server nicknames, fallback to name
-            display_name = user.display_name if hasattr(user, 'display_name') else user.name
+            display_name = (
+                user.display_name if hasattr(user, "display_name") else user.name
+            )
             content = content.replace(mention_pattern, f"@{display_name}")
 
             # Also handle <!@user_id> format (mobile mentions)
@@ -220,80 +275,105 @@ class ChatCog(commands.Cog):
 
     def _restore_mentions(self, content: str, guild: discord.Guild) -> str:
         """Convert @Username mentions back to <@user_id> for Discord.
-        
+
         This ensures that when the LLM outputs @Username, it gets converted to
         a proper Discord mention tag that is clickable.
-        
+
         Args:
             content: Message content with @Username mentions
             guild: Discord guild to get member list from
-            
+
         Returns:
             Content with @Username replaced by <@user_id>
         """
         if not guild or not content:
             return content
-            
+
         # Get all members and sort by name length (descending) to prevent partial matches
         # e.g., "Rob" inside "Robert"
         members = sorted(guild.members, key=lambda m: len(m.display_name), reverse=True)
-        
+
         for member in members:
             # Skip bots
             if member.bot:
                 continue
-                
+
             # Try display name first (server nickname)
             display_name = member.display_name
             content = content.replace(f"@{display_name}", f"<@{member.id}>")
-            
+
             # Also try global username if different from display name
             if member.name != display_name:
                 content = content.replace(f"@{member.name}", f"<@{member.id}>")
-                
+
         return content
 
     def _clean_for_tts(self, content: str, guild: discord.Guild) -> str:
         """Clean content for TTS by replacing mentions with natural names.
-        
+
         This ensures that TTS pronounces "Username" instead of reading out
         "less than at one two three four five..."
-        
+
         Args:
             content: Message content with <@user_id> or @Username mentions
             guild: Discord guild to get member list from
-            
+
         Returns:
             Content with mentions replaced by natural names
         """
         if not guild or not content:
             return content
-            
+
         # First, replace <@user_id> with display names
         for member in guild.members:
             # Skip bots
             if member.bot:
                 continue
-                
+
             # Replace <@ID> with display name
             mention_pattern = f"<@{member.id}>"
             content = content.replace(mention_pattern, member.display_name)
-            
+
             # Also handle <@!ID> format (mobile mentions)
             mention_pattern_mobile = f"<@!{member.id}>"
             content = content.replace(mention_pattern_mobile, member.display_name)
-        
+
         # Second, remove @ symbols from any remaining @Username patterns
         # This handles cases where LLM outputs @Username
-        content = re.sub(r'@([A-Za-z0-9_]+)', r'\1', content)
-        
+        content = re.sub(r"@([A-Za-z0-9_]+)", r"\1", content)
+
         return content
 
     def _analyze_sentiment(self, text: str) -> str:
         """Simple sentiment analysis heuristic."""
         text = text.lower()
-        positive_words = ["!", "awesome", "great", "love", "amazing", "excited", "happy", "yay", "wow", "excellent", "good", "haha"]
-        negative_words = ["sorry", "sad", "unfortunate", "regret", "bad", "terrible", "awful", "depressed", "grief", "miss", "pain"]
+        positive_words = [
+            "!",
+            "awesome",
+            "great",
+            "love",
+            "amazing",
+            "excited",
+            "happy",
+            "yay",
+            "wow",
+            "excellent",
+            "good",
+            "haha",
+        ]
+        negative_words = [
+            "sorry",
+            "sad",
+            "unfortunate",
+            "regret",
+            "bad",
+            "terrible",
+            "awful",
+            "depressed",
+            "grief",
+            "miss",
+            "pain",
+        ]
 
         pos_score = sum(1 for w in positive_words if w in text)
         neg_score = sum(1 for w in negative_words if w in text)
@@ -312,7 +392,9 @@ class ChatCog(commands.Cog):
         """
         # NEW: Check if compiled persona is available (AI-First PersonaSystem)
         if self.compiled_persona:
-            logger.info(f"✨ Using system prompt from compiled persona: {self.compiled_persona.persona_id}")
+            logger.info(
+                f"✨ Using system prompt from compiled persona: {self.compiled_persona.persona_id}"
+            )
             logger.info(f"   Character: {self.compiled_persona.character.display_name}")
             logger.info(f"   Framework: {self.compiled_persona.framework.name}")
             return self.compiled_persona.system_prompt
@@ -326,9 +408,11 @@ class ChatCog(commands.Cog):
         prompt_file = Path(Config.SYSTEM_PROMPT_FILE)
         if prompt_file.exists():
             try:
-                with open(prompt_file, 'r', encoding='utf-8') as f:
+                with open(prompt_file, "r", encoding="utf-8") as f:
                     prompt = f.read().strip()
-                    logger.info(f"Loaded system prompt from {prompt_file} (legacy mode)")
+                    logger.info(
+                        f"Loaded system prompt from {prompt_file} (legacy mode)"
+                    )
                     return prompt
             except Exception as e:
                 logger.error(f"Failed to load prompt from {prompt_file}: {e}")
@@ -343,10 +427,7 @@ class ChatCog(commands.Cog):
         return default_prompt
 
     async def _track_interesting_topic(
-        self,
-        message: discord.Message,
-        bot_response: str,
-        conversation_history: list
+        self, message: discord.Message, bot_response: str, conversation_history: list
     ):
         """Track interesting topics for proactive callbacks.
 
@@ -361,10 +442,12 @@ class ChatCog(commands.Cog):
         try:
             # Build conversation context
             context_messages = conversation_history[-5:] if conversation_history else []
-            context = "\n".join([
-                f"{msg.get('role', 'unknown')}: {msg.get('content', '')[:100]}"
-                for msg in context_messages
-            ])
+            context = "\n".join(
+                [
+                    f"{msg.get('role', 'unknown')}: {msg.get('content', '')[:100]}"
+                    for msg in context_messages
+                ]
+            )
 
             # Ask LLM to extract topic and assess importance
             prompt = f"""Analyze this conversation and determine if there's an interesting topic worth remembering for later.
@@ -394,16 +477,17 @@ JSON only:"""
 
             # Parse JSON response
             import json
+
             try:
                 # Try to extract JSON from response
-                json_match = re.search(r'\{.*\}', response, re.DOTALL)
+                json_match = re.search(r"\{.*\}", response, re.DOTALL)
                 if json_match:
                     data = json.loads(json_match.group())
 
-                    topic = data.get('topic', '')
-                    importance = float(data.get('importance', 0.0))
-                    sentiment = data.get('sentiment', 'neutral')
-                    keywords = data.get('keywords', [])
+                    topic = data.get("topic", "")
+                    importance = float(data.get("importance", 0.0))
+                    sentiment = data.get("sentiment", "neutral")
+                    keywords = data.get("keywords", [])
 
                     if importance >= 0.3 and topic:
                         # Store the topic memory
@@ -414,9 +498,11 @@ JSON only:"""
                             channel_id=message.channel.id,
                             importance=importance,
                             sentiment=sentiment,
-                            keywords=keywords
+                            keywords=keywords,
                         )
-                        logger.debug(f"Tracked topic (importance {importance:.2f}): {topic}")
+                        logger.debug(
+                            f"Tracked topic (importance {importance:.2f}): {topic}"
+                        )
 
             except json.JSONDecodeError as e:
                 logger.debug(f"Failed to parse topic extraction JSON: {e}")
@@ -425,10 +511,7 @@ JSON only:"""
             logger.warning(f"Failed to track interesting topic: {e}")
 
     async def _check_and_ask_followup(
-        self,
-        message: discord.Message,
-        user_content: str,
-        conversation_history: list
+        self, message: discord.Message, user_content: str, conversation_history: list
     ):
         """Check if we should ask a follow-up question and ask it.
 
@@ -446,15 +529,16 @@ JSON only:"""
 
             # Build context from history
             context_messages = [
-                msg.get('content', '') for msg in conversation_history[-5:]
-                if msg.get('content')
+                msg.get("content", "")
+                for msg in conversation_history[-5:]
+                if msg.get("content")
             ]
 
             # Check if we should ask a question
             opportunity = await self.curiosity_system.should_ask_question(
                 message_content=user_content,
                 channel_id=message.channel.id,
-                conversation_context=context_messages
+                conversation_context=context_messages,
             )
 
             if not opportunity:
@@ -462,8 +546,7 @@ JSON only:"""
 
             # Generate the follow-up question
             question = await self.curiosity_system.generate_followup_question(
-                opportunity=opportunity,
-                message_content=user_content
+                opportunity=opportunity, message_content=user_content
             )
 
             if question:
@@ -475,8 +558,7 @@ JSON only:"""
 
                 # Mark that we asked
                 self.curiosity_system.mark_question_asked(
-                    message.channel.id,
-                    opportunity.topic
+                    message.channel.id, opportunity.topic
                 )
                 logger.info(f"Asked curious follow-up: {question[:50]}...")
 
@@ -484,10 +566,7 @@ JSON only:"""
             logger.warning(f"Failed to ask follow-up question: {e}")
 
     async def _track_user_interaction(
-        self,
-        user_id: int,
-        user_message: str,
-        bot_response: str
+        self, user_id: int, user_message: str, bot_response: str
     ):
         """Track user interaction for learning & adaptation.
 
@@ -505,7 +584,7 @@ JSON only:"""
                 user_id=user_id,
                 user_message=user_message,
                 bot_response=bot_response,
-                user_reaction=None  # Could detect reactions/emoji later
+                user_reaction=None,  # Could detect reactions/emoji later
             )
 
         except Exception as e:
@@ -521,9 +600,11 @@ JSON only:"""
         async with self.active_sessions_lock:
             self.active_sessions[channel_id] = {
                 "user_id": user_id,
-                "last_activity": time.time()
+                "last_activity": time.time(),
             }
-        logger.info(f"Started conversation session in channel {channel_id} for user {user_id}")
+        logger.info(
+            f"Started conversation session in channel {channel_id} for user {user_id}"
+        )
 
     async def _refresh_session(self, channel_id: int):
         """Refresh the timeout for an active session.
@@ -554,7 +635,9 @@ JSON only:"""
 
             if elapsed > Config.CONVERSATION_TIMEOUT:
                 # Session timed out
-                logger.info(f"Session timed out in channel {channel_id} after {elapsed:.0f}s")
+                logger.info(
+                    f"Session timed out in channel {channel_id} after {elapsed:.0f}s"
+                )
                 del self.active_sessions[channel_id]
                 return False
 
@@ -571,25 +654,27 @@ JSON only:"""
                 del self.active_sessions[channel_id]
                 logger.info(f"Ended session in channel {channel_id}")
 
-    async def _safe_learn_from_conversation(self, user_id: int, username: str, user_message: str, bot_response: str):
+    async def _safe_learn_from_conversation(
+        self, user_id: int, username: str, user_message: str, bot_response: str
+    ):
         """Wrapper to run learning safely in background."""
         try:
             await self.user_profiles.learn_from_conversation(
                 user_id=user_id,
                 username=username,
                 user_message=user_message,
-                bot_response=bot_response
+                bot_response=bot_response,
             )
         except Exception as e:
             logger.error(f"Background profile learning failed: {e}")
 
-    async def _safe_update_affection(self, user_id: int, message: str, bot_response: str):
+    async def _safe_update_affection(
+        self, user_id: int, message: str, bot_response: str
+    ):
         """Wrapper to run affection update safely in background."""
         try:
             await self.user_profiles.update_affection(
-                user_id=user_id,
-                message=message,
-                bot_response=bot_response
+                user_id=user_id, message=message, bot_response=bot_response
             )
         except Exception as e:
             logger.error(f"Background affection update failed: {e}")
@@ -601,13 +686,17 @@ JSON only:"""
             True if message was handled, False otherwise.
         """
         # Ignore self, bots, and system messages
-        logger.debug(f"check_and_handle_message: msg_id={message.id}, author={message.author.name} (bot={message.author.bot}), content='{message.content[:50]}'")
+        logger.debug(
+            f"check_and_handle_message: msg_id={message.id}, author={message.author.name} (bot={message.author.bot}), content='{message.content[:50]}'"
+        )
         if message.author.bot or message.is_system():
             return False
 
         # Ignore users in the ignore list
         if message.author.id in Config.IGNORED_USERS:
-            logger.debug(f"Ignoring message from ignored user: {message.author.name} ({message.author.id})")
+            logger.debug(
+                f"Ignoring message from ignored user: {message.author.name} ({message.author.id})"
+            )
             return False
 
         # Ignore commands (starting with prefix)
@@ -619,17 +708,17 @@ JSON only:"""
             return False
 
         # Deduplication: Skip if we recently processed this exact message
-        if not hasattr(self, '_processed_messages'):
+        if not hasattr(self, "_processed_messages"):
             self._processed_messages = {}
-        
+
         message_key = f"{message.id}_{message.channel.id}"
         if message_key in self._processed_messages:
             logger.debug(f"Skipping duplicate message {message.id}")
             return True  # Return True to prevent other handlers from processing
-        
+
         # Mark as processed (will be cleaned up periodically)
         self._processed_messages[message_key] = True
-        
+
         # Clean up old entries (keep last 100)
         if len(self._processed_messages) > 100:
             # Remove oldest half
@@ -651,7 +740,9 @@ JSON only:"""
         # 2. Reply to bot (ALWAYS respond)
         elif message.reference:
             try:
-                ref_msg = await message.channel.fetch_message(message.reference.message_id)
+                ref_msg = await message.channel.fetch_message(
+                    message.reference.message_id
+                )
                 if ref_msg.author == self.bot.user:
                     should_respond = True
                     response_reason = "reply_to_bot"
@@ -660,7 +751,7 @@ JSON only:"""
                 logger.debug(f"Could not fetch referenced message: {e}")
             except Exception as e:
                 logger.warning(f"Unexpected error fetching referenced message: {e}")
-                
+
         # 3. Name trigger (ALWAYS respond)
         if not should_respond:
             # Get bot names (user name, persona name)
@@ -681,7 +772,7 @@ JSON only:"""
                 if " " in self.current_persona.name:
                     bot_names.append(self.current_persona.name.split(" ")[0].lower())
 
-                if hasattr(self.current_persona, 'display_name'):
+                if hasattr(self.current_persona, "display_name"):
                     bot_names.append(self.current_persona.display_name.lower())
 
             content_lower = message.content.lower()
@@ -690,36 +781,49 @@ JSON only:"""
                 should_respond = True
                 response_reason = "name_trigger"
                 suggested_style = "direct"
-                logger.info(f"Message triggered by name mention: {message.content[:20]}...")
+                logger.info(
+                    f"Message triggered by name mention: {message.content[:20]}..."
+                )
 
         # 4. Image reference / Question about attachment (ALWAYS respond)
         if not should_respond:
             image_keywords = [
-                "what is this", "what is that", "who is this", "who is that",
-                "look at this", "look at that", "describe this", "describe that",
-                "thoughts?", "opinion?", "can you see", "do you see"
+                "what is this",
+                "what is that",
+                "who is this",
+                "who is that",
+                "look at this",
+                "look at that",
+                "describe this",
+                "describe that",
+                "thoughts?",
+                "opinion?",
+                "can you see",
+                "do you see",
             ]
             content_lower = message.content.lower()
             if any(k in content_lower for k in image_keywords):
-                 # Case A: Current message has attachment
-                 if message.attachments or message.embeds:
-                     should_respond = True
-                     response_reason = "image_question"
-                     suggested_style = "descriptive"
+                # Case A: Current message has attachment
+                if message.attachments or message.embeds:
+                    should_respond = True
+                    response_reason = "image_question"
+                    suggested_style = "descriptive"
 
-                 # Case B: Recent message has attachment (User posted image then asked)
-                 # We look back at the last 3 messages to see if there's an image context
-                 else:
-                     try:
-                         async for msg in message.channel.history(limit=3, before=message):
-                             if msg.attachments or msg.embeds:
-                                 # Found a recent image. Assume they are talking about it.
-                                 should_respond = True
-                                 response_reason = "image_question"
-                                 suggested_style = "descriptive"
-                                 break
-                     except Exception:
-                         pass
+                # Case B: Recent message has attachment (User posted image then asked)
+                # We look back at the last 3 messages to see if there's an image context
+                else:
+                    try:
+                        async for msg in message.channel.history(
+                            limit=3, before=message
+                        ):
+                            if msg.attachments or msg.embeds:
+                                # Found a recent image. Assume they are talking about it.
+                                should_respond = True
+                                response_reason = "image_question"
+                                suggested_style = "descriptive"
+                                break
+                    except Exception:
+                        pass
 
         # 5. AI Decision Engine (Framework-based decision making)
         # Use AIDecisionEngine if available and no hard trigger matched yet
@@ -736,17 +840,20 @@ JSON only:"""
 
                 # Ask decision engine if we should respond
                 decision = await self.decision_engine.should_respond(
-                    message.content,
-                    decision_context
+                    message.content, decision_context
                 )
 
                 if decision.get("should_respond"):
                     should_respond = True
                     response_reason = f"ai_decision:{decision.get('reason', 'unknown')}"
                     suggested_style = decision.get("suggested_style")
-                    logger.info(f"✨ AI Decision Engine: RESPOND - Reason: {decision.get('reason')}, Style: {suggested_style}")
+                    logger.info(
+                        f"✨ AI Decision Engine: RESPOND - Reason: {decision.get('reason')}, Style: {suggested_style}"
+                    )
                 else:
-                    logger.debug(f"AI Decision Engine: SKIP - Reason: {decision.get('reason')}")
+                    logger.debug(
+                        f"AI Decision Engine: SKIP - Reason: {decision.get('reason')}"
+                    )
 
             except Exception as e:
                 logger.warning(f"AI Decision Engine failed: {e}")
@@ -766,8 +873,9 @@ JSON only:"""
                     should_respond = True
                     response_reason = "conversation_context"
                     suggested_style = "conversational"
-                    logger.info(f"Responding due to recent conversation context ({time_since.seconds}s ago)")
-
+                    logger.info(
+                        f"Responding due to recent conversation context ({time_since.seconds}s ago)"
+                    )
 
         # 7. Always respond in configured ambient channels (Fallback)
         if not should_respond and Config.AMBIENT_CHANNELS:
@@ -777,7 +885,9 @@ JSON only:"""
                     should_respond = True
                     response_reason = "ambient_channel"
                     suggested_style = "casual"
-                    logger.info(f"Responding in always-respond channel: {message.channel.name}")
+                    logger.info(
+                        f"Responding in always-respond channel: {message.channel.name}"
+                    )
 
         # 8. AI-powered message detection (only in ambient channels, as final fallback)
         if not should_respond and Config.AMBIENT_CHANNELS:
@@ -800,17 +910,23 @@ Answer ONLY "yes" or "no"."""
                         should_respond = True
                         response_reason = "ai_ambient_detection"
                         suggested_style = "helpful"
-                        logger.info(f"AI detected message directed at bot: {message.content[:30]}...")
+                        logger.info(
+                            f"AI detected message directed at bot: {message.content[:30]}..."
+                        )
                 except Exception as e:
                     logger.debug(f"AI message detection failed: {e}")
                     # Fallback to simple question detection
                     content_lower = message.content.lower()
-                    if "?" in message.content or any(content_lower.startswith(q) for q in ["what", "why", "how", "when", "where", "who"]):
+                    if "?" in message.content or any(
+                        content_lower.startswith(q)
+                        for q in ["what", "why", "how", "when", "where", "who"]
+                    ):
                         should_respond = True
                         response_reason = "question_detection"
                         suggested_style = "helpful"
-                        logger.info(f"Fallback question detection: {message.content[:30]}...")
-        
+                        logger.info(
+                            f"Fallback question detection: {message.content[:30]}..."
+                        )
 
         if should_respond:
             # Track that we're responding in this channel
@@ -819,11 +935,15 @@ Answer ONLY "yes" or "no"."""
             self._cleanup_response_time_tracker()
 
             # Log response decision
-            logger.info(f"Responding to message - Reason: {response_reason}, Style: {suggested_style}")
+            logger.info(
+                f"Responding to message - Reason: {response_reason}, Style: {suggested_style}"
+            )
 
             # Use AI-powered message batching
             # This will wait and combine multiple messages if user sends them quickly
-            async def respond_callback(combined_content: str, original_message: discord.Message):
+            async def respond_callback(
+                combined_content: str, original_message: discord.Message
+            ):
                 """Callback to handle response after batching decision."""
                 async with message.channel.typing():
                     await self._handle_chat_response(
@@ -832,17 +952,17 @@ Answer ONLY "yes" or "no"."""
                         user=original_message.author,
                         original_message=original_message,
                         response_reason=response_reason,
-                        suggested_style=suggested_style
+                        suggested_style=suggested_style,
                     )
 
             # Add message to batcher - AI will decide when to respond
-            if self.message_batcher:
+            if hasattr(self, "message_batcher") and self.message_batcher:
                 await self.message_batcher.add_message(message, respond_callback)
             else:
                 # Message batching disabled - respond immediately
                 await respond_callback(message.content, message)
             return True
-            
+
         return False
 
     async def _handle_chat_response(
@@ -853,7 +973,7 @@ Answer ONLY "yes" or "no"."""
         interaction: Optional[discord.Interaction] = None,
         original_message: Optional[discord.Message] = None,
         response_reason: Optional[str] = None,
-        suggested_style: Optional[str] = None
+        suggested_style: Optional[str] = None,
     ):
         """Core chat logic shared by slash command and on_message listener.
 
@@ -868,6 +988,7 @@ Answer ONLY "yes" or "no"."""
         """
         # Start response time tracking
         import time
+
         start_time = time.time()
 
         # Track if streaming TTS was used (defined here for scope)
@@ -879,54 +1000,63 @@ Answer ONLY "yes" or "no"."""
                 if interaction.response.is_done():
                     await interaction.followup.send(content, ephemeral=ephemeral)
                 else:
-                    await interaction.response.send_message(content, ephemeral=ephemeral)
+                    await interaction.response.send_message(
+                        content, ephemeral=ephemeral
+                    )
             else:
-                if not ephemeral: # Can't send ephemeral to channel
+                if not ephemeral:  # Can't send ephemeral to channel
                     await channel.send(content)
 
         # Input validation
         if not isinstance(message_content, str):
             logger.warning(f"message_content is not a string: {type(message_content)}")
-            message_content = str(message_content) if message_content is not None else ""
+            message_content = (
+                str(message_content) if message_content is not None else ""
+            )
 
         if len(message_content) > 4000:
-            await send_response("❌ Message too long! Please keep messages under 4000 characters.", ephemeral=True)
+            await send_response(
+                "❌ Message too long! Please keep messages under 4000 characters.",
+                ephemeral=True,
+            )
             return
 
         # Replace user mentions with readable names for LLM
         if original_message:
-            message_content = self._replace_mentions_with_names(message_content, original_message)
+            message_content = self._replace_mentions_with_names(
+                message_content, original_message
+            )
 
         # Check for multi-turn conversation steps (only for actual messages)
         if original_message and self.conversation_manager:
             # Prepare user content (strip mention)
             user_content = message_content
             if self.bot.user in original_message.mentions:
-                user_content = message_content.replace(f"<@{self.bot.user.id}>", "").strip()
-            
+                user_content = message_content.replace(
+                    f"<@{self.bot.user.id}>", ""
+                ).strip()
+
             conversation = self.conversation_manager.get_conversation(channel.id)
             if conversation:
                 # Process response in multi-turn conversation
                 result = await self.conversation_manager.process_response(
-                    channel.id,
-                    user.id,
-                    user_content
+                    channel.id, user.id, user_content
                 )
 
                 if result:
-                    if result['type'] == 'next_step':
+                    if result["type"] == "next_step":
                         await channel.send(
                             f"**Step {result['step_number']}/{result['total_steps']}**\n{result['prompt']}"
                         )
-                    elif result['type'] == 'completed':
-                        await channel.send(result['message'])
-                    elif result['type'] == 'invalid':
-                        remaining = result.get('attempts_remaining', 0)
+                    elif result["type"] == "completed":
+                        await channel.send(result["message"])
+                    elif result["type"] == "invalid":
+                        remaining = result.get("attempts_remaining", 0)
                         await channel.send(
                             f"{result['message']}\n*({remaining} attempts remaining)*"
                         )
-                    elif result['type'] in ['cancelled', 'failed', 'error']:
-                        await channel.send(result['message'])
+                    elif result["type"] in ["cancelled", "failed", "error"]:
+                        await channel.send(result["message"])
 
                     return  # Multi-turn conversation handled
 
@@ -935,47 +1065,75 @@ Answer ONLY "yes" or "no"."""
             # Prepare user content (strip mention)
             user_content = message_content
             if self.bot.user in original_message.mentions:
-                user_content = message_content.replace(f"<@{self.bot.user.id}>", "").strip()
+                user_content = message_content.replace(
+                    f"<@{self.bot.user.id}>", ""
+                ).strip()
 
             server_id = original_message.guild.id if original_message.guild else None
             intent = self.intent_recognition.detect_intent(
                 user_content,
                 bot_mentioned=(self.bot.user in original_message.mentions),
-                server_id=server_id
+                server_id=server_id,
             )
 
             # Handle intents that don't need AI processing
             if intent and self.intent_handler:
-                logger.info(f"Detected intent: {intent.intent_type} (confidence: {intent.confidence}) for message: '{user_content[:50]}'")
-                handled = await self.intent_handler.handle_intent(intent, original_message)
+                logger.info(
+                    f"Detected intent: {intent.intent_type} (confidence: {intent.confidence}) for message: '{user_content[:50]}'"
+                )
+                handled = await self.intent_handler.handle_intent(
+                    intent, original_message
+                )
                 logger.info(f"Intent {intent.intent_type} handled: {handled}")
                 if handled:
                     # Intent was fully handled, no need for AI response
                     if self.intent_recognition.learner:
-                        self.intent_recognition.report_success(user_content, intent.intent_type)
+                        self.intent_recognition.report_success(
+                            user_content, intent.intent_type
+                        )
                     return
                 else:
-                    logger.info(f"Intent {intent.intent_type} not handled, falling through to AI")
+                    logger.info(
+                        f"Intent {intent.intent_type} not handled, falling through to AI"
+                    )
 
         # Check if user is referencing an image in recent messages
         image_reference_keywords = [
-            "image above", "picture above", "photo above",
-            "that image", "this image", "the image",
-            "that picture", "this picture", "the picture",
-            "react to", "what do you think of",
-            "describe", "analyze",
-            "what is that", "what is this", "look at this", "look at that",
-            "who is this", "who is that", "thoughts?", "see this"
+            "image above",
+            "picture above",
+            "photo above",
+            "that image",
+            "this image",
+            "the image",
+            "that picture",
+            "this picture",
+            "the picture",
+            "react to",
+            "what do you think of",
+            "describe",
+            "analyze",
+            "what is that",
+            "what is this",
+            "look at this",
+            "look at that",
+            "who is this",
+            "who is that",
+            "thoughts?",
+            "see this",
         ]
-        
+
         message_lower = message_content.lower()
-        is_referencing_image = any(keyword in message_lower for keyword in image_reference_keywords)
-        
+        is_referencing_image = any(
+            keyword in message_lower for keyword in image_reference_keywords
+        )
+
         # Also check if the current message HAS an image (implicit reference)
         has_attachment = False
-        if original_message and (original_message.attachments or original_message.embeds):
+        if original_message and (
+            original_message.attachments or original_message.embeds
+        ):
             has_attachment = True
-            is_referencing_image = True # Treat as referencing the attached image
+            is_referencing_image = True  # Treat as referencing the attached image
 
         recent_image_url = None
         if is_referencing_image:
@@ -1000,31 +1158,41 @@ Answer ONLY "yes" or "no"."""
                 try:
                     async for msg in channel.history(limit=10):
                         # Skip the current message/interaction
-                        if interaction and msg.author == user and msg.content == message_content:
+                        if (
+                            interaction
+                            and msg.author == user
+                            and msg.content == message_content
+                        ):
                             continue
                         if original_message and msg.id == original_message.id:
                             continue
-                        
+
                         # Check for image attachments
                         if msg.attachments:
                             for attachment in msg.attachments:
                                 if is_image_attachment(attachment.filename):
                                     recent_image_url = attachment.url
-                                    logger.info(f"Found recent image: {recent_image_url}")
+                                    logger.info(
+                                        f"Found recent image: {recent_image_url}"
+                                    )
                                     break
-                        
+
                         # Check for embeds with images
                         if msg.embeds:
                             for embed in msg.embeds:
                                 if embed.image:
                                     recent_image_url = embed.image.url
-                                    logger.info(f"Found recent embed image: {recent_image_url}")
+                                    logger.info(
+                                        f"Found recent embed image: {recent_image_url}"
+                                    )
                                     break
                                 elif embed.thumbnail:
                                     recent_image_url = embed.thumbnail.url
-                                    logger.info(f"Found recent thumbnail: {recent_image_url}")
+                                    logger.info(
+                                        f"Found recent thumbnail: {recent_image_url}"
+                                    )
                                     break
-                        
+
                         if recent_image_url:
                             break
                 except Exception as e:
@@ -1046,11 +1214,11 @@ Answer ONLY "yes" or "no"."""
 
         # Calculate natural thinking delay
         thinking_delay = self.enhancer.calculate_thinking_delay(message_content)
-        
+
         if interaction:
             await interaction.response.defer(thinking=True)
         # Note: For on_message, we already started typing in the listener
-        
+
         # Apply thinking delay
         await asyncio.sleep(thinking_delay)
 
@@ -1089,11 +1257,14 @@ Answer ONLY "yes" or "no"."""
             # Add user profile context if enabled
             if self.user_profiles and Config.USER_CONTEXT_IN_CHAT:
                 user_context = await self.user_profiles.get_user_context(user_id)
-                if user_context and user_context != "New user - no profile information yet.":
+                if (
+                    user_context
+                    and user_context != "New user - no profile information yet."
+                ):
                     # Check for behavioral instructions in user profile
                     profile = await self.user_profiles.load_profile(user.id)
                     special_instructions = []
-                    
+
                     # Look for "when you see" or "always say" type facts
                     for fact_entry in profile.get("facts", []):
                         # Handle both dict (new format) and string (legacy format)
@@ -1101,30 +1272,49 @@ Answer ONLY "yes" or "no"."""
                             fact_text = fact_entry.get("fact", "")
                         else:
                             fact_text = str(fact_entry)
-                            
+
                         fact_lower = fact_text.lower()
-                        
+
                         # Check for instructions
-                        if any(keyword in fact_lower for keyword in ["when you see", "always say", "greet with", "call them", "respond with", "call me"]):
+                        if any(
+                            keyword in fact_lower
+                            for keyword in [
+                                "when you see",
+                                "always say",
+                                "greet with",
+                                "call them",
+                                "respond with",
+                                "call me",
+                            ]
+                        ):
                             special_instructions.append(fact_text)
-                    
+
                     # If there are special instructions, put them at the VERY TOP
                     if special_instructions:
-                        instruction_text = "\n".join([f"- {inst}" for inst in special_instructions])
-                        context_parts.insert(0, f"\n[CRITICAL USER-SPECIFIC INSTRUCTIONS - FOLLOW EXACTLY:\n{instruction_text}\n]")
-                    
+                        instruction_text = "\n".join(
+                            [f"- {inst}" for inst in special_instructions]
+                        )
+                        context_parts.insert(
+                            0,
+                            f"\n[CRITICAL USER-SPECIFIC INSTRUCTIONS - FOLLOW EXACTLY:\n{instruction_text}\n]",
+                        )
+
                     # Add general user context
                     context_parts.append(f"\n[User Info: {user_context}]")
 
                 # Add affection/relationship context if enabled
                 if Config.USER_AFFECTION_ENABLED:
-                    affection_context = self.user_profiles.get_affection_context(user_id)
+                    affection_context = self.user_profiles.get_affection_context(
+                        user_id
+                    )
                     if affection_context:
                         context_parts.append(f"\n[Relationship: {affection_context}]")
 
             # Add memory recall from past conversations
             if self.summarizer:
-                memory_context = await self.summarizer.build_memory_context(message_content)
+                memory_context = await self.summarizer.build_memory_context(
+                    message_content
+                )
                 if memory_context:
                     context_parts.append(f"\n{memory_context}")
 
@@ -1134,13 +1324,21 @@ Answer ONLY "yes" or "no"."""
                 persona_boost = None
                 if self.current_persona:
                     # Use explicitly configured category or fallback to persona name
-                    persona_boost = self.current_persona.rag_boost_category or self.current_persona.name
-                
-                rag_context = self.rag.get_context(message_content, max_length=1000, boost_category=persona_boost)
+                    persona_boost = (
+                        self.current_persona.rag_boost_category
+                        or self.current_persona.name
+                    )
+
+                rag_context = self.rag.get_context(
+                    message_content, max_length=1000, boost_category=persona_boost
+                )
                 if rag_context:
                     # CRITICAL: Insert RAG context at the VERY BEGINNING of context_parts
                     # This ensures it overrides general personality traits
-                    context_parts.insert(0, f"\n[CRITICAL KNOWLEDGE - USE THIS TO ANSWER:\n{rag_context}\n]")
+                    context_parts.insert(
+                        0,
+                        f"\n[CRITICAL KNOWLEDGE - USE THIS TO ANSWER:\n{rag_context}\n]",
+                    )
 
             # Add emotional state context
             emotional_context = self.enhancer.get_emotional_context()
@@ -1150,13 +1348,13 @@ Answer ONLY "yes" or "no"."""
             # Track conversation topics for callbacks
             if self.callbacks:
                 await self.callbacks.track_conversation_topic(
-                    channel_id,
-                    message_content,
-                    str(user.name)
+                    channel_id, message_content, str(user.name)
                 )
 
                 # Check for callback opportunities
-                callback_prompt = await self.callbacks.get_callback_opportunity(channel_id, message_content)
+                callback_prompt = await self.callbacks.get_callback_opportunity(
+                    channel_id, message_content
+                )
                 if callback_prompt:
                     context_parts.append(f"\n{callback_prompt}")
 
@@ -1183,10 +1381,16 @@ Answer ONLY "yes" or "no"."""
             # Add web search results if query needs current information
             if self.web_search and await self.web_search.should_search(message_content):
                 try:
-                    search_context = await self.web_search.get_context(message_content, max_length=800)
+                    search_context = await self.web_search.get_context(
+                        message_content, max_length=800
+                    )
                     if search_context:
-                        context_parts.append(f"\n\n{'='*60}\n[REAL-TIME WEB SEARCH RESULTS - READ THIS EXACTLY]\n{'='*60}\n{search_context}\n{'='*60}\n[END OF WEB SEARCH RESULTS]\n{'='*60}\n\n[CRITICAL INSTRUCTIONS - VIOLATION WILL BE DETECTED]\n1. You MUST ONLY cite information that appears EXACTLY in the search results above\n2. COPY the exact URLs shown - DO NOT modify or create new ones\n3. If search results are irrelevant (e.g., wrong topic, unrelated content), tell the user: 'The search didn't return relevant results'\n4. DO NOT invent Steam pages, Reddit posts, YouTube videos, or patch notes\n5. If you cite a URL, it MUST be copied EXACTLY from the search results\n6. When in doubt, say 'I don't have current information' - DO NOT GUESS\n\nVIOLATING THESE RULES BY INVENTING INFORMATION WILL BE IMMEDIATELY DETECTED.")
-                        logger.info(f"Added web search context for: {message_content[:50]}...")
+                        context_parts.append(
+                            f"\n\n{'=' * 60}\n[REAL-TIME WEB SEARCH RESULTS - READ THIS EXACTLY]\n{'=' * 60}\n{search_context}\n{'=' * 60}\n[END OF WEB SEARCH RESULTS]\n{'=' * 60}\n\n[CRITICAL INSTRUCTIONS - VIOLATION WILL BE DETECTED]\n1. You MUST ONLY cite information that appears EXACTLY in the search results above\n2. COPY the exact URLs shown - DO NOT modify or create new ones\n3. If search results are irrelevant (e.g., wrong topic, unrelated content), tell the user: 'The search didn't return relevant results'\n4. DO NOT invent Steam pages, Reddit posts, YouTube videos, or patch notes\n5. If you cite a URL, it MUST be copied EXACTLY from the search results\n6. When in doubt, say 'I don't have current information' - DO NOT GUESS\n\nVIOLATING THESE RULES BY INVENTING INFORMATION WILL BE IMMEDIATELY DETECTED."
+                        )
+                        logger.info(
+                            f"Added web search context for: {message_content[:50]}..."
+                        )
                 except Exception as e:
                     logger.error(f"Web search failed: {e}")
 
@@ -1198,7 +1402,9 @@ Answer ONLY "yes" or "no"."""
 
             # Add user-specific adaptation guidance (Learning & Adaptation)
             if self.pattern_learner:
-                adaptation_guidance = self.pattern_learner.get_adaptation_guidance(user.id)
+                adaptation_guidance = self.pattern_learner.get_adaptation_guidance(
+                    user.id
+                )
                 if adaptation_guidance:
                     context_parts.append(f"\n[User Adaptation: {adaptation_guidance}]")
                     logger.debug(f"Added adaptation guidance for user {user.id}")
@@ -1216,7 +1422,9 @@ Answer ONLY "yes" or "no"."""
                     "engaged": "Show genuine interest and engagement with the topic.",
                     "random": "Feel free to be spontaneous and unpredictable.",
                 }
-                style_guidance = style_map.get(suggested_style, f"Adopt a {suggested_style} tone.")
+                style_guidance = style_map.get(
+                    suggested_style, f"Adopt a {suggested_style} tone."
+                )
                 context_parts.append(f"\n[Response Style: {style_guidance}]")
                 logger.debug(f"Added style guidance: {suggested_style}")
 
@@ -1243,7 +1451,9 @@ Answer ONLY "yes" or "no"."""
 
             # Inject all context into system prompt (CHARACTER FIRST, then context)
             # CRITICAL: Put character instructions FIRST so they're not overridden by context
-            context_injected_prompt = f"{self.system_prompt}\n\n{''.join(context_parts)}"
+            context_injected_prompt = (
+                f"{self.system_prompt}\n\n{''.join(context_parts)}"
+            )
 
             # Log action for self-awareness
             if self.naturalness:
@@ -1274,24 +1484,26 @@ Answer ONLY "yes" or "no"."""
             # If we found a recent image, process it with vision
             if recent_image_url and Config.VISION_ENABLED:
                 try:
-                    logger.info(f"Processing recent image with vision: {recent_image_url}")
+                    logger.info(
+                        f"Processing recent image with vision: {recent_image_url}"
+                    )
                     # Download the image (returns bytes)
                     image_data = await download_attachment(recent_image_url)
-                    
+
                     if image_data:
                         # Convert to base64
                         image_base64 = image_to_base64(image_data)
-                        
+
                         # Add image context to the message
                         vision_message = f"{message_content}\n\n[Note: User is referencing an image from a recent message]"
-                        
+
                         # Use vision model
                         response = await self.ollama.chat_with_vision(
                             prompt=vision_message,
                             images=[image_base64],
                             system_prompt=context_injected_prompt,
                             model=Config.VISION_MODEL,
-                            max_tokens=optimal_max_tokens
+                            max_tokens=optimal_max_tokens,
                         )
 
                         logger.info("Successfully processed recent image with vision")
@@ -1300,25 +1512,26 @@ Answer ONLY "yes" or "no"."""
                         response = await self.ollama.chat(
                             history,
                             system_prompt=context_injected_prompt,
-                            max_tokens=optimal_max_tokens
+                            max_tokens=optimal_max_tokens,
                         )
                 except Exception as e:
                     logger.error(f"Vision processing failed for recent image: {e}")
                     # Fallback to text-only
-                    response = await self.ollama.chat(
+                    response = await self._llm_chat(
                         history,
                         system_prompt=context_injected_prompt,
-                        max_tokens=optimal_max_tokens
+                        max_tokens=optimal_max_tokens,
                     )
             else:
                 # Regular text-only chat
-                
+
                 # 1. Use Agentic Tools (ReAct) if available
                 # Note: Streaming is currently disabled for agentic tools to prevent showing tool calls to users
                 if self.agentic_tools:
+
                     async def llm_generate(conv):
-                        # Ollama chat expects messages list; system prompt already in conv
-                        return await self.ollama.chat(conv, system_prompt=None)
+                        # LLM chat with fallback if enabled; system prompt already in conv
+                        return await self._llm_chat(conv, system_prompt=None)
 
                     response = await self.agentic_tools.process_with_tools(
                         llm_generate_func=llm_generate,
@@ -1336,10 +1549,10 @@ Answer ONLY "yes" or "no"."""
                     # Check if we should use streaming TTS (bot in voice + voice feature enabled)
                     voice_client = channel.guild.voice_client if channel.guild else None
                     use_streaming_tts = (
-                        Config.AUTO_REPLY_WITH_VOICE and
-                        voice_client and
-                        voice_client.is_connected() and
-                        not voice_client.is_playing()
+                        Config.AUTO_REPLY_WITH_VOICE
+                        and voice_client
+                        and voice_client.is_connected()
+                        and not voice_client.is_playing()
                     )
 
                     if use_streaming_tts:
@@ -1348,7 +1561,7 @@ Answer ONLY "yes" or "no"."""
                         if voice_cog:
                             streaming_tts = StreamingTTSProcessor(
                                 voice_cog.tts,
-                                voice_cog.rvc if hasattr(voice_cog, 'rvc') else None
+                                voice_cog.rvc if hasattr(voice_cog, "rvc") else None,
                             )
 
                             # Analyze sentiment for voice modulation
@@ -1367,7 +1580,7 @@ Answer ONLY "yes" or "no"."""
                             llm_stream = self.ollama.chat_stream(
                                 history,
                                 system_prompt=context_injected_prompt,
-                                max_tokens=optimal_max_tokens
+                                max_tokens=optimal_max_tokens,
                             )
                             multiplexer = StreamMultiplexer(llm_stream)
 
@@ -1384,15 +1597,28 @@ Answer ONLY "yes" or "no"."""
 
                                     # Update message periodically
                                     current_time = time.time()
-                                    if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
+                                    if (
+                                        current_time - last_update
+                                        >= Config.STREAM_UPDATE_INTERVAL
+                                    ):
                                         if interaction:
                                             # Apply mention conversion for Discord display
-                                            display_text = self._restore_mentions(response, guild) if guild else response
+                                            display_text = (
+                                                self._restore_mentions(response, guild)
+                                                if guild
+                                                else response
+                                            )
                                             if not response_message:
-                                                response_message = await interaction.followup.send(display_text[:2000])
+                                                response_message = (
+                                                    await interaction.followup.send(
+                                                        display_text[:2000]
+                                                    )
+                                                )
                                             else:
                                                 try:
-                                                    await response_message.edit(content=display_text[:2000])
+                                                    await response_message.edit(
+                                                        content=display_text[:2000]
+                                                    )
                                                 except discord.HTTPException:
                                                     pass
 
@@ -1405,8 +1631,8 @@ Answer ONLY "yes" or "no"."""
                                     tts_stream,
                                     voice_client,
                                     speed=kokoro_speed,
-                                    rate=edge_rate
-                                )
+                                    rate=edge_rate,
+                                ),
                             )
 
                             logger.info("Parallel streaming TTS completed")
@@ -1415,20 +1641,33 @@ Answer ONLY "yes" or "no"."""
                             async for chunk in self.ollama.chat_stream(
                                 history,
                                 system_prompt=context_injected_prompt,
-                                max_tokens=optimal_max_tokens
+                                max_tokens=optimal_max_tokens,
                             ):
                                 response += chunk
 
                                 current_time = time.time()
-                                if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
+                                if (
+                                    current_time - last_update
+                                    >= Config.STREAM_UPDATE_INTERVAL
+                                ):
                                     if interaction:
                                         # Apply mention conversion for Discord display
-                                        display_text = self._restore_mentions(response, guild) if guild else response
+                                        display_text = (
+                                            self._restore_mentions(response, guild)
+                                            if guild
+                                            else response
+                                        )
                                         if not response_message:
-                                            response_message = await interaction.followup.send(display_text[:2000])
+                                            response_message = (
+                                                await interaction.followup.send(
+                                                    display_text[:2000]
+                                                )
+                                            )
                                         else:
                                             try:
-                                                await response_message.edit(content=display_text[:2000])
+                                                await response_message.edit(
+                                                    content=display_text[:2000]
+                                                )
                                             except discord.HTTPException:
                                                 pass
 
@@ -1438,21 +1677,34 @@ Answer ONLY "yes" or "no"."""
                         async for chunk in self.ollama.chat_stream(
                             history,
                             system_prompt=context_injected_prompt,
-                            max_tokens=optimal_max_tokens
+                            max_tokens=optimal_max_tokens,
                         ):
                             response += chunk
 
                             # Update message periodically to avoid rate limits
                             current_time = time.time()
-                            if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
+                            if (
+                                current_time - last_update
+                                >= Config.STREAM_UPDATE_INTERVAL
+                            ):
                                 if interaction:
                                     # Apply mention conversion for Discord display
-                                    display_text = self._restore_mentions(response, guild) if guild else response
+                                    display_text = (
+                                        self._restore_mentions(response, guild)
+                                        if guild
+                                        else response
+                                    )
                                     if not response_message:
-                                        response_message = await interaction.followup.send(display_text[:2000])
+                                        response_message = (
+                                            await interaction.followup.send(
+                                                display_text[:2000]
+                                            )
+                                        )
                                     else:
                                         try:
-                                            await response_message.edit(content=display_text[:2000])
+                                            await response_message.edit(
+                                                content=display_text[:2000]
+                                            )
                                         except discord.HTTPException:
                                             pass  # Rate limit hit, skip this update
                                 # Note: We don't stream edits to regular messages as it's spammy/rate-limited
@@ -1463,25 +1715,32 @@ Answer ONLY "yes" or "no"."""
                     # Send final update if needed
                     if interaction and response_message:
                         # Apply mention conversion for final Discord display
-                        display_text = self._restore_mentions(response, guild) if guild else response
+                        display_text = (
+                            self._restore_mentions(response, guild)
+                            if guild
+                            else response
+                        )
                         try:
                             await response_message.edit(content=display_text[:2000])
                         except discord.HTTPException:
                             pass
                     elif interaction:
                         # Apply mention conversion for final Discord display
-                        display_text = self._restore_mentions(response, guild) if guild else response
+                        display_text = (
+                            self._restore_mentions(response, guild)
+                            if guild
+                            else response
+                        )
                         await interaction.followup.send(display_text[:2000])
                     # Note: For non-interaction, the final response will be sent later
                     # after mention conversion (see lines below after response processing)
-                
 
                 # 3. Standard Non-Streaming Fallback
                 else:
                     response = await self.ollama.chat(
                         history,
                         system_prompt=context_injected_prompt,
-                        max_tokens=optimal_max_tokens
+                        max_tokens=optimal_max_tokens,
                     )
 
             # Validate and clean response (remove thinking tags, fix hallucinations)
@@ -1492,17 +1751,17 @@ Answer ONLY "yes" or "no"."""
                 response = self.naturalness.enhance_response(response, context="chat")
 
             # Apply AI-first persona framework effects (spontaneity, chaos, etc.)
-            if hasattr(self.bot, 'decision_engine') and self.bot.decision_engine:
+            if hasattr(self.bot, "decision_engine") and self.bot.decision_engine:
                 response = await self.bot.decision_engine.enhance_response(response)
                 logger.debug("Applied decision engine framework effects to response")
 
             # Clean up response (remove trailing backslashes, extra whitespace)
-            response = response.rstrip('\\').rstrip()
+            response = response.rstrip("\\").rstrip()
 
             # Create separate versions for Discord and TTS
             # Discord version: Convert @Username to <@user_id> for clickable mentions
             # TTS version: Convert <@user_id> to Username for natural pronunciation
-            guild = channel.guild if hasattr(channel, 'guild') else None
+            guild = channel.guild if hasattr(channel, "guild") else None
             if guild:
                 discord_response = self._restore_mentions(response, guild)
                 tts_response = self._clean_for_tts(response, guild)
@@ -1516,7 +1775,11 @@ Answer ONLY "yes" or "no"."""
                 # Analyze sentiment
                 sentiment = self._analyze_sentiment(message_content)
                 # Check if conversation is interesting (has questions, details, etc.)
-                is_interesting = len(message_content.split()) > 10 or "?" in message_content or "how" in message_content.lower()
+                is_interesting = (
+                    len(message_content.split()) > 10
+                    or "?" in message_content
+                    or "how" in message_content.lower()
+                )
                 self.naturalness.update_mood(sentiment, is_interesting)
 
             # Update user profile - increment interaction count and learn from conversation
@@ -1535,7 +1798,7 @@ Answer ONLY "yes" or "no"."""
                             user_id=user_id,
                             username=str(user.name),
                             user_message=message_content,
-                            bot_response=response
+                            bot_response=response,
                         )
                     )
 
@@ -1546,19 +1809,23 @@ Answer ONLY "yes" or "no"."""
                         self._safe_update_affection(
                             user_id=user_id,
                             message=message_content,
-                            bot_response=response
+                            bot_response=response,
                         )
                     )
 
             # Save to history with user attribution
             if Config.CHAT_HISTORY_ENABLED:
                 await self.history.add_message(
-                    channel_id, "user", message_content,
+                    channel_id,
+                    "user",
+                    message_content,
                     username=str(user.name),
-                    user_id=user.id
+                    user_id=user.id,
                 )
                 # Use discord_response for history (with proper mention tags)
-                await self.history.add_message(channel_id, "assistant", discord_response)
+                await self.history.add_message(
+                    channel_id, "assistant", discord_response
+                )
 
             # Start a conversation session
             await self._start_session(channel_id, user.id)
@@ -1580,7 +1847,6 @@ Answer ONLY "yes" or "no"."""
                 for i, chunk in enumerate(chunks):
                     await channel.send(chunk)
 
-
             # Check if we should auto-summarize
             if self.summarizer and len(history) >= Config.AUTO_SUMMARIZE_THRESHOLD:
                 # Summarize in background (don't block)
@@ -1596,27 +1862,29 @@ Answer ONLY "yes" or "no"."""
 
             # Also speak in voice channel if bot is connected and feature is enabled
             # Skip if streaming TTS was already used
-            if Config.AUTO_REPLY_WITH_VOICE and not (Config.RESPONSE_STREAMING_ENABLED and use_streaming_tts):
+            if Config.AUTO_REPLY_WITH_VOICE and not (
+                Config.RESPONSE_STREAMING_ENABLED and use_streaming_tts
+            ):
                 # Only generate TTS if actually in a voice channel
                 voice_client = channel.guild.voice_client if channel.guild else None
                 if voice_client and voice_client.is_connected():
                     # Use tts_response for natural pronunciation (without mention tags)
                     await self._speak_response_in_voice(channel.guild, tts_response)
 
-
             # Record metrics for successful response
-            if hasattr(self.bot, 'metrics'):
+            if hasattr(self.bot, "metrics"):
                 duration_ms = (time.time() - start_time) * 1000
                 self.bot.metrics.record_response_time(duration_ms)
                 self.bot.metrics.record_message(user.id, channel.id)
 
         except Exception as e:
             import traceback
+
             logger.error(f"Chat command failed: {e}")
             logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Record error in metrics
-            if hasattr(self.bot, 'metrics'):
+            if hasattr(self.bot, "metrics"):
                 error_type = type(e).__name__
                 self.bot.metrics.record_error(error_type, str(e))
 
@@ -1636,16 +1904,20 @@ Answer ONLY "yes" or "no"."""
             message_content=message,
             channel=interaction.channel,
             user=interaction.user,
-            interaction=interaction
+            interaction=interaction,
         )
 
-    @app_commands.command(name="ambient", description="Toggle or check ambient mode status")
+    @app_commands.command(
+        name="ambient", description="Toggle or check ambient mode status"
+    )
     @app_commands.describe(action="Action to perform")
-    @app_commands.choices(action=[
-        app_commands.Choice(name="Status", value="status"),
-        app_commands.Choice(name="Enable", value="enable"),
-        app_commands.Choice(name="Disable", value="disable"),
-    ])
+    @app_commands.choices(
+        action=[
+            app_commands.Choice(name="Status", value="status"),
+            app_commands.Choice(name="Enable", value="enable"),
+            app_commands.Choice(name="Disable", value="disable"),
+        ]
+    )
     async def ambient(self, interaction: discord.Interaction, action: str = "status"):
         """Control ambient mode.
 
@@ -1654,79 +1926,71 @@ Answer ONLY "yes" or "no"."""
             action: Action to perform (status/enable/disable)
         """
         try:
-            ambient = getattr(self.bot, 'ambient_mode', None)
+            ambient = getattr(self.bot, "ambient_mode", None)
 
             if not ambient:
                 await interaction.response.send_message(
-                    "❌ Ambient mode is not configured.",
-                    ephemeral=True
+                    "❌ Ambient mode is not configured.", ephemeral=True
                 )
                 return
 
             if action == "status":
                 stats = ambient.get_stats()
                 embed = discord.Embed(
-                    title="🌙 Ambient Mode Status",
-                    color=discord.Color.purple()
+                    title="🌙 Ambient Mode Status", color=discord.Color.purple()
                 )
                 embed.add_field(
                     name="Status",
                     value="🟢 Running" if stats["running"] else "🔴 Stopped",
-                    inline=True
+                    inline=True,
                 )
                 embed.add_field(
                     name="Active Channels",
                     value=str(stats["active_channels"]),
-                    inline=True
+                    inline=True,
                 )
                 embed.add_field(
                     name="Trigger Chance",
                     value=f"{int(stats['chance'] * 100)}%",
-                    inline=True
+                    inline=True,
                 )
                 embed.add_field(
-                    name="Lull Timeout",
-                    value=f"{stats['lull_timeout']}s",
-                    inline=True
+                    name="Lull Timeout", value=f"{stats['lull_timeout']}s", inline=True
                 )
                 embed.add_field(
-                    name="Min Interval",
-                    value=f"{stats['min_interval']}s",
-                    inline=True
+                    name="Min Interval", value=f"{stats['min_interval']}s", inline=True
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
 
             elif action == "enable":
                 if ambient.running:
                     await interaction.response.send_message(
-                        "✅ Ambient mode is already running.",
-                        ephemeral=True
+                        "✅ Ambient mode is already running.", ephemeral=True
                     )
                 else:
                     await ambient.start()
                     await interaction.response.send_message(
-                        "✅ Ambient mode enabled!",
-                        ephemeral=True
+                        "✅ Ambient mode enabled!", ephemeral=True
                     )
 
             elif action == "disable":
                 if not ambient.running:
                     await interaction.response.send_message(
-                        "❌ Ambient mode is already stopped.",
-                        ephemeral=True
+                        "❌ Ambient mode is already stopped.", ephemeral=True
                     )
                 else:
                     await ambient.stop()
                     await interaction.response.send_message(
-                        "✅ Ambient mode disabled.",
-                        ephemeral=True
+                        "✅ Ambient mode disabled.", ephemeral=True
                     )
 
         except Exception as e:
             logger.error(f"Ambient command failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="end_session", description="End the current conversation session")
+    @app_commands.command(
+        name="end_session", description="End the current conversation session"
+    )
     async def end_session(self, interaction: discord.Interaction):
         """End the active conversation session in this channel.
 
@@ -1739,13 +2003,14 @@ Answer ONLY "yes" or "no"."""
                 await self._end_session(channel_id)
                 timeout_minutes = Config.CONVERSATION_TIMEOUT // 60
                 await interaction.response.send_message(
-                    format_success(f"Conversation session ended. Use @mention or `/chat` to start a new session."),
-                    ephemeral=True
+                    format_success(
+                        f"Conversation session ended. Use @mention or `/chat` to start a new session."
+                    ),
+                    ephemeral=True,
                 )
             else:
                 await interaction.response.send_message(
-                    "No active conversation session in this channel.",
-                    ephemeral=True
+                    "No active conversation session in this channel.", ephemeral=True
                 )
         except Exception as e:
             logger.error(f"End session failed: {e}")
@@ -1775,7 +2040,10 @@ Answer ONLY "yes" or "no"."""
         if not Config.AUTO_REPLY_ENABLED:
             return
 
-        if Config.AUTO_REPLY_CHANNELS and message.channel.id not in Config.AUTO_REPLY_CHANNELS:
+        if (
+            Config.AUTO_REPLY_CHANNELS
+            and message.channel.id not in Config.AUTO_REPLY_CHANNELS
+        ):
             return
 
         # Check if there's an active session OR bot is mentioned
@@ -1794,32 +2062,32 @@ Answer ONLY "yes" or "no"."""
             user_content = message.content.replace(f"<@{self.bot.user.id}>", "").strip()
 
             if self.conversation_manager:
-                conversation = self.conversation_manager.get_conversation(message.channel.id)
+                conversation = self.conversation_manager.get_conversation(
+                    message.channel.id
+                )
                 if conversation:
                     # Process response in multi-turn conversation
                     result = await self.conversation_manager.process_response(
-                        message.channel.id,
-                        message.author.id,
-                        user_content
+                        message.channel.id, message.author.id, user_content
                     )
 
                     if result:
-                        if result['type'] == 'next_step':
+                        if result["type"] == "next_step":
                             await message.channel.send(
                                 f"**Step {result['step_number']}/{result['total_steps']}**\n{result['prompt']}"
                             )
-                        elif result['type'] == 'completed':
-                            await message.channel.send(result['message'])
+                        elif result["type"] == "completed":
+                            await message.channel.send(result["message"])
                             # Handle completed conversation data here
-                        elif result['type'] == 'invalid':
-                            remaining = result.get('attempts_remaining', 0)
+                        elif result["type"] == "invalid":
+                            remaining = result.get("attempts_remaining", 0)
                             await message.channel.send(
                                 f"{result['message']}\n*({remaining} attempts remaining)*"
                             )
-                        elif result['type'] in ['cancelled', 'failed']:
-                            await message.channel.send(result['message'])
-                        elif result['type'] == 'error':
-                            await message.channel.send(result['message'])
+                        elif result["type"] in ["cancelled", "failed"]:
+                            await message.channel.send(result["message"])
+                        elif result["type"] == "error":
+                            await message.channel.send(result["message"])
 
                         return  # Multi-turn conversation handled
 
@@ -1827,24 +2095,28 @@ Answer ONLY "yes" or "no"."""
             if self.intent_recognition:
                 server_id = message.guild.id if message.guild else None
                 intent = self.intent_recognition.detect_intent(
-                    user_content,
-                    bot_mentioned=is_mentioned,
-                    server_id=server_id
+                    user_content, bot_mentioned=is_mentioned, server_id=server_id
                 )
 
                 # Handle intents that don't need AI processing
                 if intent and self.intent_handler:
-                    logger.info(f"Detected intent: {intent.intent_type} (confidence: {intent.confidence}) for message: '{user_content[:50]}'")
+                    logger.info(
+                        f"Detected intent: {intent.intent_type} (confidence: {intent.confidence}) for message: '{user_content[:50]}'"
+                    )
                     handled = await self.intent_handler.handle_intent(intent, message)
                     logger.info(f"Intent {intent.intent_type} handled: {handled}")
                     if handled:
                         # Intent was fully handled, no need for AI response
                         # Report success to learner
                         if self.intent_recognition.learner:
-                            self.intent_recognition.report_success(user_content, intent.intent_type)
+                            self.intent_recognition.report_success(
+                                user_content, intent.intent_type
+                            )
                         return
                     else:
-                        logger.info(f"Intent {intent.intent_type} not handled, falling through to AI")
+                        logger.info(
+                            f"Intent {intent.intent_type} not handled, falling through to AI"
+                        )
 
             # Load history
             history = []
@@ -1857,13 +2129,20 @@ Answer ONLY "yes" or "no"."""
 
             # Add user profile context if enabled
             if self.user_profiles and Config.USER_CONTEXT_IN_CHAT:
-                user_context = await self.user_profiles.get_user_context(message.author.id)
-                if user_context and user_context != "New user - no profile information yet.":
+                user_context = await self.user_profiles.get_user_context(
+                    message.author.id
+                )
+                if (
+                    user_context
+                    and user_context != "New user - no profile information yet."
+                ):
                     context_parts.append(f"\n[User Info: {user_context}]")
 
                 # Add affection/relationship context if enabled
                 if Config.USER_AFFECTION_ENABLED:
-                    affection_context = self.user_profiles.get_affection_context(message.author.id)
+                    affection_context = self.user_profiles.get_affection_context(
+                        message.author.id
+                    )
                     if affection_context:
                         context_parts.append(f"\n[Relationship: {affection_context}]")
 
@@ -1879,31 +2158,43 @@ Answer ONLY "yes" or "no"."""
                         for msg in recent_msgs:
                             # Extract potential topic words (proper nouns, capitalized words)
                             import re
-                            words = re.findall(r'\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b', msg.get('content', ''))
+
+                            words = re.findall(
+                                r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b",
+                                msg.get("content", ""),
+                            )
                             topics.extend(words)
 
                         if topics:
-                            conv_context = ' '.join(set(topics))  # Unique topics
-                            logger.info(f"Extracted conversation context: {conv_context}")
+                            conv_context = " ".join(set(topics))  # Unique topics
+                            logger.info(
+                                f"Extracted conversation context: {conv_context}"
+                            )
 
                     search_context = await self.web_search.get_context(
-                        user_content,
-                        max_length=800,
-                        conversation_context=conv_context
+                        user_content, max_length=800, conversation_context=conv_context
                     )
 
                     if search_context:
-                        context_parts.append(f"\n\n{'='*60}\n[REAL-TIME WEB SEARCH RESULTS - READ THIS EXACTLY]\n{'='*60}\n{search_context}\n{'='*60}\n[END OF WEB SEARCH RESULTS]\n{'='*60}\n\n[CRITICAL INSTRUCTIONS - VIOLATION WILL BE DETECTED]\n1. You MUST ONLY cite information that appears EXACTLY in the search results above\n2. COPY the exact URLs shown - DO NOT modify or create new ones\n3. If search results are irrelevant (e.g., wrong topic, unrelated content), tell the user: 'The search didn't return relevant results'\n4. DO NOT invent Steam pages, Reddit posts, YouTube videos, or patch notes\n5. If you cite a URL, it MUST be copied EXACTLY from the search results\n6. When in doubt, say 'I don't have current information' - DO NOT GUESS\n\nVIOLATING THESE RULES BY INVENTING INFORMATION WILL BE IMMEDIATELY DETECTED.")
-                        logger.info(f"Added web search context for: {user_content[:50]}...")
+                        context_parts.append(
+                            f"\n\n{'=' * 60}\n[REAL-TIME WEB SEARCH RESULTS - READ THIS EXACTLY]\n{'=' * 60}\n{search_context}\n{'=' * 60}\n[END OF WEB SEARCH RESULTS]\n{'=' * 60}\n\n[CRITICAL INSTRUCTIONS - VIOLATION WILL BE DETECTED]\n1. You MUST ONLY cite information that appears EXACTLY in the search results above\n2. COPY the exact URLs shown - DO NOT modify or create new ones\n3. If search results are irrelevant (e.g., wrong topic, unrelated content), tell the user: 'The search didn't return relevant results'\n4. DO NOT invent Steam pages, Reddit posts, YouTube videos, or patch notes\n5. If you cite a URL, it MUST be copied EXACTLY from the search results\n6. When in doubt, say 'I don't have current information' - DO NOT GUESS\n\nVIOLATING THESE RULES BY INVENTING INFORMATION WILL BE IMMEDIATELY DETECTED."
+                        )
+                        logger.info(
+                            f"Added web search context for: {user_content[:50]}..."
+                        )
                     else:
                         # Search returned no quality results
-                        logger.info(f"No quality search results for: {user_content[:50]}")
+                        logger.info(
+                            f"No quality search results for: {user_content[:50]}"
+                        )
                 except Exception as e:
                     logger.error(f"Web search failed: {e}")
 
             # Add memory recall from past conversations
             if self.summarizer:
-                memory_context = await self.summarizer.build_memory_context(user_content)
+                memory_context = await self.summarizer.build_memory_context(
+                    user_content
+                )
                 if memory_context:
                     context_parts.append(f"\n{memory_context}")
 
@@ -1938,11 +2229,15 @@ Answer ONLY "yes" or "no"."""
 
             # Inject all context into system prompt (CHARACTER FIRST, then context)
             # CRITICAL: Put character instructions FIRST so they're not overridden by context
-            context_injected_prompt = f"{self.system_prompt}\n\n{''.join(context_parts)}"
+            context_injected_prompt = (
+                f"{self.system_prompt}\n\n{''.join(context_parts)}"
+            )
 
             # Update dashboard status
-            if hasattr(self.bot, 'web_dashboard'):
-                self.bot.web_dashboard.set_status("Thinking", f"Generating response for {message.author.name}")
+            if hasattr(self.bot, "web_dashboard"):
+                self.bot.web_dashboard.set_status(
+                    "Thinking", f"Generating response for {message.author.name}"
+                )
 
             # Check for image attachments
             images = []
@@ -1950,13 +2245,17 @@ Answer ONLY "yes" or "no"."""
                 for attachment in message.attachments:
                     if is_image_attachment(attachment.filename):
                         try:
-                            logger.info(f"Processing image attachment: {attachment.filename}")
+                            logger.info(
+                                f"Processing image attachment: {attachment.filename}"
+                            )
                             image_data = await download_attachment(attachment.url)
                             image_b64 = image_to_base64(image_data)
                             images.append(image_b64)
                         except Exception as e:
                             logger.error(f"Failed to process image attachment: {e}")
-                            await message.channel.send(f"⚠️ Failed to process image: {attachment.filename}")
+                            await message.channel.send(
+                                f"⚠️ Failed to process image: {attachment.filename}"
+                            )
 
             # Get response
             async with message.channel.typing():
@@ -1966,15 +2265,19 @@ Answer ONLY "yes" or "no"."""
                     response = await self.ollama.chat_with_vision(
                         prompt=user_content,
                         images=images,
-                        system_prompt=context_injected_prompt
+                        system_prompt=context_injected_prompt,
                     )
                 else:
                     # Regular text chat
-                    response = await self.ollama.chat(history, system_prompt=context_injected_prompt)
+                    response = await self.ollama.chat(
+                        history, system_prompt=context_injected_prompt
+                    )
 
             # Update dashboard status
-            if hasattr(self.bot, 'web_dashboard'):
-                self.bot.web_dashboard.set_status("Processing", "Response generated, updating profile...")
+            if hasattr(self.bot, "web_dashboard"):
+                self.bot.web_dashboard.set_status(
+                    "Processing", "Response generated, updating profile..."
+                )
 
             # Update user profile - increment interaction count and learn from conversation
             if self.user_profiles:
@@ -1991,7 +2294,7 @@ Answer ONLY "yes" or "no"."""
                             user_id=message.author.id,
                             username=str(message.author.name),
                             user_message=user_content,
-                            bot_response=response
+                            bot_response=response,
                         )
                     except Exception as e:
                         logger.error(f"Profile learning failed: {e}")
@@ -2002,7 +2305,7 @@ Answer ONLY "yes" or "no"."""
                         await self.user_profiles.update_affection(
                             user_id=message.author.id,
                             message=user_content,
-                            bot_response=response
+                            bot_response=response,
                         )
                     except Exception as e:
                         logger.error(f"Affection update failed: {e}")
@@ -2013,29 +2316,44 @@ Answer ONLY "yes" or "no"."""
                 # 1. Message Count Trigger (existing)
                 if len(history) >= Config.AUTO_SUMMARIZE_THRESHOLD:
                     # Trigger background summarization
-                    self._create_background_task(self.summarizer.summarize_and_store(
-                        messages=history,
-                        channel_id=message.channel.id,
-                        participants=[message.author.name],
-                        store_in_rag=Config.STORE_SUMMARIES_IN_RAG
-                    ))
+                    self._create_background_task(
+                        self.summarizer.summarize_and_store(
+                            messages=history,
+                            channel_id=message.channel.id,
+                            participants=[message.author.name],
+                            store_in_rag=Config.STORE_SUMMARIES_IN_RAG,
+                        )
+                    )
                     # Optionally clear history after summary to start fresh context
                     # await self.history.clear_history(message.channel.id)
 
                 # 2. Topic Change / Conclusion Trigger (Smart)
                 # If the bot says goodbye or wraps up, it's a good time to summarize
-                elif any(phrase in response.lower() for phrase in ["talk to you later", "goodbye", "bye for now", "have a good night", "see you soon"]):
-                     self._create_background_task(self.summarizer.summarize_and_store(
-                        messages=history,
-                        channel_id=message.channel.id,
-                        participants=[message.author.name],
-                        store_in_rag=Config.STORE_SUMMARIES_IN_RAG
-                    ))
+                elif any(
+                    phrase in response.lower()
+                    for phrase in [
+                        "talk to you later",
+                        "goodbye",
+                        "bye for now",
+                        "have a good night",
+                        "see you soon",
+                    ]
+                ):
+                    self._create_background_task(
+                        self.summarizer.summarize_and_store(
+                            messages=history,
+                            channel_id=message.channel.id,
+                            participants=[message.author.name],
+                            store_in_rag=Config.STORE_SUMMARIES_IN_RAG,
+                        )
+                    )
 
             # Save to history
             if Config.CHAT_HISTORY_ENABLED:
                 await self.history.add_message(message.channel.id, "user", user_content)
-                await self.history.add_message(message.channel.id, "assistant", response)
+                await self.history.add_message(
+                    message.channel.id, "assistant", response
+                )
 
             # Start or refresh the conversation session
             if is_mentioned:
@@ -2046,7 +2364,7 @@ Answer ONLY "yes" or "no"."""
                 await self._refresh_session(message.channel.id)
 
             # Apply natural timing delay before responding
-            if hasattr(self.bot, 'naturalness') and self.bot.naturalness:
+            if hasattr(self.bot, "naturalness") and self.bot.naturalness:
                 delay = await self.bot.naturalness.get_natural_delay()
                 if delay > 0:
                     await asyncio.sleep(delay)
@@ -2065,7 +2383,9 @@ Answer ONLY "yes" or "no"."""
             # Track user interaction for learning & adaptation (runs in background)
             if self.pattern_learner:
                 self._create_background_task(
-                    self._track_user_interaction(message.author.id, user_content, response)
+                    self._track_user_interaction(
+                        message.author.id, user_content, response
+                    )
                 )
 
             # Check for curiosity opportunities (runs in background)
@@ -2079,12 +2399,14 @@ Answer ONLY "yes" or "no"."""
                 # Only generate TTS if actually in a voice channel
                 voice_client = message.guild.voice_client
                 if voice_client and voice_client.is_connected():
-                    if hasattr(self.bot, 'web_dashboard'):
-                        self.bot.web_dashboard.set_status("Speaking", "Generating TTS audio...")
+                    if hasattr(self.bot, "web_dashboard"):
+                        self.bot.web_dashboard.set_status(
+                            "Speaking", "Generating TTS audio..."
+                        )
                     await self._speak_response_in_voice(message.guild, response)
-                
+
             # Reset status to Idle after a short delay
-            if hasattr(self.bot, 'web_dashboard'):
+            if hasattr(self.bot, "web_dashboard"):
                 # We don't await this, just let it happen
                 self._create_background_task(self._reset_status_delayed())
 
@@ -2119,7 +2441,7 @@ Answer ONLY "yes" or "no"."""
             sentiment = self._analyze_sentiment(text)
             kokoro_speed = 1.0
             edge_rate = "+0%"
-            
+
             if sentiment == "positive":
                 kokoro_speed = 1.1
                 edge_rate = "+10%"
@@ -2130,21 +2452,19 @@ Answer ONLY "yes" or "no"."""
             # Generate TTS
             audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.mp3"
             await voice_cog.tts.generate(
-                text, 
-                audio_file,
-                speed=kokoro_speed,
-                rate=edge_rate
+                text, audio_file, speed=kokoro_speed, rate=edge_rate
             )
 
             # Apply RVC if enabled
             if voice_cog.rvc and voice_cog.rvc.is_enabled() and Config.RVC_ENABLED:
                 rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.mp3"
                 await voice_cog.rvc.convert(
-                    audio_file, rvc_file,
+                    audio_file,
+                    rvc_file,
                     model_name=Config.DEFAULT_RVC_MODEL,
                     pitch_shift=Config.RVC_PITCH_SHIFT,
                     index_rate=Config.RVC_INDEX_RATE,
-                    protect=Config.RVC_PROTECT
+                    protect=Config.RVC_PROTECT,
                 )
                 audio_file = rvc_file
 
@@ -2158,27 +2478,44 @@ Answer ONLY "yes" or "no"."""
             logger.info(f"File path: {audio_file}")
             logger.info(f"File size: {file_size} bytes")
             logger.info(f"File extension: {audio_file.suffix}")
-            logger.info(f"FFmpeg options: -vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo")
+            logger.info(
+                f"FFmpeg options: -vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo"
+            )
 
             # Probe audio file properties
             import subprocess
+
             try:
                 probe_result = subprocess.run(
-                    ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', str(audio_file)],
-                    capture_output=True, text=True, timeout=5
+                    [
+                        "ffprobe",
+                        "-v",
+                        "quiet",
+                        "-print_format",
+                        "json",
+                        "-show_format",
+                        "-show_streams",
+                        str(audio_file),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 if probe_result.returncode == 0:
                     import json
+
                     probe_data = json.loads(probe_result.stdout)
-                    if 'streams' in probe_data and len(probe_data['streams']) > 0:
-                        stream = probe_data['streams'][0]
-                        logger.info(f"Audio properties - Sample rate: {stream.get('sample_rate')}, Channels: {stream.get('channels')}, Format: {probe_data.get('format', {}).get('format_name')}")
+                    if "streams" in probe_data and len(probe_data["streams"]) > 0:
+                        stream = probe_data["streams"][0]
+                        logger.info(
+                            f"Audio properties - Sample rate: {stream.get('sample_rate')}, Channels: {stream.get('channels')}, Format: {probe_data.get('format', {}).get('format_name')}"
+                        )
             except Exception as probe_error:
                 logger.warning(f"Could not probe audio file: {probe_error}")
 
             audio_source = discord.FFmpegPCMAudio(
                 str(audio_file),
-                options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+                options="-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo",
             )
             voice_client.play(
                 audio_source,
@@ -2186,7 +2523,9 @@ Answer ONLY "yes" or "no"."""
                     self._cleanup_audio(audio_file, e), self.bot.loop
                 ),
             )
-            logger.info(f"Speaking AI response in voice channel: {voice_client.channel.name}")
+            logger.info(
+                f"Speaking AI response in voice channel: {voice_client.channel.name}"
+            )
 
         except Exception as e:
             logger.error(f"Failed to speak response in voice: {e}")
@@ -2211,7 +2550,7 @@ Answer ONLY "yes" or "no"."""
     async def _reset_status_delayed(self, delay: float = 5.0):
         """Reset dashboard status to Idle after a delay."""
         await asyncio.sleep(delay)
-        if hasattr(self.bot, 'web_dashboard'):
+        if hasattr(self.bot, "web_dashboard"):
             self.bot.web_dashboard.set_status("Idle")
 
     @commands.Cog.listener()
@@ -2225,12 +2564,10 @@ Answer ONLY "yes" or "no"."""
         if user.bot:
             return
 
-        if hasattr(self.bot, 'naturalness') and self.bot.naturalness:
+        if hasattr(self.bot, "naturalness") and self.bot.naturalness:
             response = await self.bot.naturalness.on_reaction_add(reaction, user)
             if response:
                 await reaction.message.channel.send(response)
-
-
 
 
 async def setup(bot: commands.Bot):

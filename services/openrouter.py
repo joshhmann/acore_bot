@@ -148,11 +148,20 @@ class OpenRouterService:
             else:
                 messages = [{"role": "system", "content": system_prompt}] + messages
 
+        # Model-specific temperature limits
+        actual_temp = temperature or self.temperature
+
+        # Amazon Nova models require temperature <= 1.0
+        if "amazon/nova" in self.model.lower() or "amazon-nova" in self.model.lower():
+            actual_temp = min(actual_temp, 1.0)
+            if actual_temp != (temperature or self.temperature):
+                logger.debug(f"Clamped temperature from {temperature or self.temperature} to {actual_temp} for Amazon Nova")
+
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": False,
-            "temperature": temperature or self.temperature,
+            "temperature": actual_temp,
             "max_tokens": max_tokens or self.max_tokens,
             "top_p": self.top_p,
             "repetition_penalty": self.repeat_penalty,
@@ -180,6 +189,26 @@ class OpenRouterService:
                 response_time = end_time - start_time
                 self.last_response_time = response_time
                 self.total_requests += 1
+
+                # Check for API errors first
+                if "error" in data:
+                    error_msg = data.get("error", {})
+                    if isinstance(error_msg, dict):
+                        error_text = error_msg.get("message", str(error_msg))
+                    else:
+                        error_text = str(error_msg)
+                    logger.error(f"OpenRouter API error: {error_text}")
+                    raise Exception(f"OpenRouter API error: {error_text}")
+
+                # Validate response structure
+                if "choices" not in data:
+                    logger.error(f"Unexpected OpenRouter response structure. Keys: {list(data.keys())}")
+                    logger.error(f"Response data: {json.dumps(data, indent=2)}")
+                    raise Exception(f"Invalid response from OpenRouter: missing 'choices' field. Response keys: {list(data.keys())}")
+
+                if not data["choices"] or len(data["choices"]) == 0:
+                    logger.error(f"OpenRouter returned empty choices array")
+                    raise Exception("OpenRouter returned no response choices")
 
                 # Get token usage from response
                 usage = data.get("usage", {})
@@ -257,11 +286,20 @@ class OpenRouterService:
             else:
                 messages = [{"role": "system", "content": system_prompt}] + messages
 
+        # Model-specific temperature limits
+        actual_temp = temperature or self.temperature
+
+        # Amazon Nova models require temperature <= 1.0
+        if "amazon/nova" in self.model.lower() or "amazon-nova" in self.model.lower():
+            actual_temp = min(actual_temp, 1.0)
+            if actual_temp != (temperature or self.temperature):
+                logger.debug(f"Clamped temperature from {temperature or self.temperature} to {actual_temp} for Amazon Nova (streaming)")
+
         payload = {
             "model": self.model,
             "messages": messages,
             "stream": True,
-            "temperature": temperature or self.temperature,
+            "temperature": actual_temp,
             "max_tokens": max_tokens or self.max_tokens,
             "top_p": self.top_p,
             "repetition_penalty": self.repeat_penalty,

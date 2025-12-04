@@ -250,6 +250,11 @@ class Config:
     LLM_CACHE_MAX_SIZE: int = int(os.getenv("LLM_CACHE_MAX_SIZE", "1000"))  # Maximum cached responses (LRU eviction)
     LLM_CACHE_TTL_SECONDS: int = int(os.getenv("LLM_CACHE_TTL_SECONDS", "3600"))  # Cache entry lifetime (1 hour default)
 
+    # LLM Model Fallback (LiteLLM-style)
+    LLM_FALLBACK_ENABLED: bool = os.getenv("LLM_FALLBACK_ENABLED", "false").lower() == "true"  # Enable model fallback chain
+    LLM_FALLBACK_MODELS: str = os.getenv("LLM_FALLBACK_MODELS", "")  # Comma-separated list: "model1:free,model2:paid"
+    # Example: "x-ai/grok-beta:free,anthropic/claude-3.5-sonnet:paid"
+
     @classmethod
     def validate(cls) -> bool:
         """Validate required configuration."""

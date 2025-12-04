@@ -148,6 +148,34 @@ class OllamaBot(commands.Bot):
             )
             logger.info(f"Using Ollama Provider with model: {Config.OLLAMA_MODEL}")
 
+        # Initialize LLM fallback system (LiteLLM-style)
+        self.llm_fallback = None
+        if Config.LLM_FALLBACK_ENABLED and Config.LLM_FALLBACK_MODELS:
+            from services.llm_fallback import LLMFallbackManager, ModelConfig
+
+            # Parse fallback models from config (format: "model1:tier,model2:tier,...")
+            fallback_models = []
+            for i, model_spec in enumerate(Config.LLM_FALLBACK_MODELS.split(',')):
+                parts = model_spec.strip().split(':')
+                model_name = parts[0].strip()
+                cost_tier = parts[1].strip() if len(parts) > 1 else "free"
+
+                # Model-specific constraints
+                max_temp = None
+                if "amazon/nova" in model_name.lower():
+                    max_temp = 1.0  # Amazon Nova requires temp <= 1.0
+
+                fallback_models.append(ModelConfig(
+                    name=model_name,
+                    provider=Config.LLM_PROVIDER,
+                    max_temp=max_temp,
+                    cost_tier=cost_tier,
+                    priority=i  # Order in config determines priority
+                ))
+
+            self.llm_fallback = LLMFallbackManager(fallback_models)
+            logger.info(f"LLM Fallback enabled with {len(fallback_models)} models (free tier only)")
+
         self.tts = TTSService(
             engine=Config.TTS_ENGINE,
             kokoro_voice=Config.KOKORO_VOICE,
@@ -433,6 +461,7 @@ class OllamaBot(commands.Bot):
                 callbacks_system=self.callbacks_system,
                 curiosity_system=self.curiosity_system,
                 pattern_learner=self.pattern_learner,
+                llm_fallback=self.llm_fallback,
             )
         )
         logger.info("Loaded ChatCog")
