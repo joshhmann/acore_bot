@@ -56,3 +56,5 @@ poetry.lock
 Thumbs.db
 sound_effects/oh_yeah_esU6L8c.mp3
 sound_effects/grenade-plonk-sound-effect-tarkov-louder.mp3
+test_*.mp3
+test_*.wav
