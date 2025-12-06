@@ -193,7 +193,7 @@ class VoiceCommandParser:
         # Try to match command patterns
         for cmd_type, patterns in self.patterns.items():
             for pattern in patterns:
-                match = re.search(pattern, text)
+                match = re.match(pattern, text)
                 if match:
                     # Extract argument if captured
                     argument = None

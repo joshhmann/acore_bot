@@ -352,12 +352,24 @@ class RVCHTTPClient(RVCInterface):
                                     # Check if file has content
                                     file_size = source_path.stat().st_size
                                     if file_size > 0:
-                                        # Copy the file (fix: ensure paths are strings)
-                                        await asyncio.to_thread(
-                                            shutil.copy2,
-                                            str(source_path),
-                                            str(output_path)
-                                        )
+                                        # If output is MP3 but source is WAV (likely), convert it
+                                        if output_path.suffix.lower() == '.mp3' and source_path.suffix.lower() != '.mp3':
+                                            import subprocess
+                                            logger.info(f"Converting RVC output to MP3: {output_path}")
+                                            await asyncio.to_thread(subprocess.run, [
+                                                'ffmpeg', '-i', str(source_path),
+                                                '-codec:a', 'libmp3lame',
+                                                '-b:a', '192k',
+                                                '-y',
+                                                str(output_path)
+                                            ], check=True, capture_output=True)
+                                        else:
+                                            # Just copy/move
+                                            await asyncio.to_thread(
+                                                shutil.copy2,
+                                                str(source_path),
+                                                str(output_path)
+                                            )
                                         logger.info(f"RVC conversion successful: {output_path} ({file_size} bytes)")
                                         return output_path
                                     else:

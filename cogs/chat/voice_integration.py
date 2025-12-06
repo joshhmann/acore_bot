@@ -71,7 +71,8 @@ class VoiceIntegration:
             # Apply RVC if enabled
             if voice_cog.rvc and voice_cog.rvc.is_enabled() and Config.RVC_ENABLED:
                 rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.mp3"
-                await voice_cog.rvc.convert(
+                # Use result path in case it changed extension (e.g. fallback to wav)
+                audio_file = await voice_cog.rvc.convert(
                     audio_file,
                     rvc_file,
                     model_name=Config.DEFAULT_RVC_MODEL,
@@ -79,7 +80,6 @@ class VoiceIntegration:
                     index_rate=Config.RVC_INDEX_RATE,
                     protect=Config.RVC_PROTECT,
                 )
-                audio_file = rvc_file
 
             # Play audio with explicit FFmpeg options for proper conversion
             # Log detailed audio file info
