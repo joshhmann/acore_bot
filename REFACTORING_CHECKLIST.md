@@ -36,11 +36,11 @@ This document tracks progress on the codebase refactoring effort. Check off item
 - [x] Test message handling
 - [x] Commit: "Extract message handling to message_handler.py"
 
-### Step 4: Extract Commands (~150 lines)
-- [ ] Create `cogs/chat/commands.py`
-- [ ] Move slash command methods (`/chat`, `/ambient`, etc.)
-- [ ] Import and bind in `main.py`
-- [ ] Test slash commands work
+### Step 4: Extract Commands (~150 lines) [COMPLETED]
+- [x] Create `cogs/chat/commands.py`
+- [x] Move command logic (`chat`, `reset`, etc.)
+- [x] Delegate in `main.py`
+- [x] Commit: "Extract commands to commands.py"rk
 - [ ] Commit: "Extract commands to commands.py"
 
 ### Step 5: Extract Event Listeners (~100 lines)

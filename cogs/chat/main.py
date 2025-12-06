@@ -41,6 +41,7 @@ from .voice_integration import VoiceIntegration
 from .response_handler import _handle_chat_response as _handle_chat_response_func
 from .context_builder import ContextBuilder
 from .message_handler import MessageHandler
+from .commands import ChatCommandHandler
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +127,7 @@ class ChatCog(commands.Cog):
         self.voice_integration = VoiceIntegration(bot, self.helpers.analyze_sentiment)
         self.context_builder = ContextBuilder(self)
         self.message_handler = MessageHandler(self)
+        self.command_handler = ChatCommandHandler(self)
 
         # Load persona configurations
         self.persona_loader = PersonaLoader()
@@ -1199,18 +1201,8 @@ class ChatCog(commands.Cog):
     @app_commands.describe(message="Your message to the AI")
     @app_commands.checks.cooldown(1, 3.0)  # 1 use per 3 seconds per user
     async def chat(self, interaction: discord.Interaction, message: str):
-        """Chat with Ollama AI.
-
-        Args:
-            interaction: Discord interaction
-            message: User's message
-        """
-        await self._handle_chat_response(
-            message_content=message,
-            channel=interaction.channel,
-            user=interaction.user,
-            interaction=interaction,
-        )
+        """Chat with Ollama AI."""
+        await self.command_handler.chat(interaction, message)
 
     @app_commands.command(
         name="ambient", description="Toggle or check ambient mode status"
@@ -1224,102 +1216,15 @@ class ChatCog(commands.Cog):
         ]
     )
     async def ambient(self, interaction: discord.Interaction, action: str = "status"):
-        """Control ambient mode.
-
-        Args:
-            interaction: Discord interaction
-            action: Action to perform (status/enable/disable)
-        """
-        try:
-            ambient = getattr(self.bot, "ambient_mode", None)
-
-            if not ambient:
-                await interaction.response.send_message(
-                    "❌ Ambient mode is not configured.", ephemeral=True
-                )
-                return
-
-            if action == "status":
-                stats = ambient.get_stats()
-                embed = discord.Embed(
-                    title="🌙 Ambient Mode Status", color=discord.Color.purple()
-                )
-                embed.add_field(
-                    name="Status",
-                    value="🟢 Running" if stats["running"] else "🔴 Stopped",
-                    inline=True,
-                )
-                embed.add_field(
-                    name="Active Channels",
-                    value=str(stats["active_channels"]),
-                    inline=True,
-                )
-                embed.add_field(
-                    name="Trigger Chance",
-                    value=f"{int(stats['chance'] * 100)}%",
-                    inline=True,
-                )
-                embed.add_field(
-                    name="Lull Timeout", value=f"{stats['lull_timeout']}s", inline=True
-                )
-                embed.add_field(
-                    name="Min Interval", value=f"{stats['min_interval']}s", inline=True
-                )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
-
-            elif action == "enable":
-                if ambient.running:
-                    await interaction.response.send_message(
-                        "✅ Ambient mode is already running.", ephemeral=True
-                    )
-                else:
-                    await ambient.start()
-                    await interaction.response.send_message(
-                        "✅ Ambient mode enabled!", ephemeral=True
-                    )
-
-            elif action == "disable":
-                if not ambient.running:
-                    await interaction.response.send_message(
-                        "❌ Ambient mode is already stopped.", ephemeral=True
-                    )
-                else:
-                    await ambient.stop()
-                    await interaction.response.send_message(
-                        "✅ Ambient mode disabled.", ephemeral=True
-                    )
-
-        except Exception as e:
-            logger.error(f"Ambient command failed: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
+        """Control ambient mode."""
+        await self.command_handler.ambient(interaction, action)
 
     @app_commands.command(
         name="end_session", description="End the current conversation session"
     )
     async def end_session(self, interaction: discord.Interaction):
-        """End the active conversation session in this channel.
-
-        Args:
-            interaction: Discord interaction
-        """
-        try:
-            channel_id = interaction.channel_id
-            if await self.session_manager.is_session_active(channel_id):
-                await self.session_manager.end_session(channel_id)
-                timeout_minutes = Config.CONVERSATION_TIMEOUT // 60
-                await interaction.response.send_message(
-                    format_success(
-                        f"Conversation session ended. Use @mention or `/chat` to start a new session."
-                    ),
-                    ephemeral=True,
-                )
-            else:
-                await interaction.response.send_message(
-                    "No active conversation session in this channel.", ephemeral=True
-                )
-        except Exception as e:
-            logger.error(f"End session failed: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
+        """End the active conversation session in this channel."""
+        await self.command_handler.end_session(interaction)
 
     async def _disabled_on_message(self, message: discord.Message):
         """Listen for messages to enable auto-reply with text and TTS.
