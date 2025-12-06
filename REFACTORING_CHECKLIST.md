@@ -29,12 +29,12 @@ This document tracks progress on the codebase refactoring effort. Check off item
 - [x] Test imports and bot functionality
 - [x] Commit: "Extract context building to context_builder.py"
 
-### Step 3: Extract Message Handler (~300 lines)
-- [ ] Create `cogs/chat/message_handler.py`
-- [ ] Copy `check_and_handle_message` and routing logic
-- [ ] Import and bind in `main.py`
-- [ ] Test imports and bot functionality
-- [ ] Commit: "Extract message handler to message_handler.py"
+### Step 3: Extract Message Handler (~300 lines) [COMPLETED]
+- [x] Create `cogs/chat/message_handler.py`
+- [x] Extract `check_and_handle_message` and related methods
+- [x] Update `main.py` imports and delegation
+- [x] Test message handling
+- [x] Commit: "Extract message handling to message_handler.py"
 
 ### Step 4: Extract Commands (~150 lines)
 - [ ] Create `cogs/chat/commands.py`
