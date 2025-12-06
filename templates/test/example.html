@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{ title }}</title>
+</head>
+<body>
+    <h1>{{ heading }}</h1>
+    <p>Status: <strong>{{ status }}</strong></p>
+    <p>Uptime: {{ uptime | format_uptime }}</p>
+    
+    {% if items %}
+    <ul>
+    {% for item in items %}
+        <li>{{ item }}</li>
+    {% endfor %}
+    </ul>
+    {% else %}
+    <p>No items</p>
+    {% endif %}
+</body>
+</html>

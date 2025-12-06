@@ -8,11 +8,12 @@ from typing import Optional
 import json
 import time
 from config import Config
+from services.interfaces import RVCInterface
 
 logger = logging.getLogger(__name__)
 
 
-class RVCHTTPClient:
+class RVCHTTPClient(RVCInterface):
     """Simple HTTP client for RVC-WebUI API."""
 
     def __init__(self, base_url: str = "http://localhost:7865", default_model: str = "default"):
@@ -384,10 +385,33 @@ class RVCHTTPClient:
 
         raise Exception(f"RVC conversion failed - HTTP {response_status}")
 
-    def is_available(self) -> bool:
-        """Check if client is configured.
+    async def is_enabled(self) -> bool:
+        """Check if RVC service is enabled and available.
 
         Returns:
             True if available
         """
         return bool(self.base_url)
+
+    def get_default_model(self) -> Optional[str]:
+        """Get the default model name.
+
+        Returns:
+            Default model name
+        """
+        return self.default_model
+
+    async def initialize(self):
+        """Initialize the service (ensure session is ready).
+
+        Note:
+            Session is created lazily by _ensure_session().
+        """
+        await self._ensure_session()
+
+    async def cleanup(self):
+        """Clean up resources.
+
+        Alias for close() to match interface.
+        """
+        await self.close()

@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 from utils.helpers import clean_text_for_tts
+from services.interfaces import TTSInterface
 
 try:
     from services.kokoro_tts import KokoroTTSService
@@ -25,7 +26,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-class TTSService:
+class TTSService(TTSInterface):
     """Service for text-to-speech generation using Kokoro TTS or Supertonic TTS."""
 
     def __init__(
@@ -268,3 +269,25 @@ class TTSService:
                 "engine": self.engine,
                 "error": "Unknown TTS engine",
             }
+
+    async def is_available(self) -> bool:
+        """Check if TTS service is available.
+
+        Returns:
+            True if at least one TTS engine is configured
+        """
+        if self.engine == "kokoro_api":
+            return KOKORO_API_AVAILABLE and self.kokoro_api is not None
+        elif self.engine == "kokoro":
+            return KOKORO_AVAILABLE and self.kokoro is not None
+        elif self.engine == "supertonic":
+            return SUPERTONIC_AVAILABLE and self.supertonic is not None
+        return False
+
+    async def cleanup(self):
+        """Clean up resources.
+
+        Note:
+            Current TTS engines don't require explicit cleanup.
+        """
+        pass

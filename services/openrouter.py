@@ -1,4 +1,5 @@
 """OpenRouter LLM client service."""
+
 import aiohttp
 import asyncio
 import logging
@@ -8,11 +9,12 @@ from typing import List, Dict, Optional, AsyncGenerator
 
 from config import Config
 from services.llm_cache import LLMCache
+from services.interfaces import LLMInterface
 
 logger = logging.getLogger(__name__)
 
 
-class OpenRouterService:
+class OpenRouterService(LLMInterface):
     """Service for interacting with OpenRouter API."""
 
     def __init__(
@@ -63,18 +65,19 @@ class OpenRouterService:
         self.stream_timeout = stream_timeout
         self.session: Optional[aiohttp.ClientSession] = None
 
-        # Performance metrics tracking
+        # Performance metrics tracking (with reset mechanism)
         self.last_response_time = 0.0  # seconds
         self.last_tps = 0.0  # tokens per second
         self.total_requests = 0
         self.total_tokens_generated = 0
         self.average_response_time = 0.0
+        self._metrics_start_time = time.time()
 
         # Initialize LLM response cache
         self.cache = LLMCache(
             max_size=Config.LLM_CACHE_MAX_SIZE,
             ttl_seconds=Config.LLM_CACHE_TTL_SECONDS,
-            enabled=Config.LLM_CACHE_ENABLED
+            enabled=Config.LLM_CACHE_ENABLED,
         )
 
     async def initialize(self):
@@ -99,10 +102,9 @@ class OpenRouterService:
         """Clean messages to only include 'role' and 'content' fields."""
         cleaned = []
         for msg in messages:
-            cleaned.append({
-                "role": msg.get("role", "user"),
-                "content": msg.get("content", "")
-            })
+            cleaned.append(
+                {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+            )
         return cleaned
 
     async def chat(
@@ -134,10 +136,12 @@ class OpenRouterService:
             model=self.model,
             temperature=temp,
             system_prompt=system_prompt,
-            max_tokens=max_tok
+            max_tokens=max_tok,
         )
         if cached_response:
-            logger.debug(f"Returning cached response for OpenRouter chat (model: {self.model})")
+            logger.debug(
+                f"Returning cached response for OpenRouter chat (model: {self.model})"
+            )
             return cached_response
 
         # Prepend system message if provided
@@ -155,7 +159,9 @@ class OpenRouterService:
         if "amazon/nova" in self.model.lower() or "amazon-nova" in self.model.lower():
             actual_temp = min(actual_temp, 1.0)
             if actual_temp != (temperature or self.temperature):
-                logger.debug(f"Clamped temperature from {temperature or self.temperature} to {actual_temp} for Amazon Nova")
+                logger.debug(
+                    f"Clamped temperature from {temperature or self.temperature} to {actual_temp} for Amazon Nova"
+                )
 
         payload = {
             "model": self.model,
@@ -177,10 +183,14 @@ class OpenRouterService:
 
         try:
             url = f"{self.base_url}/chat/completions"
-            async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
+            async with self.session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    raise Exception(f"OpenRouter API error ({resp.status}): {error_text}")
+                    raise Exception(
+                        f"OpenRouter API error ({resp.status}): {error_text}"
+                    )
 
                 data = await resp.json()
 
@@ -202,9 +212,13 @@ class OpenRouterService:
 
                 # Validate response structure
                 if "choices" not in data:
-                    logger.error(f"Unexpected OpenRouter response structure. Keys: {list(data.keys())}")
+                    logger.error(
+                        f"Unexpected OpenRouter response structure. Keys: {list(data.keys())}"
+                    )
                     logger.error(f"Response data: {json.dumps(data, indent=2)}")
-                    raise Exception(f"Invalid response from OpenRouter: missing 'choices' field. Response keys: {list(data.keys())}")
+                    raise Exception(
+                        f"Invalid response from OpenRouter: missing 'choices' field. Response keys: {list(data.keys())}"
+                    )
 
                 if not data["choices"] or len(data["choices"]) == 0:
                     logger.error(f"OpenRouter returned empty choices array")
@@ -225,7 +239,9 @@ class OpenRouterService:
                 # Update average response time
                 if self.total_requests > 0:
                     old_avg = self.average_response_time
-                    self.average_response_time = (old_avg * (self.total_requests - 1) + response_time) / self.total_requests
+                    self.average_response_time = (
+                        old_avg * (self.total_requests - 1) + response_time
+                    ) / self.total_requests
 
                 # Log metrics
                 logger.info(
@@ -244,7 +260,7 @@ class OpenRouterService:
                     temperature=temp,
                     response=response,
                     system_prompt=system_prompt,
-                    max_tokens=max_tok
+                    max_tokens=max_tok,
                 )
 
                 return response
@@ -252,7 +268,9 @@ class OpenRouterService:
         except asyncio.TimeoutError:
             elapsed = time.time() - start_time
             logger.error(f"OpenRouter request timed out after {elapsed:.1f}s")
-            raise Exception("OpenRouter request timed out - the API took too long to respond. Try again or use a faster model.")
+            raise Exception(
+                "OpenRouter request timed out - the API took too long to respond. Try again or use a faster model."
+            )
         except aiohttp.ClientError as e:
             logger.error(f"OpenRouter request failed: {e}")
             raise Exception(f"Failed to connect to OpenRouter: {e}")
@@ -293,7 +311,9 @@ class OpenRouterService:
         if "amazon/nova" in self.model.lower() or "amazon-nova" in self.model.lower():
             actual_temp = min(actual_temp, 1.0)
             if actual_temp != (temperature or self.temperature):
-                logger.debug(f"Clamped temperature from {temperature or self.temperature} to {actual_temp} for Amazon Nova (streaming)")
+                logger.debug(
+                    f"Clamped temperature from {temperature or self.temperature} to {actual_temp} for Amazon Nova (streaming)"
+                )
 
         payload = {
             "model": self.model,
@@ -319,16 +339,14 @@ class OpenRouterService:
             # Use sock_read timeout for streaming to allow long responses
             # total=None prevents timeout of the entire stream duration
             timeout = aiohttp.ClientTimeout(
-                total=None, 
-                sock_read=self.stream_timeout, 
-                connect=self.timeout
+                total=None, sock_read=self.stream_timeout, connect=self.timeout
             )
-            async with self.session.post(
-                url, json=payload, timeout=timeout
-            ) as resp:
+            async with self.session.post(url, json=payload, timeout=timeout) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    raise Exception(f"OpenRouter API error ({resp.status}): {error_text}")
+                    raise Exception(
+                        f"OpenRouter API error ({resp.status}): {error_text}"
+                    )
 
                 async for line in resp.content:
                     line = line.strip()
@@ -372,7 +390,9 @@ class OpenRouterService:
                 # Update average
                 if self.total_requests > 0:
                     old_avg = self.average_response_time
-                    self.average_response_time = (old_avg * (self.total_requests - 1) + total_time) / self.total_requests
+                    self.average_response_time = (
+                        old_avg * (self.total_requests - 1) + total_time
+                    ) / self.total_requests
 
                 # Log metrics
                 logger.info(
@@ -383,8 +403,12 @@ class OpenRouterService:
                 )
 
         except asyncio.TimeoutError:
-            logger.error(f"OpenRouter streaming timeout after {time.time() - start_time:.1f}s")
-            raise Exception("OpenRouter request timed out - try reducing message length or switching models")
+            logger.error(
+                f"OpenRouter streaming timeout after {time.time() - start_time:.1f}s"
+            )
+            raise Exception(
+                "OpenRouter request timed out - try reducing message length or switching models"
+            )
         except aiohttp.ClientError as e:
             logger.error(f"OpenRouter streaming request failed: {e}")
             raise Exception(f"Failed to connect to OpenRouter: {e}")
@@ -409,14 +433,14 @@ class OpenRouterService:
 
         # Format content for vision
         content = [{"type": "text", "text": prompt}]
-        
+
         for img_b64 in images:
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{img_b64}"
+            content.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"},
                 }
-            })
+            )
 
         messages = [{"role": "user", "content": content}]
 
@@ -441,10 +465,14 @@ class OpenRouterService:
 
         try:
             url = f"{self.base_url}/chat/completions"
-            async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=self.timeout)) as resp:
+            async with self.session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
-                    raise Exception(f"OpenRouter Vision API error ({resp.status}): {error_text}")
+                    raise Exception(
+                        f"OpenRouter Vision API error ({resp.status}): {error_text}"
+                    )
 
                 data = await resp.json()
                 return data["choices"][0]["message"]["content"]
@@ -461,7 +489,9 @@ class OpenRouterService:
         try:
             # OpenRouter has a models endpoint
             url = "https://openrouter.ai/api/v1/models"
-            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self.session.get(
+                url, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 return resp.status == 200
         except Exception as e:
             logger.warning(f"OpenRouter health check failed: {e}")
@@ -474,7 +504,9 @@ class OpenRouterService:
 
         try:
             url = "https://openrouter.ai/api/v1/models"
-            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self.session.get(
+                url, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return [model["id"] for model in data.get("data", [])]
@@ -517,3 +549,41 @@ class OpenRouterService:
         """Clear the LLM response cache."""
         self.cache.clear()
         logger.info("OpenRouter LLM cache cleared")
+
+    def reset_metrics(self):
+        """Reset performance metrics to prevent unbounded growth."""
+        self.last_response_time = 0.0
+        self.last_tps = 0.0
+        self.total_requests = 0
+        self.total_tokens_generated = 0
+        self.average_response_time = 0.0
+        self._metrics_start_time = time.time()
+        logger.info("OpenRouter performance metrics reset")
+
+    async def is_available(self) -> bool:
+        """Check if OpenRouter service is available.
+
+        Returns:
+            True if service is operational
+        """
+        try:
+            if not self.session:
+                await self.initialize()
+
+            async with self.session.get(
+                f"{self.base_url}/models",
+                headers=self.headers,
+                timeout=aiohttp.ClientTimeout(total=5),
+            ) as resp:
+                return resp.status == 200
+        except Exception as e:
+            logger.error(f"OpenRouter availability check failed: {e}")
+            return False
+
+    def get_model_name(self) -> str:
+        """Get the current model name.
+
+        Returns:
+            Model name
+        """
+        return self.model

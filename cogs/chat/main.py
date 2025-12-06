@@ -34,6 +34,11 @@ from utils.persona_loader import PersonaLoader
 from utils.system_context import SystemContextProvider
 from utils.response_validator import ResponseValidator
 
+# Import modularized components
+from .helpers import ChatHelpers
+from .session_manager import SessionManager
+from .voice_integration import VoiceIntegration
+
 logger = logging.getLogger(__name__)
 
 
@@ -112,6 +117,11 @@ class ChatCog(commands.Cog):
             logger.warning(f"Could not load conversational callbacks: {e}")
             self.callbacks = None
 
+        # Initialize modularized components (must be before _load_system_prompt)
+        self.helpers = ChatHelpers()
+        self.session_manager = SessionManager()
+        self.voice_integration = VoiceIntegration(bot, self.helpers.analyze_sentiment)
+
         # Load persona configurations
         self.persona_loader = PersonaLoader()
 
@@ -127,18 +137,6 @@ class ChatCog(commands.Cog):
             if default_persona:
                 self.current_persona = default_persona
                 logger.info(f"Loaded default persona: {default_persona.display_name}")
-
-        # Track active conversation sessions per channel
-        # Format: {channel_id: {"user_id": user_id, "last_activity": timestamp}}
-        self.active_sessions: Dict[int, Dict] = {}
-        self.active_sessions_lock = (
-            asyncio.Lock()
-        )  # Protect active_sessions from race conditions
-
-        # Track last response time per channel (for conversation context)
-        # Limit size to prevent memory leak
-        self._last_response_time: Dict[int, datetime] = {}
-        self._max_response_time_entries = 50  # Keep only last 50 channels
 
         # Track background tasks for proper cleanup
         self._background_tasks: set = set()
@@ -198,19 +196,6 @@ class ChatCog(commands.Cog):
                 max_tokens=max_tokens,
             )
 
-    def _cleanup_response_time_tracker(self):
-        """Clean up old entries from response time tracker to prevent memory leak."""
-        if len(self._last_response_time) > self._max_response_time_entries:
-            # Sort by timestamp (oldest first) and remove oldest entries
-            sorted_items = sorted(self._last_response_time.items(), key=lambda x: x[1])
-            # Keep only the most recent entries
-            entries_to_remove = (
-                len(self._last_response_time) - self._max_response_time_entries
-            )
-            for channel_id, _ in sorted_items[:entries_to_remove]:
-                del self._last_response_time[channel_id]
-            logger.debug(f"Cleaned up {entries_to_remove} old response time entries")
-
     def _create_background_task(self, coro):
         """Create a background task and track it for cleanup.
 
@@ -238,152 +223,6 @@ class ChatCog(commands.Cog):
             await asyncio.gather(*self._background_tasks, return_exceptions=True)
             logger.info("ChatCog background tasks cancelled")
 
-    def _replace_mentions_with_names(
-        self, content: str, message: discord.Message
-    ) -> str:
-        """Replace user mention IDs with readable usernames.
-
-        Args:
-            content: Message content with <@user_id> mentions
-            message: Discord message object with mentions list
-
-        Returns:
-            Content with mentions replaced as @username
-        """
-        if not message or not message.mentions:
-            return content
-
-        # Replace each user mention with their display name
-        for user in message.mentions:
-            # Skip bot mentions (already handled separately)
-            if user.id == self.bot.user.id:
-                continue
-
-            # Replace <@user_id> with @username
-            mention_pattern = f"<@{user.id}>"
-            # Use display_name for server nicknames, fallback to name
-            display_name = (
-                user.display_name if hasattr(user, "display_name") else user.name
-            )
-            content = content.replace(mention_pattern, f"@{display_name}")
-
-            # Also handle <!@user_id> format (mobile mentions)
-            mention_pattern_mobile = f"<@!{user.id}>"
-            content = content.replace(mention_pattern_mobile, f"@{display_name}")
-
-        return content
-
-    def _restore_mentions(self, content: str, guild: discord.Guild) -> str:
-        """Convert @Username mentions back to <@user_id> for Discord.
-
-        This ensures that when the LLM outputs @Username, it gets converted to
-        a proper Discord mention tag that is clickable.
-
-        Args:
-            content: Message content with @Username mentions
-            guild: Discord guild to get member list from
-
-        Returns:
-            Content with @Username replaced by <@user_id>
-        """
-        if not guild or not content:
-            return content
-
-        # Get all members and sort by name length (descending) to prevent partial matches
-        # e.g., "Rob" inside "Robert"
-        members = sorted(guild.members, key=lambda m: len(m.display_name), reverse=True)
-
-        for member in members:
-            # Skip bots
-            if member.bot:
-                continue
-
-            # Try display name first (server nickname)
-            display_name = member.display_name
-            content = content.replace(f"@{display_name}", f"<@{member.id}>")
-
-            # Also try global username if different from display name
-            if member.name != display_name:
-                content = content.replace(f"@{member.name}", f"<@{member.id}>")
-
-        return content
-
-    def _clean_for_tts(self, content: str, guild: discord.Guild) -> str:
-        """Clean content for TTS by replacing mentions with natural names.
-
-        This ensures that TTS pronounces "Username" instead of reading out
-        "less than at one two three four five..."
-
-        Args:
-            content: Message content with <@user_id> or @Username mentions
-            guild: Discord guild to get member list from
-
-        Returns:
-            Content with mentions replaced by natural names
-        """
-        if not guild or not content:
-            return content
-
-        # First, replace <@user_id> with display names
-        for member in guild.members:
-            # Skip bots
-            if member.bot:
-                continue
-
-            # Replace <@ID> with display name
-            mention_pattern = f"<@{member.id}>"
-            content = content.replace(mention_pattern, member.display_name)
-
-            # Also handle <@!ID> format (mobile mentions)
-            mention_pattern_mobile = f"<@!{member.id}>"
-            content = content.replace(mention_pattern_mobile, member.display_name)
-
-        # Second, remove @ symbols from any remaining @Username patterns
-        # This handles cases where LLM outputs @Username
-        content = re.sub(r"@([A-Za-z0-9_]+)", r"\1", content)
-
-        return content
-
-    def _analyze_sentiment(self, text: str) -> str:
-        """Simple sentiment analysis heuristic."""
-        text = text.lower()
-        positive_words = [
-            "!",
-            "awesome",
-            "great",
-            "love",
-            "amazing",
-            "excited",
-            "happy",
-            "yay",
-            "wow",
-            "excellent",
-            "good",
-            "haha",
-        ]
-        negative_words = [
-            "sorry",
-            "sad",
-            "unfortunate",
-            "regret",
-            "bad",
-            "terrible",
-            "awful",
-            "depressed",
-            "grief",
-            "miss",
-            "pain",
-        ]
-
-        pos_score = sum(1 for w in positive_words if w in text)
-        neg_score = sum(1 for w in negative_words if w in text)
-
-        if pos_score > neg_score:
-            return "positive"
-        elif neg_score > pos_score:
-            return "negative"
-        return "neutral"
-
     def _load_system_prompt(self) -> str:
         """Load system prompt from file or environment variable.
 
@@ -406,25 +245,12 @@ class ChatCog(commands.Cog):
 
         # Try to load from file (legacy mode)
         prompt_file = Path(Config.SYSTEM_PROMPT_FILE)
-        if prompt_file.exists():
-            try:
-                with open(prompt_file, "r", encoding="utf-8") as f:
-                    prompt = f.read().strip()
-                    logger.info(
-                        f"Loaded system prompt from {prompt_file} (legacy mode)"
-                    )
-                    return prompt
-            except Exception as e:
-                logger.error(f"Failed to load prompt from {prompt_file}: {e}")
-
-        # Fallback to default
         default_prompt = (
             "You are a helpful AI assistant in a Discord server. "
             "Keep your responses concise and friendly. "
             "You can use Discord markdown for formatting."
         )
-        logger.warning(f"Using default system prompt (file not found: {prompt_file})")
-        return default_prompt
+        return self.helpers.load_system_prompt(prompt_file, default_prompt)
 
     async def _track_interesting_topic(
         self, message: discord.Message, bot_response: str, conversation_history: list
@@ -589,70 +415,6 @@ JSON only:"""
 
         except Exception as e:
             logger.warning(f"Failed to track user interaction: {e}")
-
-    async def _start_session(self, channel_id: int, user_id: int):
-        """Start or refresh a conversation session.
-
-        Args:
-            channel_id: Discord channel ID
-            user_id: User ID who initiated the session
-        """
-        async with self.active_sessions_lock:
-            self.active_sessions[channel_id] = {
-                "user_id": user_id,
-                "last_activity": time.time(),
-            }
-        logger.info(
-            f"Started conversation session in channel {channel_id} for user {user_id}"
-        )
-
-    async def _refresh_session(self, channel_id: int):
-        """Refresh the timeout for an active session.
-
-        Args:
-            channel_id: Discord channel ID
-        """
-        async with self.active_sessions_lock:
-            if channel_id in self.active_sessions:
-                self.active_sessions[channel_id]["last_activity"] = time.time()
-                logger.debug(f"Refreshed session in channel {channel_id}")
-
-    async def _is_session_active(self, channel_id: int) -> bool:
-        """Check if a conversation session is still active.
-
-        Args:
-            channel_id: Discord channel ID
-
-        Returns:
-            True if session is active and hasn't timed out
-        """
-        async with self.active_sessions_lock:
-            if channel_id not in self.active_sessions:
-                return False
-
-            session = self.active_sessions[channel_id]
-            elapsed = time.time() - session["last_activity"]
-
-            if elapsed > Config.CONVERSATION_TIMEOUT:
-                # Session timed out
-                logger.info(
-                    f"Session timed out in channel {channel_id} after {elapsed:.0f}s"
-                )
-                del self.active_sessions[channel_id]
-                return False
-
-            return True
-
-    async def _end_session(self, channel_id: int):
-        """Manually end a conversation session.
-
-        Args:
-            channel_id: Discord channel ID
-        """
-        async with self.active_sessions_lock:
-            if channel_id in self.active_sessions:
-                del self.active_sessions[channel_id]
-                logger.info(f"Ended session in channel {channel_id}")
 
     async def _safe_learn_from_conversation(
         self, user_id: int, username: str, user_message: str, bot_response: str
@@ -865,7 +627,7 @@ JSON only:"""
             channel_id = message.channel.id
 
             # Check if we have recent activity in this channel
-            last_time = self._last_response_time.get(channel_id)
+            last_time = self.session_manager.get_last_response_time(channel_id)
             if last_time:
                 time_since = datetime.now() - last_time
                 # Respond to follow-ups within 5 minutes
@@ -930,9 +692,7 @@ Answer ONLY "yes" or "no"."""
 
         if should_respond:
             # Track that we're responding in this channel
-            self._last_response_time[message.channel.id] = datetime.now()
-            # Clean up old entries to prevent memory leak
-            self._cleanup_response_time_tracker()
+            self.session_manager.update_response_time(message.channel.id)
 
             # Log response decision
             logger.info(
@@ -1023,8 +783,8 @@ Answer ONLY "yes" or "no"."""
 
         # Replace user mentions with readable names for LLM
         if original_message:
-            message_content = self._replace_mentions_with_names(
-                message_content, original_message
+            message_content = self.helpers.replace_mentions_with_names(
+                message_content, original_message, self.bot.user.id
             )
 
         # Check for multi-turn conversation steps (only for actual messages)
@@ -1565,7 +1325,7 @@ Answer ONLY "yes" or "no"."""
                             )
 
                             # Analyze sentiment for voice modulation
-                            sentiment = self._analyze_sentiment(message_content)
+                            sentiment = self.helpers.analyze_sentiment(message_content)
                             kokoro_speed = 1.0
                             edge_rate = "+0%"
 
@@ -1604,7 +1364,9 @@ Answer ONLY "yes" or "no"."""
                                         if interaction:
                                             # Apply mention conversion for Discord display
                                             display_text = (
-                                                self._restore_mentions(response, guild)
+                                                self.helpers.restore_mentions(
+                                                    response, guild
+                                                )
                                                 if guild
                                                 else response
                                             )
@@ -1653,7 +1415,9 @@ Answer ONLY "yes" or "no"."""
                                     if interaction:
                                         # Apply mention conversion for Discord display
                                         display_text = (
-                                            self._restore_mentions(response, guild)
+                                            self.helpers.restore_mentions(
+                                                response, guild
+                                            )
                                             if guild
                                             else response
                                         )
@@ -1690,7 +1454,7 @@ Answer ONLY "yes" or "no"."""
                                 if interaction:
                                     # Apply mention conversion for Discord display
                                     display_text = (
-                                        self._restore_mentions(response, guild)
+                                        self.helpers.restore_mentions(response, guild)
                                         if guild
                                         else response
                                     )
@@ -1716,7 +1480,7 @@ Answer ONLY "yes" or "no"."""
                     if interaction and response_message:
                         # Apply mention conversion for final Discord display
                         display_text = (
-                            self._restore_mentions(response, guild)
+                            self.helpers.restore_mentions(response, guild)
                             if guild
                             else response
                         )
@@ -1727,7 +1491,7 @@ Answer ONLY "yes" or "no"."""
                     elif interaction:
                         # Apply mention conversion for final Discord display
                         display_text = (
-                            self._restore_mentions(response, guild)
+                            self.helpers.restore_mentions(response, guild)
                             if guild
                             else response
                         )
@@ -1763,8 +1527,8 @@ Answer ONLY "yes" or "no"."""
             # TTS version: Convert <@user_id> to Username for natural pronunciation
             guild = channel.guild if hasattr(channel, "guild") else None
             if guild:
-                discord_response = self._restore_mentions(response, guild)
-                tts_response = self._clean_for_tts(response, guild)
+                discord_response = self.helpers.restore_mentions(response, guild)
+                tts_response = self.helpers.clean_for_tts(response, guild)
             else:
                 # No guild context (DMs), use original response
                 discord_response = response
@@ -1773,7 +1537,7 @@ Answer ONLY "yes" or "no"."""
             # Update mood based on interaction
             if self.naturalness and Config.MOOD_UPDATE_FROM_INTERACTIONS:
                 # Analyze sentiment
-                sentiment = self._analyze_sentiment(message_content)
+                sentiment = self.helpers.analyze_sentiment(message_content)
                 # Check if conversation is interesting (has questions, details, etc.)
                 is_interesting = (
                     len(message_content.split()) > 10
@@ -1828,7 +1592,7 @@ Answer ONLY "yes" or "no"."""
                 )
 
             # Start a conversation session
-            await self._start_session(channel_id, user.id)
+            await self.session_manager.start_session(channel_id, user.id)
 
             # Send response (handle long messages) - only if not streaming
             if not Config.RESPONSE_STREAMING_ENABLED:
@@ -1869,7 +1633,9 @@ Answer ONLY "yes" or "no"."""
                 voice_client = channel.guild.voice_client if channel.guild else None
                 if voice_client and voice_client.is_connected():
                     # Use tts_response for natural pronunciation (without mention tags)
-                    await self._speak_response_in_voice(channel.guild, tts_response)
+                    await self.voice_integration.speak_response_in_voice(
+                        channel.guild, tts_response
+                    )
 
             # Record metrics for successful response
             if hasattr(self.bot, "metrics"):
@@ -1999,8 +1765,8 @@ Answer ONLY "yes" or "no"."""
         """
         try:
             channel_id = interaction.channel_id
-            if await self._is_session_active(channel_id):
-                await self._end_session(channel_id)
+            if await self.session_manager.is_session_active(channel_id):
+                await self.session_manager.end_session(channel_id)
                 timeout_minutes = Config.CONVERSATION_TIMEOUT // 60
                 await interaction.response.send_message(
                     format_success(
@@ -2047,7 +1813,9 @@ Answer ONLY "yes" or "no"."""
             return
 
         # Check if there's an active session OR bot is mentioned
-        is_session_active = await self._is_session_active(message.channel.id)
+        is_session_active = await self.session_manager.is_session_active(
+            message.channel.id
+        )
         is_mentioned = self.bot.user in message.mentions
 
         # Only respond if mentioned OR session is active
@@ -2358,10 +2126,12 @@ Answer ONLY "yes" or "no"."""
             # Start or refresh the conversation session
             if is_mentioned:
                 # Mentioned - start new session
-                await self._start_session(message.channel.id, message.author.id)
+                await self.session_manager.start_session(
+                    message.channel.id, message.author.id
+                )
             else:
                 # Session active - just refresh
-                await self._refresh_session(message.channel.id)
+                await self.session_manager.refresh_session(message.channel.id)
 
             # Apply natural timing delay before responding
             if hasattr(self.bot, "naturalness") and self.bot.naturalness:
@@ -2403,7 +2173,9 @@ Answer ONLY "yes" or "no"."""
                         self.bot.web_dashboard.set_status(
                             "Speaking", "Generating TTS audio..."
                         )
-                    await self._speak_response_in_voice(message.guild, response)
+                    await self.voice_integration.speak_response_in_voice(
+                        message.guild, response
+                    )
 
             # Reset status to Idle after a short delay
             if hasattr(self.bot, "web_dashboard"):
@@ -2413,139 +2185,6 @@ Answer ONLY "yes" or "no"."""
         except Exception as e:
             logger.error(f"Auto-reply failed: {e}")
             await message.channel.send(format_error(e))
-
-    async def _speak_response_in_voice(self, guild: discord.Guild, text: str):
-        """Speak the response in voice channel if bot is connected.
-
-        Args:
-            guild: Discord guild
-            text: Text to speak
-        """
-        try:
-            # Get voice cog to access TTS
-            voice_cog = self.bot.get_cog("VoiceCog")
-            if not voice_cog:
-                return
-
-            # Check if bot is in a voice channel in this guild
-            voice_client = guild.voice_client
-            if not voice_client or not voice_client.is_connected():
-                return
-
-            # Don't interrupt if already playing
-            if voice_client.is_playing():
-                logger.info("Voice client already playing, skipping TTS")
-                return
-
-            # Analyze sentiment for voice modulation
-            sentiment = self._analyze_sentiment(text)
-            kokoro_speed = 1.0
-            edge_rate = "+0%"
-
-            if sentiment == "positive":
-                kokoro_speed = 1.1
-                edge_rate = "+10%"
-            elif sentiment == "negative":
-                kokoro_speed = 0.9
-                edge_rate = "-10%"
-
-            # Generate TTS
-            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.mp3"
-            await voice_cog.tts.generate(
-                text, audio_file, speed=kokoro_speed, rate=edge_rate
-            )
-
-            # Apply RVC if enabled
-            if voice_cog.rvc and voice_cog.rvc.is_enabled() and Config.RVC_ENABLED:
-                rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.mp3"
-                await voice_cog.rvc.convert(
-                    audio_file,
-                    rvc_file,
-                    model_name=Config.DEFAULT_RVC_MODEL,
-                    pitch_shift=Config.RVC_PITCH_SHIFT,
-                    index_rate=Config.RVC_INDEX_RATE,
-                    protect=Config.RVC_PROTECT,
-                )
-                audio_file = rvc_file
-
-            # Play audio with explicit FFmpeg options for proper conversion
-            import asyncio
-            import os
-
-            # Log detailed audio file info
-            file_size = os.path.getsize(audio_file) if os.path.exists(audio_file) else 0
-            logger.info(f"=== AUDIO PLAYBACK DEBUG ===")
-            logger.info(f"File path: {audio_file}")
-            logger.info(f"File size: {file_size} bytes")
-            logger.info(f"File extension: {audio_file.suffix}")
-            logger.info(
-                f"FFmpeg options: -vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo"
-            )
-
-            # Probe audio file properties
-            import subprocess
-
-            try:
-                probe_result = subprocess.run(
-                    [
-                        "ffprobe",
-                        "-v",
-                        "quiet",
-                        "-print_format",
-                        "json",
-                        "-show_format",
-                        "-show_streams",
-                        str(audio_file),
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=5,
-                )
-                if probe_result.returncode == 0:
-                    import json
-
-                    probe_data = json.loads(probe_result.stdout)
-                    if "streams" in probe_data and len(probe_data["streams"]) > 0:
-                        stream = probe_data["streams"][0]
-                        logger.info(
-                            f"Audio properties - Sample rate: {stream.get('sample_rate')}, Channels: {stream.get('channels')}, Format: {probe_data.get('format', {}).get('format_name')}"
-                        )
-            except Exception as probe_error:
-                logger.warning(f"Could not probe audio file: {probe_error}")
-
-            audio_source = discord.FFmpegPCMAudio(
-                str(audio_file),
-                options="-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo",
-            )
-            voice_client.play(
-                audio_source,
-                after=lambda e: asyncio.run_coroutine_threadsafe(
-                    self._cleanup_audio(audio_file, e), self.bot.loop
-                ),
-            )
-            logger.info(
-                f"Speaking AI response in voice channel: {voice_client.channel.name}"
-            )
-
-        except Exception as e:
-            logger.error(f"Failed to speak response in voice: {e}")
-
-    async def _cleanup_audio(self, audio_file: Path, error):
-        """Clean up audio file after playback.
-
-        Args:
-            audio_file: Path to audio file
-            error: Playback error if any
-        """
-        if error:
-            logger.error(f"Audio playback error: {error}")
-
-        try:
-            if audio_file.exists():
-                audio_file.unlink()
-                logger.debug(f"Cleaned up audio file: {audio_file}")
-        except Exception as e:
-            logger.error(f"Failed to cleanup audio file: {e}")
 
     async def _reset_status_delayed(self, delay: float = 5.0):
         """Reset dashboard status to Idle after a delay."""

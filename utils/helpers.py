@@ -1,10 +1,12 @@
 """Utility functions and helpers."""
+
 import json
 import logging
 import re
 import base64
 from pathlib import Path
 from typing import Dict, List, Optional
+from collections import OrderedDict
 import aiofiles
 import aiohttp
 
@@ -14,7 +16,13 @@ logger = logging.getLogger(__name__)
 class ChatHistoryManager:
     """Manages chat history per Discord channel with in-memory caching."""
 
-    def __init__(self, history_dir: Path, max_messages: int = 20, cache_size: int = 100, metrics=None):
+    def __init__(
+        self,
+        history_dir: Path,
+        max_messages: int = 20,
+        cache_size: int = 100,
+        metrics=None,
+    ):
         """Initialize chat history manager.
 
         Args:
@@ -29,10 +37,9 @@ class ChatHistoryManager:
         self.metrics = metrics
         self.history_dir.mkdir(parents=True, exist_ok=True)
 
-        # In-memory cache: {channel_id: messages_list}
-        self._cache: Dict[int, List[Dict[str, str]]] = {}
-        # Track cache access order for LRU eviction
-        self._cache_access_order: List[int] = []
+        # In-memory cache using OrderedDict for O(1) LRU operations
+        # {channel_id: messages_list}
+        self._cache: OrderedDict[int, List[Dict[str, str]]] = OrderedDict()
 
     def _get_history_file(self, channel_id: int) -> Path:
         """Get the history file path for a channel.
@@ -46,24 +53,20 @@ class ChatHistoryManager:
         return self.history_dir / f"{channel_id}.json"
 
     def _update_cache_access(self, channel_id: int):
-        """Update cache access order for LRU eviction.
+        """Update cache access order for LRU eviction using OrderedDict.
 
         Args:
             channel_id: Channel ID that was accessed
         """
-        # Remove from current position if exists
-        if channel_id in self._cache_access_order:
-            self._cache_access_order.remove(channel_id)
-        # Add to end (most recently used)
-        self._cache_access_order.append(channel_id)
+        # Move to end (most recently used) - O(1) operation in OrderedDict
+        if channel_id in self._cache:
+            self._cache.move_to_end(channel_id)
 
         # Evict oldest if cache is full
-        if len(self._cache_access_order) > self.cache_size:
-            # Remove least recently used (first in list)
-            oldest_channel = self._cache_access_order.pop(0)
-            if oldest_channel in self._cache:
-                del self._cache[oldest_channel]
-                logger.debug(f"Evicted channel {oldest_channel} from history cache")
+        if len(self._cache) > self.cache_size:
+            # Remove least recently used (first item) - O(1) operation
+            oldest_channel, _ = self._cache.popitem(last=False)
+            logger.debug(f"Evicted channel {oldest_channel} from history cache")
 
     async def load_history(self, channel_id: int) -> List[Dict[str, str]]:
         """Load chat history for a channel (from cache or disk).
@@ -80,14 +83,16 @@ class ChatHistoryManager:
             logger.debug(f"Cache hit for channel {channel_id}")
             # Record cache hit
             if self.metrics:
-                self.metrics.record_cache_hit('history')
-            return self._cache[channel_id].copy()  # Return copy to prevent external modification
+                self.metrics.record_cache_hit("history")
+            return self._cache[
+                channel_id
+            ].copy()  # Return copy to prevent external modification
 
         # Cache miss - load from disk
         logger.debug(f"Cache miss for channel {channel_id}")
         # Record cache miss
         if self.metrics:
-            self.metrics.record_cache_miss('history')
+            self.metrics.record_cache_miss("history")
 
         history_file = self._get_history_file(channel_id)
 
@@ -102,17 +107,29 @@ class ChatHistoryManager:
                 content = await f.read()
                 history = json.loads(content)
 
+                # Validate history format
+                if not isinstance(history, list):
+                    logger.warning(
+                        f"Invalid history format for channel {channel_id}, expected list"
+                    )
+                    history = []
+
                 # Store in cache
                 self._cache[channel_id] = history
                 self._update_cache_access(channel_id)
 
                 logger.debug(f"Loaded history for channel {channel_id} from disk")
                 return history.copy()  # Return copy
+        except json.JSONDecodeError as e:
+            logger.error(f"Corrupted history file for channel {channel_id}: {e}")
+            return []
         except Exception as e:
             logger.error(f"Failed to load history for channel {channel_id}: {e}")
             return []
 
-    async def save_history(self, channel_id: int, messages: List[Dict[str, str]]) -> None:
+    async def save_history(
+        self, channel_id: int, messages: List[Dict[str, str]]
+    ) -> None:
         """Save chat history for a channel (to cache and disk).
 
         Args:
@@ -122,7 +139,7 @@ class ChatHistoryManager:
         try:
             # Trim to max messages
             if len(messages) > self.max_messages:
-                messages = messages[-self.max_messages:]
+                messages = messages[-self.max_messages :]
 
             # Update cache
             self._cache[channel_id] = messages.copy()
@@ -172,7 +189,7 @@ class ChatHistoryManager:
 
         # Trim if needed
         if len(self._cache[channel_id]) > self.max_messages:
-            self._cache[channel_id] = self._cache[channel_id][-self.max_messages:]
+            self._cache[channel_id] = self._cache[channel_id][-self.max_messages :]
 
         # Update access order
         self._update_cache_access(channel_id)
@@ -264,11 +281,9 @@ class ChatHistoryManager:
             channel_id: Discord channel ID
         """
         try:
-            # Clear from cache
+            # Clear from cache (OrderedDict handles removal automatically)
             if channel_id in self._cache:
                 del self._cache[channel_id]
-            if channel_id in self._cache_access_order:
-                self._cache_access_order.remove(channel_id)
 
             # Clear from disk
             history_file = self._get_history_file(channel_id)
@@ -366,53 +381,53 @@ def clean_text_for_tts(text: str) -> str:
         Cleaned text suitable for TTS
     """
     # Remove content in asterisks (roleplay actions like *sighs*, *laughs*)
-    text = re.sub(r'\*[^*]+\*', '', text)
+    text = re.sub(r"\*[^*]+\*", "", text)
 
     # Remove content in underscores (markdown italic)
-    text = re.sub(r'_[^_]+_', '', text)
+    text = re.sub(r"_[^_]+_", "", text)
 
     # Remove markdown bold
-    text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+    text = re.sub(r"\*\*([^*]+)\*\*", r"\1", text)
 
     # Remove code blocks
-    text = re.sub(r'```[^`]*```', '', text)
-    text = re.sub(r'`[^`]+`', '', text)
+    text = re.sub(r"```[^`]*```", "", text)
+    text = re.sub(r"`[^`]+`", "", text)
 
     # Remove URLs
-    text = re.sub(r'https?://\S+', '', text)
+    text = re.sub(r"https?://\S+", "", text)
 
     # Remove common emoji patterns
     # Remove emoji shortcodes like :smile:, :joy:
-    text = re.sub(r':[a-z_]+:', '', text)
+    text = re.sub(r":[a-z_]+:", "", text)
 
     # Remove Unicode emojis (basic range)
     emoji_pattern = re.compile(
         "["
-        "\U0001F600-\U0001F64F"  # emoticons
-        "\U0001F300-\U0001F5FF"  # symbols & pictographs
-        "\U0001F680-\U0001F6FF"  # transport & map symbols
-        "\U0001F1E0-\U0001F1FF"  # flags
-        "\U00002702-\U000027B0"  # dingbats
-        "\U000024C2-\U0001F251"
+        "\U0001f600-\U0001f64f"  # emoticons
+        "\U0001f300-\U0001f5ff"  # symbols & pictographs
+        "\U0001f680-\U0001f6ff"  # transport & map symbols
+        "\U0001f1e0-\U0001f1ff"  # flags
+        "\U00002702-\U000027b0"  # dingbats
+        "\U000024c2-\U0001f251"
         "]+",
-        flags=re.UNICODE
+        flags=re.UNICODE,
     )
-    text = emoji_pattern.sub('', text)
+    text = emoji_pattern.sub("", text)
 
     # Remove stage directions in parentheses or brackets
-    text = re.sub(r'\([^)]*\)', '', text)
-    text = re.sub(r'\[[^\]]*\]', '', text)
+    text = re.sub(r"\([^)]*\)", "", text)
+    text = re.sub(r"\[[^\]]*\]", "", text)
 
     # Clean up excessive punctuation (but keep some for emphasis)
     # Replace multiple exclamation marks with max 3
-    text = re.sub(r'!{4,}', '!!!', text)
+    text = re.sub(r"!{4,}", "!!!", text)
     # Replace multiple question marks with max 2
-    text = re.sub(r'\?{3,}', '??', text)
+    text = re.sub(r"\?{3,}", "??", text)
     # Replace multiple periods with ellipsis
-    text = re.sub(r'\.{4,}', '...', text)
+    text = re.sub(r"\.{4,}", "...", text)
 
     # Remove multiple spaces
-    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r"\s+", " ", text)
 
     # Trim whitespace
     text = text.strip()
@@ -436,7 +451,9 @@ async def download_attachment(url: str) -> bytes:
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as resp:
                 if resp.status != 200:
-                    raise Exception(f"Failed to download attachment: HTTP {resp.status}")
+                    raise Exception(
+                        f"Failed to download attachment: HTTP {resp.status}"
+                    )
                 return await resp.read()
     except Exception as e:
         logger.error(f"Failed to download attachment from {url}: {e}")
@@ -452,7 +469,7 @@ def image_to_base64(image_data: bytes) -> str:
     Returns:
         Base64-encoded string
     """
-    return base64.b64encode(image_data).decode('utf-8')
+    return base64.b64encode(image_data).decode("utf-8")
 
 
 def is_image_attachment(filename: str) -> bool:
@@ -464,5 +481,5 @@ def is_image_attachment(filename: str) -> bool:
     Returns:
         True if file is an image
     """
-    image_extensions = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp'}
+    image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
     return Path(filename).suffix.lower() in image_extensions

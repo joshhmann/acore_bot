@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Optional
 import wave
 import io
+from services.interfaces import STTInterface
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ except ImportError:
     TORCH_AVAILABLE = False
 
 
-class WhisperSTTService:
+class WhisperSTTService(STTInterface):
     """Service for speech-to-text using faster-whisper."""
 
     def __init__(

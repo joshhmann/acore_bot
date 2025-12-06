@@ -1,4 +1,5 @@
 """Metrics tracking service for monitoring bot performance and usage."""
+
 import time
 import logging
 from collections import defaultdict, deque
@@ -23,6 +24,7 @@ class MetricsService:
         # Set up metrics data directory
         if data_dir is None:
             from config import Config
+
             data_dir = Config.DATA_DIR / "metrics"
 
         self.metrics_dir = Path(data_dir)
@@ -30,6 +32,7 @@ class MetricsService:
 
         # Check if DEBUG mode for enhanced logging
         from config import Config
+
         self.debug_mode = Config.LOG_LEVEL == "DEBUG"
 
         # Response time tracking (rolling window of last 100 responses in INFO, 500 in DEBUG)
@@ -41,57 +44,63 @@ class MetricsService:
 
         # Token usage tracking
         self.token_usage = {
-            'total_tokens': 0,
-            'prompt_tokens': 0,
-            'completion_tokens': 0,
-            'by_model': defaultdict(int),
+            "total_tokens": 0,
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "by_model": defaultdict(int),
         }
 
         # Error tracking
         self.error_counts = {
-            'total_errors': 0,
-            'by_type': defaultdict(int),
-            'recent_errors': deque(maxlen=20),  # Last 20 errors with timestamps
+            "total_errors": 0,
+            "by_type": defaultdict(int),
+            "recent_errors": deque(maxlen=20),  # Last 20 errors with timestamps
         }
 
         # Active tracking (reset hourly to prevent unbounded growth)
         self.active_stats = {
-            'active_users': set(),
-            'active_channels': set(),
-            'messages_processed': 0,
-            'commands_executed': 0,
+            "active_users": set(),
+            "active_channels": set(),
+            "messages_processed": 0,
+            "commands_executed": 0,
         }
         self._last_active_reset = datetime.now()
         self._reset_task: Optional[asyncio.Task] = None
 
         # Cache hit rates
         self.cache_stats = {
-            'history_cache_hits': 0,
-            'history_cache_misses': 0,
-            'rag_cache_hits': 0,
-            'rag_cache_misses': 0,
+            "history_cache_hits": 0,
+            "history_cache_misses": 0,
+            "rag_cache_hits": 0,
+            "rag_cache_misses": 0,
         }
 
         # Service-specific metrics
         self.service_metrics = {
-            'tts_generations': 0,
-            'vision_requests': 0,
-            'web_searches': 0,
-            'summarizations': 0,
-            'rag_queries': 0,
+            "tts_generations": 0,
+            "vision_requests": 0,
+            "web_searches": 0,
+            "summarizations": 0,
+            "rag_queries": 0,
         }
 
         # Hourly stats (for trending)
         self.hourly_stats = {
-            'messages_per_hour': deque(maxlen=24),  # Last 24 hours
-            'errors_per_hour': deque(maxlen=24),
-            'last_hour_start': datetime.now(),
-            'current_hour_messages': 0,
-            'current_hour_errors': 0,
+            "messages_per_hour": deque(maxlen=24),  # Last 24 hours
+            "errors_per_hour": deque(maxlen=24),
+            "last_hour_start": datetime.now(),
+            "current_hour_messages": 0,
+            "current_hour_errors": 0,
         }
 
         # Start time
         self.start_time = datetime.now()
+
+        # Batch logging for reducing disk I/O
+        self.pending_events = []  # Buffer for events before batch write
+        self.batch_size = 50  # Write after 50 events
+        self.batch_interval = 60  # Or write every 60 seconds
+        self._batch_task: Optional[asyncio.Task] = None
 
         logger.info("Metrics service initialized")
 
@@ -108,9 +117,9 @@ class MetricsService:
         # In DEBUG mode, record detailed request info
         if self.debug_mode and self.detailed_requests is not None and details:
             request_log = {
-                'timestamp': datetime.now().isoformat(),
-                'duration_ms': duration_ms,
-                **details  # Include all provided details
+                "timestamp": datetime.now().isoformat(),
+                "duration_ms": duration_ms,
+                **details,  # Include all provided details
             }
             self.detailed_requests.append(request_log)
 
@@ -122,30 +131,32 @@ class MetricsService:
         """
         if not self.response_times:
             return {
-                'avg': 0,
-                'min': 0,
-                'max': 0,
-                'p50': 0,
-                'p95': 0,
-                'p99': 0,
-                'count': 0,
+                "avg": 0,
+                "min": 0,
+                "max": 0,
+                "p50": 0,
+                "p95": 0,
+                "p99": 0,
+                "count": 0,
             }
 
         sorted_times = sorted(self.response_times)
         count = len(sorted_times)
 
         return {
-            'avg': sum(sorted_times) / count,
-            'min': sorted_times[0],
-            'max': sorted_times[-1],
-            'p50': sorted_times[int(count * 0.50)],
-            'p95': sorted_times[int(count * 0.95)] if count > 1 else sorted_times[0],
-            'p99': sorted_times[int(count * 0.99)] if count > 1 else sorted_times[0],
-            'count': count,
+            "avg": sum(sorted_times) / count,
+            "min": sorted_times[0],
+            "max": sorted_times[-1],
+            "p50": sorted_times[int(count * 0.50)],
+            "p95": sorted_times[int(count * 0.95)] if count > 1 else sorted_times[0],
+            "p99": sorted_times[int(count * 0.99)] if count > 1 else sorted_times[0],
+            "count": count,
         }
 
     # Token usage tracking
-    def record_token_usage(self, prompt_tokens: int, completion_tokens: int, model: str = "unknown"):
+    def record_token_usage(
+        self, prompt_tokens: int, completion_tokens: int, model: str = "unknown"
+    ):
         """Record token usage.
 
         Args:
@@ -154,10 +165,10 @@ class MetricsService:
             model: Model name
         """
         total = prompt_tokens + completion_tokens
-        self.token_usage['total_tokens'] += total
-        self.token_usage['prompt_tokens'] += prompt_tokens
-        self.token_usage['completion_tokens'] += completion_tokens
-        self.token_usage['by_model'][model] += total
+        self.token_usage["total_tokens"] += total
+        self.token_usage["prompt_tokens"] += prompt_tokens
+        self.token_usage["completion_tokens"] += completion_tokens
+        self.token_usage["by_model"][model] += total
 
     def get_token_usage(self) -> Dict:
         """Get token usage statistics.
@@ -166,10 +177,10 @@ class MetricsService:
             Token usage stats
         """
         return {
-            'total_tokens': self.token_usage['total_tokens'],
-            'prompt_tokens': self.token_usage['prompt_tokens'],
-            'completion_tokens': self.token_usage['completion_tokens'],
-            'by_model': dict(self.token_usage['by_model']),
+            "total_tokens": self.token_usage["total_tokens"],
+            "prompt_tokens": self.token_usage["prompt_tokens"],
+            "completion_tokens": self.token_usage["completion_tokens"],
+            "by_model": dict(self.token_usage["by_model"]),
         }
 
     # Error tracking
@@ -180,14 +191,16 @@ class MetricsService:
             error_type: Type of error (e.g., 'APIError', 'ValidationError')
             error_message: Error message
         """
-        self.error_counts['total_errors'] += 1
-        self.error_counts['by_type'][error_type] += 1
-        self.error_counts['recent_errors'].append({
-            'type': error_type,
-            'message': error_message[:200],  # Truncate long messages
-            'timestamp': datetime.now().isoformat(),
-        })
-        self.hourly_stats['current_hour_errors'] += 1
+        self.error_counts["total_errors"] += 1
+        self.error_counts["by_type"][error_type] += 1
+        self.error_counts["recent_errors"].append(
+            {
+                "type": error_type,
+                "message": error_message[:200],  # Truncate long messages
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+        self.hourly_stats["current_hour_errors"] += 1
 
     def get_error_stats(self) -> Dict:
         """Get error statistics.
@@ -196,10 +209,10 @@ class MetricsService:
             Error stats
         """
         return {
-            'total_errors': self.error_counts['total_errors'],
-            'by_type': dict(self.error_counts['by_type']),
-            'recent_errors': list(self.error_counts['recent_errors']),
-            'error_rate': self._calculate_error_rate(),
+            "total_errors": self.error_counts["total_errors"],
+            "by_type": dict(self.error_counts["by_type"]),
+            "recent_errors": list(self.error_counts["recent_errors"]),
+            "error_rate": self._calculate_error_rate(),
         }
 
     def _calculate_error_rate(self) -> float:
@@ -208,10 +221,10 @@ class MetricsService:
         Returns:
             Error rate as percentage
         """
-        total_messages = self.active_stats['messages_processed']
+        total_messages = self.active_stats["messages_processed"]
         if total_messages == 0:
             return 0.0
-        return (self.error_counts['total_errors'] / total_messages) * 100
+        return (self.error_counts["total_errors"] / total_messages) * 100
 
     # Active stats tracking
     def record_message(self, user_id: int, channel_id: int):
@@ -221,10 +234,10 @@ class MetricsService:
             user_id: User ID
             channel_id: Channel ID
         """
-        self.active_stats['active_users'].add(user_id)
-        self.active_stats['active_channels'].add(channel_id)
-        self.active_stats['messages_processed'] += 1
-        self.hourly_stats['current_hour_messages'] += 1
+        self.active_stats["active_users"].add(user_id)
+        self.active_stats["active_channels"].add(channel_id)
+        self.active_stats["messages_processed"] += 1
+        self.hourly_stats["current_hour_messages"] += 1
         self._check_hourly_rollover()
 
     def record_command(self, command_name: str):
@@ -233,7 +246,7 @@ class MetricsService:
         Args:
             command_name: Name of the command
         """
-        self.active_stats['commands_executed'] += 1
+        self.active_stats["commands_executed"] += 1
 
     def get_active_stats(self) -> Dict:
         """Get active user/channel statistics.
@@ -242,10 +255,10 @@ class MetricsService:
             Active stats
         """
         return {
-            'active_users': len(self.active_stats['active_users']),
-            'active_channels': len(self.active_stats['active_channels']),
-            'messages_processed': self.active_stats['messages_processed'],
-            'commands_executed': self.active_stats['commands_executed'],
+            "active_users": len(self.active_stats["active_users"]),
+            "active_channels": len(self.active_stats["active_channels"]),
+            "messages_processed": self.active_stats["messages_processed"],
+            "commands_executed": self.active_stats["commands_executed"],
         }
 
     # Cache stats tracking
@@ -275,31 +288,32 @@ class MetricsService:
         Returns:
             Cache stats with hit rates
         """
+
         def calculate_hit_rate(hits: int, misses: int) -> float:
             total = hits + misses
             return (hits / total * 100) if total > 0 else 0.0
 
         return {
-            'history_cache': {
-                'hits': self.cache_stats['history_cache_hits'],
-                'misses': self.cache_stats['history_cache_misses'],
-                'hit_rate': calculate_hit_rate(
-                    self.cache_stats['history_cache_hits'],
-                    self.cache_stats['history_cache_misses']
+            "history_cache": {
+                "hits": self.cache_stats["history_cache_hits"],
+                "misses": self.cache_stats["history_cache_misses"],
+                "hit_rate": calculate_hit_rate(
+                    self.cache_stats["history_cache_hits"],
+                    self.cache_stats["history_cache_misses"],
                 ),
             },
-            'rag_cache': {
-                'hits': self.cache_stats['rag_cache_hits'],
-                'misses': self.cache_stats['rag_cache_misses'],
-                'hit_rate': calculate_hit_rate(
-                    self.cache_stats['rag_cache_hits'],
-                    self.cache_stats['rag_cache_misses']
+            "rag_cache": {
+                "hits": self.cache_stats["rag_cache_hits"],
+                "misses": self.cache_stats["rag_cache_misses"],
+                "hit_rate": calculate_hit_rate(
+                    self.cache_stats["rag_cache_hits"],
+                    self.cache_stats["rag_cache_misses"],
                 ),
             },
         }
 
     # Service-specific metrics
-    def record_service_event(self, service: str, event: str = 'request'):
+    def record_service_event(self, service: str, event: str = "request"):
         """Record a service event.
 
         Args:
@@ -322,19 +336,19 @@ class MetricsService:
     def _check_hourly_rollover(self):
         """Check if we need to rollover to a new hour."""
         now = datetime.now()
-        if now - self.hourly_stats['last_hour_start'] >= timedelta(hours=1):
+        if now - self.hourly_stats["last_hour_start"] >= timedelta(hours=1):
             # Save current hour stats
-            self.hourly_stats['messages_per_hour'].append(
-                self.hourly_stats['current_hour_messages']
+            self.hourly_stats["messages_per_hour"].append(
+                self.hourly_stats["current_hour_messages"]
             )
-            self.hourly_stats['errors_per_hour'].append(
-                self.hourly_stats['current_hour_errors']
+            self.hourly_stats["errors_per_hour"].append(
+                self.hourly_stats["current_hour_errors"]
             )
 
             # Reset for new hour
-            self.hourly_stats['current_hour_messages'] = 0
-            self.hourly_stats['current_hour_errors'] = 0
-            self.hourly_stats['last_hour_start'] = now
+            self.hourly_stats["current_hour_messages"] = 0
+            self.hourly_stats["current_hour_errors"] = 0
+            self.hourly_stats["last_hour_start"] = now
 
     def get_hourly_trends(self) -> Dict:
         """Get hourly trend data.
@@ -343,10 +357,10 @@ class MetricsService:
             Hourly trends
         """
         return {
-            'messages_per_hour': list(self.hourly_stats['messages_per_hour']),
-            'errors_per_hour': list(self.hourly_stats['errors_per_hour']),
-            'current_hour_messages': self.hourly_stats['current_hour_messages'],
-            'current_hour_errors': self.hourly_stats['current_hour_errors'],
+            "messages_per_hour": list(self.hourly_stats["messages_per_hour"]),
+            "errors_per_hour": list(self.hourly_stats["errors_per_hour"]),
+            "current_hour_messages": self.hourly_stats["current_hour_messages"],
+            "current_hour_errors": self.hourly_stats["current_hour_errors"],
         }
 
     # Overall summary
@@ -359,22 +373,23 @@ class MetricsService:
         uptime = datetime.now() - self.start_time
 
         summary = {
-            'uptime_seconds': int(uptime.total_seconds()),
-            'uptime_formatted': str(uptime).split('.')[0],  # Remove microseconds
-            'response_times': self.get_response_time_stats(),
-            'token_usage': self.get_token_usage(),
-            'errors': self.get_error_stats(),
-            'active_stats': self.get_active_stats(),
-            'cache_stats': self.get_cache_stats(),
-            'service_metrics': self.get_service_metrics(),
-            'hourly_trends': self.get_hourly_trends(),
-            'debug_mode': self.debug_mode,
+            "uptime_seconds": int(uptime.total_seconds()),
+            "uptime_formatted": str(uptime).split(".")[0],  # Remove microseconds
+            "response_times": self.get_response_time_stats(),
+            "token_usage": self.get_token_usage(),
+            "errors": self.get_error_stats(),
+            "active_stats": self.get_active_stats(),
+            "cache_stats": self.get_cache_stats(),
+            "service_metrics": self.get_service_metrics(),
+            "hourly_trends": self.get_hourly_trends(),
+            "batch_logging": self.get_batch_stats(),
+            "debug_mode": self.debug_mode,
         }
 
         # Include detailed request log in DEBUG mode
         if self.debug_mode and self.detailed_requests is not None:
-            summary['detailed_requests'] = list(self.detailed_requests)
-            summary['detailed_request_count'] = len(self.detailed_requests)
+            summary["detailed_requests"] = list(self.detailed_requests)
+            summary["detailed_request_count"] = len(self.detailed_requests)
 
         return summary
 
@@ -382,7 +397,7 @@ class MetricsService:
     class Timer:
         """Context manager for timing operations."""
 
-        def __init__(self, metrics_service: 'MetricsService'):
+        def __init__(self, metrics_service: "MetricsService"):
             """Initialize timer.
 
             Args:
@@ -433,11 +448,11 @@ class MetricsService:
             metrics_data = self.get_summary()
 
             # Add metadata
-            metrics_data['saved_at'] = datetime.now().isoformat()
-            metrics_data['version'] = '1.0'
+            metrics_data["saved_at"] = datetime.now().isoformat()
+            metrics_data["version"] = "1.0"
 
             # Save to file
-            with open(filepath, 'w') as f:
+            with open(filepath, "w") as f:
                 json.dump(metrics_data, f, indent=2, default=str)
 
             logger.info(f"Metrics saved to {filepath}")
@@ -498,6 +513,7 @@ class MetricsService:
         Returns:
             Async task
         """
+
         async def auto_save_loop():
             while True:
                 try:
@@ -510,7 +526,10 @@ class MetricsService:
                         self.save_daily_summary()
                         # Use configured retention period
                         from config import Config
-                        self.cleanup_old_metrics(days_to_keep=Config.METRICS_RETENTION_DAYS)
+
+                        self.cleanup_old_metrics(
+                            days_to_keep=Config.METRICS_RETENTION_DAYS
+                        )
 
                 except Exception as e:
                     logger.error(f"Error in auto-save loop: {e}")
@@ -534,16 +553,16 @@ class MetricsService:
                     await asyncio.sleep(3600)  # 1 hour
 
                     # Log stats before reset
-                    user_count = len(self.active_stats['active_users'])
-                    channel_count = len(self.active_stats['active_channels'])
+                    user_count = len(self.active_stats["active_users"])
+                    channel_count = len(self.active_stats["active_channels"])
                     logger.info(
                         f"Hourly active stats reset: {user_count} users, "
                         f"{channel_count} channels in last hour"
                     )
 
                     # Reset unbounded sets
-                    self.active_stats['active_users'].clear()
-                    self.active_stats['active_channels'].clear()
+                    self.active_stats["active_users"].clear()
+                    self.active_stats["active_channels"].clear()
                     self._last_active_reset = datetime.now()
 
                 except Exception as e:
@@ -552,6 +571,107 @@ class MetricsService:
         self._reset_task = asyncio.create_task(hourly_reset_loop())
         logger.info("Started hourly active stats reset task")
         return self._reset_task
+
+    # Batch logging methods
+    def log_event(self, event_type: str, event_data: Dict):
+        """Log an event to the batch buffer.
+
+        Args:
+            event_type: Type of event (e.g., 'command', 'error', 'response')
+            event_data: Event data dictionary
+        """
+        event = {
+            "type": event_type,
+            "data": event_data,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+        self.pending_events.append(event)
+
+        # Flush if batch size reached
+        if len(self.pending_events) >= self.batch_size:
+            # Schedule flush in background (don't block)
+            asyncio.create_task(self._flush_events())
+
+    async def _flush_events(self):
+        """Flush pending events to disk."""
+        if not self.pending_events:
+            return
+
+        # Get events to flush and clear buffer
+        events_to_write = self.pending_events[:]
+        self.pending_events.clear()
+
+        # Write to disk in single operation
+        try:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            event_file = self.metrics_dir / f"events_{timestamp}.jsonl"
+
+            # Write as JSON Lines format for efficient appending
+            async with asyncio.Lock():  # Prevent concurrent writes
+                with open(event_file, "a") as f:
+                    for event in events_to_write:
+                        f.write(json.dumps(event) + "\n")
+
+            logger.debug(f"Flushed {len(events_to_write)} events to {event_file.name}")
+
+        except Exception as e:
+            logger.error(f"Failed to flush events to disk: {e}")
+            # Re-add events to buffer on failure
+            self.pending_events.extend(events_to_write)
+
+    def start_batch_flush_task(self):
+        """Start background task to flush events at regular intervals.
+
+        Returns:
+            The background task
+        """
+        if self._batch_task and not self._batch_task.done():
+            logger.warning("Batch flush task already running")
+            return self._batch_task
+
+        async def batch_flush_loop():
+            """Flush events every batch_interval seconds."""
+            while True:
+                try:
+                    await asyncio.sleep(self.batch_interval)
+                    await self._flush_events()
+
+                except Exception as e:
+                    logger.error(f"Error in batch flush loop: {e}")
+
+        self._batch_task = asyncio.create_task(batch_flush_loop())
+        logger.info(
+            f"Started batch event flush task (interval: {self.batch_interval}s)"
+        )
+        return self._batch_task
+
+    async def stop_batch_flush_task(self):
+        """Stop the batch flush task and flush remaining events."""
+        if self._batch_task and not self._batch_task.done():
+            self._batch_task.cancel()
+            try:
+                await self._batch_task
+            except asyncio.CancelledError:
+                pass
+
+        # Flush any remaining events
+        await self._flush_events()
+        logger.info("Stopped batch event flush task")
+
+    def get_batch_stats(self) -> Dict:
+        """Get batch logging statistics.
+
+        Returns:
+            Dict with batch buffer info
+        """
+        return {
+            "pending_events": len(self.pending_events),
+            "batch_size": self.batch_size,
+            "batch_interval": self.batch_interval,
+            "batch_task_running": self._batch_task is not None
+            and not self._batch_task.done(),
+        }
 
     def load_metrics_from_file(self, filename: str) -> Optional[Dict]:
         """Load metrics from a file.
@@ -565,7 +685,7 @@ class MetricsService:
         filepath = self.metrics_dir / filename
 
         try:
-            with open(filepath, 'r') as f:
+            with open(filepath, "r") as f:
                 data = json.load(f)
             logger.info(f"Loaded metrics from {filepath}")
             return data
@@ -585,12 +705,14 @@ class MetricsService:
         for file in sorted(self.metrics_dir.glob("*.json"), reverse=True):
             try:
                 stat = file.stat()
-                metrics_files.append({
-                    'filename': file.name,
-                    'size_bytes': stat.st_size,
-                    'size_kb': round(stat.st_size / 1024, 2),
-                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                })
+                metrics_files.append(
+                    {
+                        "filename": file.name,
+                        "size_bytes": stat.st_size,
+                        "size_kb": round(stat.st_size / 1024, 2),
+                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    }
+                )
             except Exception as e:
                 logger.warning(f"Failed to stat {file}: {e}")
 

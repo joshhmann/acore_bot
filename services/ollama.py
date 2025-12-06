@@ -1,17 +1,115 @@
 """Ollama LLM client service."""
+
 import aiohttp
 import logging
 import json
+import asyncio
+import hashlib
 from typing import List, Dict, Optional, AsyncGenerator
 
 from config import Config
 from services.llm_cache import LLMCache
 from services.rate_limiter import RateLimiter
+from services.interfaces import LLMInterface
 
 logger = logging.getLogger(__name__)
 
 
-class OllamaService:
+class RequestDeduplicator:
+    """Deduplicates concurrent identical requests to avoid redundant API calls."""
+
+    def __init__(self):
+        """Initialize request deduplicator."""
+        self.pending_requests: Dict[str, asyncio.Task] = {}
+        self._cleanup_delay = 5  # seconds to keep completed requests cached
+
+    def _hash_request(
+        self,
+        messages: List[Dict],
+        model: str,
+        temperature: float,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """Create a hash key for a request.
+
+        Args:
+            messages: List of message dicts
+            model: Model name
+            temperature: Temperature value
+            system_prompt: Optional system prompt
+
+        Returns:
+            Hash string
+        """
+        # Create stable string representation
+        request_str = json.dumps(
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "system_prompt": system_prompt or "",
+            },
+            sort_keys=True,
+        )
+
+        return hashlib.sha256(request_str.encode()).hexdigest()
+
+    async def deduplicate(self, key: str, coro):
+        """Deduplicate a request by key.
+
+        If an identical request is already pending, waits for its result.
+        Otherwise, creates a new request.
+
+        Args:
+            key: Request hash key
+            coro: Coroutine to execute if not deduplicated
+
+        Returns:
+            Result from the coroutine
+        """
+        # Check if identical request is already pending
+        if key in self.pending_requests:
+            task = self.pending_requests[key]
+            if not task.done():
+                logger.debug(f"Deduplicating request with key: {key[:16]}...")
+                # Wait for the existing request to complete
+                return await task
+
+        # Create new task for this request
+        task = asyncio.create_task(coro)
+        self.pending_requests[key] = task
+
+        try:
+            result = await task
+
+            # Schedule cleanup after a short delay (allows immediate duplicates to benefit)
+            async def cleanup():
+                await asyncio.sleep(self._cleanup_delay)
+                self.pending_requests.pop(key, None)
+
+            asyncio.create_task(cleanup())
+
+            return result
+        except Exception as e:
+            # Remove failed request immediately
+            self.pending_requests.pop(key, None)
+            raise e
+
+    def get_stats(self) -> Dict:
+        """Get deduplication statistics.
+
+        Returns:
+            Dict with pending request count
+        """
+        return {
+            "pending_requests": len(self.pending_requests),
+            "active_deduplication": sum(
+                1 for task in self.pending_requests.values() if not task.done()
+            ),
+        }
+
+
+class OllamaService(LLMInterface):
     """Service for interacting with Ollama LLM."""
 
     def __init__(
@@ -57,15 +155,18 @@ class OllamaService:
         # Limits concurrent requests to avoid OOM and rate limits API calls
         self.rate_limiter = RateLimiter(
             max_concurrent=5,  # Max 5 parallel generations
-            requests_per_minute=60  # Max 60 requests per minute
+            requests_per_minute=60,  # Max 60 requests per minute
         )
 
         # Initialize LLM response cache
         self.cache = LLMCache(
             max_size=Config.LLM_CACHE_MAX_SIZE,
             ttl_seconds=Config.LLM_CACHE_TTL_SECONDS,
-            enabled=Config.LLM_CACHE_ENABLED
+            enabled=Config.LLM_CACHE_ENABLED,
         )
+
+        # Initialize request deduplicator
+        self.deduplicator = RequestDeduplicator()
 
     async def initialize(self):
         """Initialize the HTTP session."""
@@ -92,10 +193,9 @@ class OllamaService:
         """
         cleaned = []
         for msg in messages:
-            cleaned.append({
-                "role": msg.get("role", "user"),
-                "content": msg.get("content", "")
-            })
+            cleaned.append(
+                {"role": msg.get("role", "user"), "content": msg.get("content", "")}
+            )
         return cleaned
 
     async def chat(
@@ -129,61 +229,83 @@ class OllamaService:
             messages=messages,
             model=self.model,
             temperature=temp,
-            system_prompt=system_prompt
+            system_prompt=system_prompt,
         )
         if cached_response:
-            logger.debug(f"Returning cached response for Ollama chat (model: {self.model})")
+            logger.debug(
+                f"Returning cached response for Ollama chat (model: {self.model})"
+            )
             return cached_response
 
-        # Prepend system message if provided
-        if system_prompt:
-            messages = [{"role": "system", "content": system_prompt}] + messages
+        # Create deduplication key
+        dedup_key = self.deduplicator.create_request_key(
+            messages=messages,
+            model=self.model,
+            temperature=temp,
+            system_prompt=system_prompt,
+        )
 
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": temperature or self.temperature,
-                "num_predict": self.max_tokens,
-                "min_p": self.min_p,
-                "top_k": self.top_k,
-                "repeat_penalty": self.repeat_penalty,
-                "frequency_penalty": self.frequency_penalty,
-                "presence_penalty": self.presence_penalty,
-                "top_p": self.top_p,
-                "num_ctx": 4096,  # Ensure full context window
-            },
-        }
+        # Define the actual request coroutine
+        async def perform_request():
+            # Prepend system message if provided
+            request_messages = messages
+            if system_prompt:
+                request_messages = [
+                    {"role": "system", "content": system_prompt}
+                ] + messages
 
-        try:
-            async with self.rate_limiter.acquire():
-                url = f"{self.host}/api/chat"
-                async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=60)) as resp:
-                    if resp.status != 200:
-                        error_text = await resp.text()
-                        raise Exception(f"Ollama API error ({resp.status}): {error_text}")
+            payload = {
+                "model": self.model,
+                "messages": request_messages,
+                "stream": False,
+                "options": {
+                    "temperature": temp,
+                    "num_predict": self.max_tokens,
+                    "min_p": self.min_p,
+                    "top_k": self.top_k,
+                    "repeat_penalty": self.repeat_penalty,
+                    "frequency_penalty": self.frequency_penalty,
+                    "presence_penalty": self.presence_penalty,
+                    "top_p": self.top_p,
+                    "num_ctx": 4096,  # Ensure full context window
+                },
+            }
 
-                    data = await resp.json()
-                    response = data["message"]["content"]
+            try:
+                async with self.rate_limiter.acquire():
+                    url = f"{self.host}/api/chat"
+                    async with self.session.post(
+                        url, json=payload, timeout=aiohttp.ClientTimeout(total=60)
+                    ) as resp:
+                        if resp.status != 200:
+                            error_text = await resp.text()
+                            raise Exception(
+                                f"Ollama API error ({resp.status}): {error_text}"
+                            )
 
-                    # Cache the response
-                    self.cache.set(
-                        messages=messages,
-                        model=self.model,
-                        temperature=temp,
-                        response=response,
-                        system_prompt=system_prompt
-                    )
+                        data = await resp.json()
+                        response = data["message"]["content"]
 
-                    return response
+                        # Cache the response
+                        self.cache.set(
+                            messages=messages,
+                            model=self.model,
+                            temperature=temp,
+                            response=response,
+                            system_prompt=system_prompt,
+                        )
 
-        except aiohttp.ClientError as e:
-            logger.error(f"Ollama request failed: {e}")
-            raise Exception(f"Failed to connect to Ollama: {e}")
-        except KeyError as e:
-            logger.error(f"Unexpected Ollama response format: {e}")
-            raise Exception("Invalid response from Ollama")
+                        return response
+
+            except aiohttp.ClientError as e:
+                logger.error(f"Ollama request failed: {e}")
+                raise Exception(f"Failed to connect to Ollama: {e}")
+            except KeyError as e:
+                logger.error(f"Unexpected Ollama response format: {e}")
+                raise Exception("Invalid response from Ollama")
+
+        # Deduplicate the request
+        return await self.deduplicator.deduplicate(dedup_key, perform_request())
 
     async def chat_stream(
         self,
@@ -239,7 +361,9 @@ class OllamaService:
                 ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
-                        raise Exception(f"Ollama API error ({resp.status}): {error_text}")
+                        raise Exception(
+                            f"Ollama API error ({resp.status}): {error_text}"
+                        )
 
                     # Stream response chunks
                     async for line in resp.content:
@@ -300,11 +424,7 @@ class OllamaService:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
 
-        messages.append({
-            "role": "user",
-            "content": prompt,
-            "images": images
-        })
+        messages.append({"role": "user", "content": prompt, "images": images})
 
         # Use vision model
         vision_model = model or Config.VISION_MODEL
@@ -328,10 +448,14 @@ class OllamaService:
         try:
             async with self.rate_limiter.acquire():
                 url = f"{self.host}/api/chat"
-                async with self.session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=120)) as resp:
+                async with self.session.post(
+                    url, json=payload, timeout=aiohttp.ClientTimeout(total=120)
+                ) as resp:
                     if resp.status != 200:
                         error_text = await resp.text()
-                        raise Exception(f"Ollama Vision API error ({resp.status}): {error_text}")
+                        raise Exception(
+                            f"Ollama Vision API error ({resp.status}): {error_text}"
+                        )
 
                     data = await resp.json()
                     return data["message"]["content"]
@@ -354,7 +478,9 @@ class OllamaService:
 
         try:
             url = f"{self.host}/api/tags"
-            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=5)) as resp:
+            async with self.session.get(
+                url, timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
                 return resp.status == 200
         except Exception as e:
             logger.warning(f"Ollama health check failed: {e}")
@@ -371,7 +497,9 @@ class OllamaService:
 
         try:
             url = f"{self.host}/api/tags"
-            async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self.session.get(
+                url, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 if resp.status == 200:
                     data = await resp.json()
                     return [model["name"] for model in data.get("models", [])]
@@ -386,9 +514,38 @@ class OllamaService:
         Returns:
             Dictionary with cache statistics
         """
-        return self.cache.get_stats()
+        cache_stats = self.cache.get_stats()
+        dedup_stats = self.deduplicator.get_stats()
+
+        return {**cache_stats, "deduplication": dedup_stats}
 
     def clear_cache(self):
         """Clear the LLM response cache."""
         self.cache.clear()
         logger.info("Ollama LLM cache cleared")
+
+    async def is_available(self) -> bool:
+        """Check if Ollama service is available.
+
+        Returns:
+            True if service is operational
+        """
+        try:
+            if not self.session:
+                await self.initialize()
+
+            async with self.session.get(
+                f"{self.host}/api/tags", timeout=aiohttp.ClientTimeout(total=5)
+            ) as resp:
+                return resp.status == 200
+        except Exception as e:
+            logger.error(f"Ollama availability check failed: {e}")
+            return False
+
+    def get_model_name(self) -> str:
+        """Get the current model name.
+
+        Returns:
+            Model name
+        """
+        return self.model
