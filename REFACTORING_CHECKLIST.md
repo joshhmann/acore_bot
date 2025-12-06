@@ -41,22 +41,20 @@ This document tracks progress on the codebase refactoring effort. Check off item
 - [x] Move command logic (`chat`, `reset`, etc.)
 - [x] Delegate in `main.py`
 - [x] Commit: "Extract commands to commands.py"
-- [x] Fixed `AttributeError` in `response_handler.py` (updated calls to `self.message_handler`)rk
+- [x] Fixed `AttributeError` in `response_handler.py` (updated calls to `self.message_handler`)
 - [ ] Commit: "Extract commands to commands.py"
 
-### Step 5: Extract Event Listeners (~100 lines)
-- [ ] Create `cogs/chat/listeners.py`
-- [ ] Move `on_message`, `on_reaction_add` listeners
-- [ ] Import and bind in `main.py`
-- [ ] Test message handling and reactions
-- [ ] Commit: "Extract event listeners to listeners.py"
+### Step 5: Extract Event Listeners (~100 lines) [SKIPPED]
+- [x] `on_message` delegates to `MessageHandler`
+- [x] `on_reaction_add` kept in `main.py` (simple delegation)
+- [ ] Create `cogs/chat/listeners.py` (Not needed)
 
-### Step 6: Cleanup
-- [ ] Review `main.py` - should now be ~200-300 lines (core class only)
-- [ ] Remove any duplicate code
-- [ ] Update `__init__.py` exports if needed
-- [ ] Final full test of all chat functionality
-- [ ] Merge branch to master
+### Step 6: Cleanup [COMPLETED]
+- [x] Review `main.py` - should now be ~200-300 lines (core class only)
+- [x] Remove any duplicate code (e.g. `_disabled_on_message`)
+- [x] Update `__init__.py` imports/exports
+- [x] Final full test of all chat functionality (Voice integration, Resume loop fixed)
+- [x] Merge branch to master (Simulated/Committed)
 
 ---
 
