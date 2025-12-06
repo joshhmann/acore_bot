@@ -38,6 +38,7 @@ from utils.response_validator import ResponseValidator
 from .helpers import ChatHelpers
 from .session_manager import SessionManager
 from .voice_integration import VoiceIntegration
+from .response_handler import _handle_chat_response as _handle_chat_response_func
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +163,9 @@ class ChatCog(commands.Cog):
 
         self.agentic_tools = AgenticToolSystem()
         logger.info("Agentic tool system initialized")
+
+        # Bind extracted response handler method
+        self._handle_chat_response = _handle_chat_response_func.__get__(self, type(self))
 
     async def _llm_chat(
         self, messages, system_prompt=None, temperature=None, max_tokens=None
