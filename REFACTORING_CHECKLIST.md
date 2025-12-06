@@ -22,12 +22,12 @@ This document tracks progress on the codebase refactoring effort. Check off item
 - [x] Restart bot and test message response
 - [x] Commit: "Extract _handle_chat_response to response_handler.py"
 
-### Step 2: Extract Context Builder (~400 lines)
-- [ ] Create `cogs/chat/context_builder.py`
-- [ ] Copy context/history building methods
-- [ ] Import and bind in `main.py`
-- [ ] Test imports and bot functionality
-- [ ] Commit: "Extract context building to context_builder.py"
+### Step 2: Extract Context Builder (~400 lines) [COMPLETED]
+- [x] Create `cogs/chat/context_builder.py`
+- [x] Copy context/history building methods
+- [x] Import and bind in `main.py`
+- [x] Test imports and bot functionality
+- [x] Commit: "Extract context building to context_builder.py"
 
 ### Step 3: Extract Message Handler (~300 lines)
 - [ ] Create `cogs/chat/message_handler.py`

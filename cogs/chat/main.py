@@ -39,6 +39,7 @@ from .helpers import ChatHelpers
 from .session_manager import SessionManager
 from .voice_integration import VoiceIntegration
 from .response_handler import _handle_chat_response as _handle_chat_response_func
+from .context_builder import ContextBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -122,6 +123,7 @@ class ChatCog(commands.Cog):
         self.helpers = ChatHelpers()
         self.session_manager = SessionManager()
         self.voice_integration = VoiceIntegration(bot, self.helpers.analyze_sentiment)
+        self.context_builder = ContextBuilder(self)
 
         # Load persona configurations
         self.persona_loader = PersonaLoader()
