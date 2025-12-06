@@ -40,7 +40,8 @@ This document tracks progress on the codebase refactoring effort. Check off item
 - [x] Create `cogs/chat/commands.py`
 - [x] Move command logic (`chat`, `reset`, etc.)
 - [x] Delegate in `main.py`
-- [x] Commit: "Extract commands to commands.py"rk
+- [x] Commit: "Extract commands to commands.py"
+- [x] Fixed `AttributeError` in `response_handler.py` (updated calls to `self.message_handler`)rk
 - [ ] Commit: "Extract commands to commands.py"
 
 ### Step 5: Extract Event Listeners (~100 lines)
