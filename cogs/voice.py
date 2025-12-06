@@ -150,12 +150,12 @@ class VoiceCog(commands.Cog):
                 return
 
             # Generate TTS
-            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.mp3"
+            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.wav"
             await self.tts.generate(text, audio_file)
 
             # Apply RVC if enabled and available
             if self.rvc and self.rvc.is_enabled() and Config.RVC_ENABLED:
-                rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.mp3"
+                rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.wav"
                 await self.rvc.convert(
                     audio_file, rvc_file,
                     model_name=Config.DEFAULT_RVC_MODEL,
@@ -220,11 +220,11 @@ class VoiceCog(commands.Cog):
                 return
 
             # Generate TTS
-            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.mp3"
+            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.wav"
             await self.tts.generate(text, audio_file)
 
             # Apply RVC
-            rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.mp3"
+            rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.wav"
             await self.rvc.convert(
                     audio_file, rvc_file,
                     model_name=voice_model,
@@ -733,12 +733,12 @@ class VoiceCog(commands.Cog):
                     if vc and not vc.is_playing():
                             try:
                                 # Generate TTS
-                                audio_file = Config.TEMP_DIR / f"voice_response_{uuid.uuid4()}.mp3"
+                                audio_file = Config.TEMP_DIR / f"voice_response_{uuid.uuid4()}.wav"
                                 await self.tts.generate(response, audio_file)
 
                                 # Apply RVC if enabled
                                 if self.rvc and self.rvc.is_enabled() and Config.RVC_ENABLED:
-                                    rvc_file = Config.TEMP_DIR / f"rvc_response_{uuid.uuid4()}.mp3"
+                                    rvc_file = Config.TEMP_DIR / f"rvc_response_{uuid.uuid4()}.wav"
                                     await self.rvc.convert(
                     audio_file, rvc_file,
                     model_name=Config.DEFAULT_RVC_MODEL,
