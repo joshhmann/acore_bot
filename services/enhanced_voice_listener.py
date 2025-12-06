@@ -183,6 +183,7 @@ class EnhancedVoiceListener:
                 "is_recording_speech": False,
                 "on_transcription": on_transcription,
                 "on_bot_response_needed": on_bot_response_needed,
+                "first_speech_time": None,
             }
 
             self.active_sessions[guild_id] = session
@@ -229,6 +230,19 @@ class EnhancedVoiceListener:
                         # Reset for next segment
                         session["last_speech_time"] = None
                         session["is_recording_speech"] = False
+                        session["first_speech_time"] = None
+
+                # Check max speech duration (force transcribe if talking too long or constant noise)
+                if session.get("is_recording_speech") and session.get("first_speech_time"):
+                    MAX_SPEECH_DURATION = 8.0  # Force transcribe after 8 seconds of continuous 'speech'
+                    if current_time - session["first_speech_time"] > MAX_SPEECH_DURATION:
+                        logger.info(f"Max speech duration ({MAX_SPEECH_DURATION}s) reached, forcing transcription...")
+                        await self._auto_transcribe(guild_id)
+                        
+                        # Reset for next segment
+                        session["last_speech_time"] = None
+                        session["is_recording_speech"] = False
+                        session["first_speech_time"] = None
 
                 await asyncio.sleep(0.1)  # Check every 100ms for snappier response
 
@@ -568,6 +582,8 @@ class EnhancedVoiceListener:
         """
         session = self.active_sessions.get(guild_id)
         if session:
+            if not session.get("is_recording_speech"):
+                session["first_speech_time"] = time.time()
             session["last_speech_time"] = time.time()
             session["is_recording_speech"] = True
 
