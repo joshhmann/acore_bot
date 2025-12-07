@@ -15,11 +15,9 @@ import asyncio
 
 from config import Config
 from services.ollama import OllamaService
-from services.intent_recognition import (
-    IntentRecognitionService,
-    ConversationalResponder,
-)
-from services.intent_handler import IntentHandler
+# Intent system removed - now AI-first with LLM tool calling
+# from services.intent_recognition import IntentRecognitionService, ConversationalResponder
+# from services.intent_handler import IntentHandler
 from services.naturalness import NaturalnessEnhancer
 from utils.helpers import (
     ChatHistoryManager,
@@ -148,15 +146,9 @@ class ChatCog(commands.Cog):
         # Track background tasks for proper cleanup
         self._background_tasks: set = set()
 
-        # Intent recognition for natural language commands
+        # Intent system removed - LLM handles intents via tool calling now
         self.intent_recognition = None
         self.intent_handler = None
-        if Config.INTENT_RECOGNITION_ENABLED:
-            self.intent_recognition = IntentRecognitionService()
-            self.intent_handler = IntentHandler(bot)
-            logger.info(
-                "Intent recognition enabled - bot can now understand natural language commands"
-            )
 
         # AI-powered message batching - feature removed during cleanup
         # from services.message_batcher import MessageBatcher

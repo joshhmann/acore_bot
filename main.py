@@ -492,7 +492,7 @@ class OllamaBot(commands.Bot):
         await self.load_extension("cogs.character_commands")  # AI-First character system
         await self.load_extension("cogs.profile_commands")
         await self.load_extension("cogs.search_commands")
-        await self.load_extension("cogs.intent_commands")  # Custom intent management
+        # await self.load_extension("cogs.intent_commands")  # REMOVED: AI-first - LLM handles intents
 
         # Game cogs removed - not core
         await self.load_extension("cogs.help")
