@@ -16,6 +16,7 @@ from services.enhanced_voice_listener import EnhancedVoiceListener
 from services.voice_commands import VoiceCommandParser, CommandType
 from utils.helpers import format_error, format_success, format_info
 from .manager import VoiceManager
+from .commands import VoiceCommands
 
 logger = logging.getLogger(__name__)
 
@@ -31,15 +32,7 @@ class VoiceCog(commands.Cog):
         voice_activity_detector=None,
         enhanced_voice_listener: Optional[EnhancedVoiceListener] = None,
     ):
-        """Initialize voice cog.
-
-        Args:
-            bot: Discord bot instance
-            tts: TTS service instance
-            rvc: Optional RVC service instance
-            voice_activity_detector: Optional voice activity detector (legacy)
-            enhanced_voice_listener: Optional enhanced voice listener (smart)
-        """
+        """Initialize voice cog."""
         self.bot = bot
         self.tts = tts
         self.rvc = rvc
@@ -47,206 +40,27 @@ class VoiceCog(commands.Cog):
         self.enhanced_listener = enhanced_voice_listener
         self.voice_manager = VoiceManager(bot)
 
-    @app_commands.command(name="join", description="Join your voice channel")
-    async def join(self, interaction: discord.Interaction):
-        """Join the user's voice channel.
+    async def cog_load(self):
+        """Load sub-cogs (commands)."""
+        # Register command cog
+        await self.bot.add_cog(VoiceCommands(self.bot, self))
 
-        Args:
-            interaction: Discord interaction
-        """
-        if not interaction.user.voice:
-            await interaction.response.send_message(
-                "❌ You need to be in a voice channel!", ephemeral=True
-            )
-            return
+    def play_audio(self, guild_id: int, audio_file: Path):
+        """Helper to play audio in a guild."""
+        voice_client = self.voice_manager.get_voice_client(guild_id)
+        if not voice_client: return
 
-        await interaction.response.defer(ephemeral=True)
-        channel = interaction.user.voice.channel
-
-        try:
-            if self.voice_manager.is_connected(interaction.guild.id):
-                await interaction.followup.send(
-                    "✅ Already connected to a voice channel!"
-                )
-                return
-
-            voice_client = await self.voice_manager.join_channel(channel, interaction.guild.id)
-            if voice_client:
-                await interaction.followup.send(
-                    format_success(f"Joined **{channel.name}**!")
-                )
-            else:
-                await interaction.followup.send(
-                    format_error("Failed to join voice channel")
-                )
-
-        except Exception as e:
-            logger.error(f"Failed to join voice channel: {e}")
-            await interaction.followup.send(format_error(e))
-
-    @app_commands.command(name="leave", description="Leave voice channel")
-    async def leave(self, interaction: discord.Interaction):
-        """Leave the current voice channel.
-
-        Args:
-            interaction: Discord interaction
-        """
-        await interaction.response.defer(ephemeral=True)
-        guild_id = interaction.guild.id
-
-        if not self.voice_manager.is_connected(guild_id):
-            await interaction.followup.send(
-                "❌ Not connected to any voice channel!"
-            )
-            return
-
-        if await self.voice_manager.leave_channel(guild_id):
-            await interaction.followup.send(
-                format_success("Disconnected from voice channel!")
-            )
-        else:
-            await interaction.followup.send(
-                format_error("Failed to leave voice channel")
-            )
-
-    @app_commands.command(name="speak", description="Generate speech and play in voice channel")
-    @app_commands.describe(text="Text to speak")
-    @app_commands.checks.cooldown(1, 3.0)  # 1 use per 3 seconds per user
-    async def speak(self, interaction: discord.Interaction, text: str):
-        """Generate TTS and play in voice channel.
-
-        Args:
-            interaction: Discord interaction
-            text: Text to convert to speech
-        """
-        # Input validation
-        if len(text) > 1000:
-            await interaction.response.send_message(
-                "❌ Text too long! Please keep speech under 1000 characters.",
-                ephemeral=True
-            )
-            return
-
-        await interaction.response.defer(thinking=True)
-
-        try:
-            guild_id = interaction.guild.id
-
-            # Check if connected to voice
-            if guild_id not in self.voice_clients:
-                await interaction.followup.send(
-                    "❌ Not connected to a voice channel! Use `/join` first."
-                )
-                return
-            voice_client = self.voice_manager.get_voice_client(guild_id)
-
-            # Check if already playing
-            if voice_client.is_playing():
-                await interaction.followup.send("⏸️ Already playing audio. Please wait...")
-                return
-
-            # Generate TTS
-            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.wav"
-            await self.tts.generate(text, audio_file)
-
-            # Apply RVC if enabled and available
-            if self.rvc and self.rvc.is_enabled() and Config.RVC_ENABLED:
-                rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.wav"
-                await self.rvc.convert(
-                    audio_file, rvc_file,
-                    model_name=Config.DEFAULT_RVC_MODEL,
-                    pitch_shift=Config.RVC_PITCH_SHIFT,
-                    index_rate=Config.RVC_INDEX_RATE,
-                    protect=Config.RVC_PROTECT
-                )
-                audio_file = rvc_file
-
-            # Play audio with explicit FFmpeg options for proper conversion
-            audio_source = discord.FFmpegPCMAudio(
-                str(audio_file),
-                options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
-            )
-            voice_client.play(
-                audio_source,
-                after=lambda e: asyncio.run_coroutine_threadsafe(
-                    self._cleanup_audio(audio_file, e), self.bot.loop
-                ),
-            )
-
-            await interaction.followup.send(format_success("🔊 Playing audio..."))
-
-        except Exception as e:
-            logger.error(f"Speak command failed: {e}")
-            await interaction.followup.send(format_error(e))
-
-    @app_commands.command(name="speak_as", description="Speak with a specific RVC voice")
-    @app_commands.checks.cooldown(1, 3.0)  # 1 use per 3 seconds per user
-    @app_commands.describe(voice_model="Voice model to use", text="Text to speak")
-    async def speak_as(self, interaction: discord.Interaction, voice_model: str, text: str):
-        """Generate TTS with specific RVC voice.
-
-        Args:
-            interaction: Discord interaction
-            voice_model: Name of RVC model to use
-            text: Text to convert to speech
-        """
-        await interaction.response.defer(thinking=True)
-
-        try:
-            if not self.rvc or not self.rvc.is_enabled():
-                await interaction.followup.send(
-                    "❌ RVC is not available. Please configure RVC models first."
-                )
-                return
-
-            guild_id = interaction.guild.id
-
-            # Check if connected to voice
-            if guild_id not in self.voice_clients:
-                await interaction.followup.send(
-                    "❌ Not connected to a voice channel! Use `/join` first."
-                )
-                return
-            voice_client = self.voice_manager.get_voice_client(guild_id)
-
-            # Check if already playing
-            if voice_client.is_playing():
-                await interaction.followup.send("⏸️ Already playing audio. Please wait...")
-                return
-
-            # Generate TTS
-            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.wav"
-            await self.tts.generate(text, audio_file)
-
-            # Apply RVC
-            rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.wav"
-            await self.rvc.convert(
-                    audio_file, rvc_file,
-                    model_name=voice_model,
-                    pitch_shift=Config.RVC_PITCH_SHIFT,
-                    index_rate=Config.RVC_INDEX_RATE,
-                    protect=Config.RVC_PROTECT
-                )
-
-            # Play audio with explicit FFmpeg options for proper conversion
-            audio_source = discord.FFmpegPCMAudio(
-                str(rvc_file),
-                options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
-            )
-            voice_client.play(
-                audio_source,
-                after=lambda e: asyncio.run_coroutine_threadsafe(
-                    self._cleanup_audio(rvc_file, e), self.bot.loop
-                ),
-            )
-
-            await interaction.followup.send(
-                format_success(f"🔊 Playing audio with voice: **{voice_model}**")
-            )
-
-        except Exception as e:
-            logger.error(f"Speak_as command failed: {e}")
-            await interaction.followup.send(format_error(e))
+        # Play audio with explicit FFmpeg options for proper conversion
+        audio_source = discord.FFmpegPCMAudio(
+            str(audio_file),
+            options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+        )
+        voice_client.play(
+            audio_source,
+            after=lambda e: asyncio.run_coroutine_threadsafe(
+                self._cleanup_audio(audio_file, e), self.bot.loop
+            ),
+        )
 
     @app_commands.command(name="voices", description="List available TTS and RVC voices")
     async def voices(self, interaction: discord.Interaction):
