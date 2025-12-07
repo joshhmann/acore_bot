@@ -27,7 +27,7 @@ from services.memory_manager import MemoryManager
 from services.conversation_summarizer import ConversationSummarizer
 from services.rag import RAGService
 from services.whisper_stt import WhisperSTTService, VoiceActivityDetector
-from services.parakeet_stt import ParakeetSTTService
+from services.parakeet_api_client import ParakeetAPIService
 from services.enhanced_voice_listener import EnhancedVoiceListener
 from utils.helpers import ChatHistoryManager
 from cogs.chat import ChatCog
@@ -249,19 +249,18 @@ class OllamaBot(commands.Bot):
         self.voice_activity_detector = None
         self.enhanced_voice_listener = None
 
-        # Smart STT Initialization: Only load the selected engine to save VRAM
+        # Smart STT Initialization: Use API-based Parakeet (model runs separately)
         if Config.STT_ENGINE == "parakeet" and Config.PARAKEET_ENABLED:
-            logger.info("Initializing Parakeet STT (Primary)...")
-            self.parakeet = ParakeetSTTService(
-                model_name=Config.PARAKEET_MODEL,
-                device=Config.PARAKEET_DEVICE,
+            logger.info("Initializing Parakeet STT API client...")
+            self.parakeet = ParakeetAPIService(
+                api_url=Config.PARAKEET_API_URL,
                 language=Config.PARAKEET_LANGUAGE,
             )
             if self.parakeet.is_available():
                 self.stt_service = self.parakeet
-                logger.info(f"Using Parakeet as primary STT engine (model: {Config.PARAKEET_MODEL})")
+                logger.info(f"Using Parakeet API as STT engine (URL: {Config.PARAKEET_API_URL})")
             else:
-                logger.warning("Parakeet STT failed to initialize. Falling back to Whisper if enabled.")
+                logger.warning("Parakeet API not available. Check if parakeet-api service is running.")
                 self.parakeet = None
 
         # Fallback or Primary Whisper Initialization

@@ -149,9 +149,10 @@ class Config:
 
     # Parakeet STT Settings
     PARAKEET_ENABLED: bool = os.getenv("PARAKEET_ENABLED", "false").lower() == "true"
-    PARAKEET_MODEL: str = os.getenv("PARAKEET_MODEL", "nvidia/parakeet-tdt-0.6b-v3")
-    PARAKEET_DEVICE: str = os.getenv("PARAKEET_DEVICE", "auto")  # auto, cpu, cuda
-    PARAKEET_LANGUAGE: str = os.getenv("PARAKEET_LANGUAGE", "en")  # Auto-detects among 25 European languages
+    PARAKEET_API_URL: str = os.getenv("PARAKEET_API_URL", "http://localhost:8890")  # External API
+    PARAKEET_MODEL: str = os.getenv("PARAKEET_MODEL", "nvidia/parakeet-tdt-0.6b-v3")  # Legacy, used if no API
+    PARAKEET_DEVICE: str = os.getenv("PARAKEET_DEVICE", "auto")  # Legacy
+    PARAKEET_LANGUAGE: str = os.getenv("PARAKEET_LANGUAGE", "en")
 
     # Enhanced Voice Listener Settings
     VOICE_ENERGY_THRESHOLD: int = int(os.getenv("VOICE_ENERGY_THRESHOLD", "500"))  # Audio energy threshold for VAD
