@@ -1,7 +1,7 @@
 """Configuration management for Discord Ollama Bot."""
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Dict
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -41,7 +41,22 @@ class Config:
     # Chat
     CLEAN_THINKING_OUTPUT: bool = os.getenv("CLEAN_THINKING_OUTPUT", "true").lower() == "true"
     CHAT_HISTORY_ENABLED: bool = os.getenv("CHAT_HISTORY_ENABLED", "true").lower() == "true"
-    CHAT_HISTORY_MAX_MESSAGES: int = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "20"))
+    CHAT_HISTORY_MAX_MESSAGES: int = int(os.getenv("CHAT_HISTORY_MAX_MESSAGES", "100"))
+    MAX_CONTEXT_TOKENS: int = int(os.getenv("MAX_CONTEXT_TOKENS", "8192"))
+
+    # Model specific context limits (override MAX_CONTEXT_TOKENS)
+    MODEL_CONTEXT_LIMITS: Dict[str, int] = {
+        "llama3.2": 128000,
+        "mistral": 32000,
+        "gpt-4": 8192,
+        "gpt-4-turbo": 128000,
+        "gpt-4o": 128000,
+        "claude-3-opus-20240229": 200000,
+        "claude-3-sonnet-20240229": 200000,
+        "claude-3-haiku-20240307": 200000,
+        "nousresearch/hermes-3-llama-3.1-405b": 128000,
+    }
+
     AUTO_REPLY_ENABLED: bool = os.getenv("AUTO_REPLY_ENABLED", "false").lower() == "true"
     AUTO_REPLY_CHANNELS: List[int] = [
         int(x.strip()) for x in os.getenv("AUTO_REPLY_CHANNELS", "").split(",") if x.strip()
