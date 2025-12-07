@@ -55,6 +55,29 @@ A Discord bot with:
 - Bot can restart without reloading STT model
 - STT service can be updated independently
 
+### Phase 2-3: Cleanup & Reorganization ✅
+- Moved API clients to `services/clients/` directory
+- Archived old planning docs to `archive/docs/`
+
+### Phase 4: AI-First Cleanup ✅
+**Completed: 2024-12-06**
+
+**Deprecated ~5,170 lines total:**
+| File | Lines | Reason |
+|------|-------|--------|
+| `services/web_dashboard.py` | 2,009 | Unused |
+| `services/intent_recognition.py` | 720 | Replaced by LLM tool calling |
+| `services/trivia.py` | 473 | Not core |
+| `services/intent_handler.py` | 328 | Part of intent system |
+| `services/custom_intents.py` | 368 | Part of intent system |
+| `services/parakeet_stt.py` | 238 | Replaced by API |
+| `cogs/trivia.py` | 398 | Not core |
+| `cogs/game_helper.py` | 165 | Not core |
+| `cogs/games.py` | 95 | Not core |
+| `cogs/intent_commands.py` | 376 | Part of intent system |
+
+**Key change:** Bot is now **AI-first** - the LLM handles intents via tool calling instead of hardcoded regex patterns.
+
 ---
 
 ## Current Codebase Structure
