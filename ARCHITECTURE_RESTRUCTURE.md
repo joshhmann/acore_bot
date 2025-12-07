@@ -62,7 +62,7 @@ A Discord bot with:
 ### Phase 4: AI-First Cleanup ✅
 **Completed: 2024-12-06**
 
-**Deprecated ~5,170 lines total:**
+**Deprecated 12 files, ~5,642 lines total:**
 | File | Lines | Reason |
 |------|-------|--------|
 | `services/web_dashboard.py` | 2,009 | Unused |
@@ -71,6 +71,8 @@ A Discord bot with:
 | `services/intent_handler.py` | 328 | Part of intent system |
 | `services/custom_intents.py` | 368 | Part of intent system |
 | `services/parakeet_stt.py` | 238 | Replaced by API |
+| `services/kokoro_tts.py` | 222 | Using Kokoro API |
+| `services/supertonic_tts.py` | 195 | Unused alternative |
 | `cogs/trivia.py` | 398 | Not core |
 | `cogs/game_helper.py` | 165 | Not core |
 | `cogs/games.py` | 95 | Not core |
