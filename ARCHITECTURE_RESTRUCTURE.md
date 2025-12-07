@@ -91,36 +91,19 @@ acore_bot/
 
 ## Next Steps (Priority Order)
 
-### Phase 2: Cleanup Legacy Code
-- [ ] Remove `services/parakeet_stt.py` (replaced by API client)
-- [ ] Remove `services/whisper_stt.py` if not used
-- [ ] Delete old documentation files:
-  - `REFACTORING_PLAN.md`
-  - `REFACTORING_CHECKLIST.md`
-  - `CODEBASE_AUDIT.md`
-  - `CLEANUP_SUMMARY.md`
-  - `DOCUMENTATION_AUDIT.md`
+### Phase 2: Cleanup Legacy Code ✅
+- [x] Move `services/parakeet_stt.py` to deprecated/ (replaced by API client)
+- [x] Archive old planning docs to archive/docs/
+- [ ] Remove `services/whisper_stt.py` if not used (still in use as fallback)
 
-### Phase 3: Reorganize Services Directory
-Target structure:
+### Phase 3: Reorganize Services Directory ✅
+Created `services/clients/` for external API clients:
 ```
-services/
-├── clients/              # External API clients
-│   ├── tts_client.py     # Kokoro
-│   ├── stt_client.py     # Parakeet
-│   ├── llm_client.py     # Ollama/OpenRouter
-│   └── rvc_client.py     # RVC
-│
-├── features/             # Bot features
-│   ├── rag/
-│   ├── personas/
-│   ├── memory/
-│   ├── profiles/
-│   └── behavior/
-│
-└── core/                 # Core utilities
-    ├── metrics.py
-    └── rate_limiter.py
+services/clients/
+├── __init__.py
+├── stt_client.py     # Parakeet API (was parakeet_api_client.py)
+├── tts_client.py     # Kokoro API (was kokoro_api_client.py)
+└── rvc_client.py     # RVC WebUI (was rvc_http.py)
 ```
 
 ### Phase 4: Slim Down main.py
@@ -199,7 +182,15 @@ nvidia-smi
 
 ## Session Log
 
-### 2024-12-06
+### 2024-12-06 (Session 2)
+- **Phase 2: Cleanup** - Moved legacy parakeet_stt.py to deprecated/, archived old docs
+- **Phase 3: Reorganize** - Created `services/clients/` directory with API clients
+- Moved `parakeet_api_client.py` → `clients/stt_client.py`
+- Moved `kokoro_api_client.py` → `clients/tts_client.py`
+- Moved `rvc_http.py` → `clients/rvc_client.py`
+- Updated all imports, bot running successfully ✅
+
+### 2024-12-06 (Session 1)
 - Discussed architecture vision ("SillyTavern for Discord")
 - Set up Parakeet STT as external API service
 - Created `parakeet_api_client.py`
@@ -208,4 +199,4 @@ nvidia-smi
 
 ---
 
-*Last updated: 2024-12-06 21:27*
+*Last updated: 2024-12-06 22:10*
