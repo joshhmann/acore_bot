@@ -18,7 +18,6 @@ from services.ollama import OllamaService
 # Intent system removed - now AI-first with LLM tool calling
 # from services.intent_recognition import IntentRecognitionService, ConversationalResponder
 # from services.intent_handler import IntentHandler
-from services.naturalness import NaturalnessEnhancer
 from utils.helpers import (
     ChatHistoryManager,
     chunk_message,
@@ -43,6 +42,7 @@ from .commands import ChatCommandHandler
 # New services
 from services.context_manager import ContextManager
 from services.lorebook_service import LorebookService
+from services.behavior_engine import BehaviorEngine
 
 logger = logging.getLogger(__name__)
 
@@ -58,37 +58,13 @@ class ChatCog(commands.Cog):
         user_profiles=None,
         summarizer=None,
         web_search=None,
-        naturalness=None,
         rag=None,
         conversation_manager=None,
         persona_system=None,
         compiled_persona=None,
-        decision_engine=None,
-        callbacks_system=None,
-        curiosity_system=None,
-        pattern_learner=None,
         llm_fallback=None,
     ):
-        """Initialize chat cog.
-
-        Args:
-            bot: Discord bot instance
-            ollama: Ollama service instance
-            history_manager: Chat history manager
-            user_profiles: User profile service (optional)
-            summarizer: Conversation summarizer service (optional)
-            web_search: Web search service (optional)
-            naturalness: Naturalness service (optional)
-            rag: RAG service (optional)
-            conversation_manager: Multi-turn conversation manager (optional)
-            persona_system: AI-First PersonaSystem (optional)
-            compiled_persona: Current compiled persona (character + framework) (optional)
-            decision_engine: AI decision engine (optional)
-            callbacks_system: Proactive callbacks system for topic memory (optional)
-            curiosity_system: Curiosity system for follow-up questions (optional)
-            pattern_learner: Pattern learner for user adaptation (optional)
-            llm_fallback: LLM fallback manager for resilient model switching (optional)
-        """
+        """Initialize chat cog."""
         self.bot = bot
         self.ollama = ollama
         self.llm_fallback = llm_fallback
@@ -96,31 +72,12 @@ class ChatCog(commands.Cog):
         self.user_profiles = user_profiles
         self.summarizer = summarizer
         self.web_search = web_search
-        self.naturalness = naturalness
         self.rag = rag
         self.conversation_manager = conversation_manager
 
-        # AI-First Persona System (new modular system)
+        # AI-First Persona System
         self.persona_system = persona_system
         self.compiled_persona = compiled_persona
-        self.decision_engine = decision_engine
-        self.callbacks_system = callbacks_system
-        self.curiosity_system = curiosity_system
-        self.pattern_learner = pattern_learner
-
-        # Naturalness enhancer for Neuro-like behaviors
-        self.enhancer = NaturalnessEnhancer()
-        logger.info("Naturalness enhancer initialized")
-
-        # Conversational callbacks
-        try:
-            from services.conversational_callbacks import ConversationalCallbacks
-
-            self.callbacks = ConversationalCallbacks(history_manager, summarizer)
-            logger.info("Conversational callbacks initialized")
-        except Exception as e:
-            logger.warning(f"Could not load conversational callbacks: {e}")
-            self.callbacks = None
 
         # Initialize modularized components (must be before _load_system_prompt)
         self.helpers = ChatHelpers()
@@ -132,6 +89,20 @@ class ChatCog(commands.Cog):
         # Initialize new services
         self.context_manager = ContextManager()
         self.lorebook_service = LorebookService()
+
+        # Initialize Behavior Engine
+        self.behavior_engine = BehaviorEngine(
+            bot,
+            ollama,
+            self.context_manager,
+            self.lorebook_service
+        )
+        # Pass initial persona if available
+        if self.compiled_persona:
+            self.behavior_engine.set_persona(self.compiled_persona)
+
+        # Start behavior engine
+        self._create_background_task(self.behavior_engine.start())
 
         # Load persona configurations
         self.persona_loader = PersonaLoader()
@@ -220,6 +191,10 @@ class ChatCog(commands.Cog):
 
     async def cleanup_tasks(self):
         """Cancel all background tasks (called on shutdown)."""
+        # Stop behavior engine
+        if self.behavior_engine:
+            await self.behavior_engine.stop()
+
         if self._background_tasks:
             logger.info(
                 f"Cancelling {len(self._background_tasks)} ChatCog background tasks..."
@@ -496,45 +471,23 @@ class ChatCog(commands.Cog):
                 except Exception as e:
                     logger.error(f"Error fetching recent images: {e}")
 
-        # Check for trigger word reactions FIRST (before defer)
-        trigger_reaction = self.enhancer.check_trigger_words(message_content)
-        if trigger_reaction:
-            await send_response(trigger_reaction)
-            logger.info(f"Sent trigger word reaction: {trigger_reaction[:50]}...")
-            return
+        # Process with Behavior Engine (Reactions & Proactive Engagement)
+        if not interaction and self.behavior_engine and original_message:
+            action = await self.behavior_engine.handle_message(original_message)
 
-        # Check for fake glitch
-        glitch = self.enhancer.should_glitch()
-        if glitch:
-            await send_response(glitch)
-            logger.info(f"Sent glitch message: {glitch[:50]}...")
-            return
-
-        # Calculate natural thinking delay
-        thinking_delay = self.enhancer.calculate_thinking_delay(message_content)
+            # If behavior engine wants to reply proactively (e.g. interrupt), handle it
+            if action and action.get('reply'):
+                # We can either append it or handle it here
+                # But since we are already replying (we got triggered),
+                # we usually ignore the proactive suggestion unless it's a "interrupt"
+                pass
 
         if interaction:
             await interaction.response.defer(thinking=True)
-        # Note: For on_message, we already started typing in the listener
-
-        # Apply thinking delay
-        await asyncio.sleep(thinking_delay)
 
         try:
             channel_id = channel.id
             user_id = user.id
-
-            # Update emotional state based on message
-            sentiment_deltas = self.enhancer.analyze_message_sentiment(message_content)
-            for emotion, delta in sentiment_deltas.items():
-                self.enhancer.update_emotion(emotion, delta)
-
-            # Check if we should use a sarcastic short response
-            short_response = self.enhancer.should_use_short_response(message_content)
-            if short_response:
-                await send_response(short_response)
-                logger.info(f"Sent short response: {short_response}")
-                return
 
             # Load conversation history
             history = []
