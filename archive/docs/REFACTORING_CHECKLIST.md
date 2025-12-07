@@ -64,12 +64,12 @@ This document tracks progress on the codebase refactoring effort. Check off item
 - [ ] Create new branch `refactor/voice-cog-split`
 - [ ] Verify bot is working before starting
 
-### Step 1: Extract Voice Manager (~200 lines)
-- [ ] Create `cogs/voice/manager.py`
-- [ ] Copy voice client management, connection logic
-- [ ] Import in main `voice.py`
-- [ ] Test voice join/leave functionality
-- [ ] Commit: "Extract voice manager to manager.py"
+### Step 1: Extract Voice Manager (~200 lines) [COMPLETED]
+- [x] Create `cogs/voice/manager.py`
+- [x] Copy voice client management, connection logic
+- [x] Import in main `voice.py`
+- [x] Test voice join/leave functionality
+- [x] Commit: "Extract voice manager to manager.py"
 
 ### Step 2: Extract Voice Commands (~250 lines)
 - [ ] Create `cogs/voice/commands.py`
