@@ -3,8 +3,8 @@ import logging
 import random
 from typing import Dict, Any, Optional, List
 from datetime import datetime
-from services.persona_system import CompiledPersona
-from services.enhanced_tools import EnhancedToolSystem
+from services.persona.system import CompiledPersona
+from services.llm.tools import EnhancedToolSystem
 
 logger = logging.getLogger(__name__)
 

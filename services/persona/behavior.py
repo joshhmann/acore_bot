@@ -14,9 +14,9 @@ from collections import deque, defaultdict
 import discord
 
 from config import Config
-from services.ollama import OllamaService
-from services.context_manager import ContextManager
-from services.lorebook_service import LorebookService
+from services.llm.ollama import OllamaService
+from services.core.context import ContextManager
+from services.persona.lorebook import LorebookService
 
 logger = logging.getLogger(__name__)
 

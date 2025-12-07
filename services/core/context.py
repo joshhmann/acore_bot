@@ -5,9 +5,9 @@ from typing import List, Dict, Optional, Tuple
 import tiktoken
 
 from config import Config
-from services.persona_system import CompiledPersona
-from services.lorebook_service import LoreEntry
-from services.rag import RAGService
+from services.persona.system import CompiledPersona
+from services.persona.lorebook import LoreEntry
+from services.memory.rag import RAGService
 
 logger = logging.getLogger(__name__)
 

@@ -8,8 +8,8 @@ import hashlib
 from typing import List, Dict, Optional, AsyncGenerator
 
 from config import Config
-from services.llm_cache import LLMCache
-from services.rate_limiter import RateLimiter
+from services.llm.cache import LLMCache
+from services.core.rate_limiter import RateLimiter
 from services.interfaces import LLMInterface
 
 logger = logging.getLogger(__name__)

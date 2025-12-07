@@ -11,10 +11,10 @@ import asyncio
 import uuid
 
 from config import Config
-from services.tts import TTSService
-from services.rvc_unified import UnifiedRVCService
-from services.enhanced_voice_listener import EnhancedVoiceListener
-from services.voice_commands import VoiceCommandParser, CommandType
+from services.voice.tts import TTSService
+from services.voice.rvc import UnifiedRVCService
+from services.voice.listener import EnhancedVoiceListener
+from services.voice.commands import VoiceCommandParser, CommandType
 from utils.helpers import format_error, format_success, format_info
 from .manager import VoiceManager
 from .commands import VoiceCommands

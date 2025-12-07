@@ -1,25 +1,38 @@
 """Service factory for initializing bot services."""
 import logging
 from config import Config
-from services.ollama import OllamaService
-from services.tts import TTSService
-from services.rvc_unified import UnifiedRVCService
-from services.user_profiles import UserProfileService
-from services.memory_manager import MemoryManager
-from services.conversation_summarizer import ConversationSummarizer
-from services.rag import RAGService
-from services.whisper_stt import WhisperSTTService, VoiceActivityDetector
+
+# LLM domain
+from services.llm.ollama import OllamaService
+from services.llm.fallback import LLMFallbackManager, ModelConfig
+
+# Voice domain
+from services.voice.tts import TTSService
+from services.voice.rvc import UnifiedRVCService
+from services.voice.listener import EnhancedVoiceListener
 from services.clients.stt_client import ParakeetAPIService
-from services.enhanced_voice_listener import EnhancedVoiceListener
-from services.web_search import WebSearchService
-from services.conversation_manager import MultiTurnConversationManager
-from services.persona_system import PersonaSystem
-from services.ai_decision_engine import AIDecisionEngine
-from services.enhanced_tools import EnhancedToolSystem
-from services.metrics import MetricsService
-from services.reminders import RemindersService
-from services.notes import NotesService
-from services.llm_fallback import LLMFallbackManager, ModelConfig
+
+# Memory domain
+from services.memory.long_term import MemoryManager
+from services.memory.summarizer import ConversationSummarizer
+from services.memory.rag import RAGService
+from services.memory.conversation import MultiTurnConversationManager
+
+# Persona domain
+from services.persona.system import PersonaSystem
+
+# Discord domain
+from services.discord.profiles import UserProfileService
+from services.discord.web_search import WebSearchService
+from services.discord.reminders import RemindersService
+from services.discord.notes import NotesService
+
+# Core domain
+from services.core.metrics import MetricsService
+
+# LLM tools
+from services.llm.tools import EnhancedToolSystem
+
 from utils.helpers import ChatHistoryManager
 
 logger = logging.getLogger(__name__)
@@ -59,7 +72,7 @@ class ServiceFactory:
         """Initialize LLM and related services."""
         # Main LLM Provider
         if Config.LLM_PROVIDER == "openrouter":
-            from services.openrouter import OpenRouterService
+            from services.llm.openrouter import OpenRouterService
             self.services['ollama'] = OpenRouterService(
                 api_key=Config.OPENROUTER_API_KEY,
                 model=Config.OPENROUTER_MODEL,
@@ -131,7 +144,7 @@ class ServiceFactory:
         else:
             self.services['rvc'] = None
 
-        # STT (Speech-to-Text)
+        # STT (Speech-to-Text) - Parakeet API only
         self.services['stt'] = None
         self.services['enhanced_voice_listener'] = None
 
@@ -143,24 +156,6 @@ class ServiceFactory:
             )
             if parakeet.is_available():
                 self.services['stt'] = parakeet
-
-        # Whisper (Fallback/Legacy)
-        if (not self.services['stt'] and Config.WHISPER_ENABLED) or (Config.STT_ENGINE == "whisper" and Config.WHISPER_ENABLED):
-            whisper = WhisperSTTService(
-                model_size=Config.WHISPER_MODEL_SIZE,
-                device=Config.WHISPER_DEVICE,
-                language=Config.WHISPER_LANGUAGE,
-            )
-            if whisper.is_available():
-                self.services['stt'] = whisper
-
-                # Legacy detector
-                self.services['voice_activity_detector'] = VoiceActivityDetector(
-                    whisper_stt=whisper,
-                    temp_dir=Config.TEMP_DIR,
-                    silence_threshold=Config.WHISPER_SILENCE_THRESHOLD,
-                    max_recording_duration=Config.MAX_RECORDING_DURATION,
-                )
 
         # Enhanced Listener
         if self.services['stt']:
@@ -249,7 +244,7 @@ class ServiceFactory:
         """Initialize high-level AI systems."""
         self.services['persona_system'] = None
         self.services['compiled_persona'] = None
-        self.services['decision_engine'] = None
+        self.services['tool_system'] = None
 
         if Config.USE_PERSONA_SYSTEM:
             try:
@@ -265,10 +260,7 @@ class ServiceFactory:
                 if compiled_persona:
                     self.services['persona_system'] = persona_system
                     self.services['compiled_persona'] = compiled_persona
-
-                    decision_engine = AIDecisionEngine(self.services['ollama'], tool_system)
-                    decision_engine.set_persona(compiled_persona)
-                    self.services['decision_engine'] = decision_engine
+                    self.services['tool_system'] = tool_system
                     logger.info(f"AI Persona loaded: {compiled_persona.character.display_name}")
             except Exception as e:
                 logger.error(f"Error initializing persona system: {e}")

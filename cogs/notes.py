@@ -5,7 +5,7 @@ from discord.ext import commands
 import logging
 from datetime import datetime
 
-from services.notes import NotesService
+from services.discord.notes import NotesService
 from utils.helpers import format_error, format_success
 
 logger = logging.getLogger(__name__)

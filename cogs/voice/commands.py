@@ -9,7 +9,7 @@ import uuid
 import asyncio
 
 from config import Config
-from services.voice_commands import VoiceCommandParser, CommandType
+from services.voice.commands import VoiceCommandParser, CommandType
 from utils.helpers import format_error, format_success, format_info
 
 logger = logging.getLogger(__name__)

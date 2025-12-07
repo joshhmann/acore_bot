@@ -6,7 +6,7 @@ import logging
 from typing import Optional
 
 from config import Config
-from services.music_player import MusicPlayer
+from services.discord.music import MusicPlayer
 from utils.helpers import format_error
 
 logger = logging.getLogger(__name__)

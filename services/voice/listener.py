@@ -11,7 +11,7 @@ import struct
 
 import discord
 from discord.ext import voice_recv
-from services.transcription_fixer import get_transcription_fixer
+# Transcription fixer removed - Parakeet is accurate enough
 # Sound effects service removed - was never fully integrated
 
 logger = logging.getLogger(__name__)
@@ -367,15 +367,7 @@ class EnhancedVoiceListener:
             transcription = result["text"].strip()
             language = result.get("language", "unknown")
 
-            logger.info(f"Auto-transcribed (raw): {transcription}")
-
-            # Fix common transcription errors
-            fixer = get_transcription_fixer()
-            fixed_transcription = fixer.fix(transcription)
-
-            if fixed_transcription != transcription:
-                transcription = fixed_transcription
-                logger.info(f"Fixed transcription: {transcription}")
+            logger.info(f"Auto-transcribed: {transcription}")
 
             # Check for interrupt command (stop talking)
             voice_client = session.get("voice_client")

@@ -19,7 +19,7 @@ import asyncio
 from pathlib import Path
 
 from config import Config
-from services.service_factory import ServiceFactory
+from services.core.factory import ServiceFactory
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
 from cogs.music import MusicCog

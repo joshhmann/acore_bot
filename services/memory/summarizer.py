@@ -7,8 +7,8 @@ from typing import Dict, List, Optional
 import json
 import aiofiles
 
-from services.ollama import OllamaService
-from services.rag import RAGService
+from services.llm.ollama import OllamaService
+from services.memory.rag import RAGService
 
 logger = logging.getLogger(__name__)
 

@@ -14,7 +14,7 @@ import re
 import asyncio
 
 from config import Config
-from services.ollama import OllamaService
+from services.llm.ollama import OllamaService
 
 # Intent system removed - now AI-first with LLM tool calling
 # from services.intent_recognition import IntentRecognitionService, ConversationalResponder
@@ -41,9 +41,9 @@ from .message_handler import MessageHandler
 from .commands import ChatCommandHandler
 
 # New services
-from services.context_manager import ContextManager
-from services.lorebook_service import LorebookService
-from services.behavior_engine import BehaviorEngine
+from services.core.context import ContextManager
+from services.persona.lorebook import LorebookService
+from services.persona.behavior import BehaviorEngine
 
 logger = logging.getLogger(__name__)
 
@@ -604,7 +604,7 @@ class ChatCog(commands.Cog):
             else:
                 # Fallback: Wrap legacy system prompt in a dummy compiled persona structure
                 # This is a bit hacky but ensures compatibility with ContextManager
-                from services.persona_system import (
+                from services.persona.system import (
                     CompiledPersona,
                     Character,
                     Framework,
