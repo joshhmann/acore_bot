@@ -37,9 +37,12 @@ from .helpers import ChatHelpers
 from .session_manager import SessionManager
 from .voice_integration import VoiceIntegration
 from .response_handler import _handle_chat_response as _handle_chat_response_func
-from .context_builder import ContextBuilder
 from .message_handler import MessageHandler
 from .commands import ChatCommandHandler
+
+# New services
+from services.context_manager import ContextManager
+from services.lorebook_service import LorebookService
 
 logger = logging.getLogger(__name__)
 
@@ -123,9 +126,12 @@ class ChatCog(commands.Cog):
         self.helpers = ChatHelpers()
         self.session_manager = SessionManager()
         self.voice_integration = VoiceIntegration(bot, self.helpers.analyze_sentiment)
-        self.context_builder = ContextBuilder(self)
         self.message_handler = MessageHandler(self)
         self.command_handler = ChatCommandHandler(self)
+
+        # Initialize new services
+        self.context_manager = ContextManager()
+        self.lorebook_service = LorebookService()
 
         # Load persona configurations
         self.persona_loader = PersonaLoader()
@@ -538,237 +544,104 @@ class ChatCog(commands.Cog):
             # Add user message
             history.append({"role": "user", "content": message_content})
 
-            # Build system prompt with context (TIME FIRST so it's most prominent)
-            context_parts = [SystemContextProvider.get_compact_context()]
+            # --- CONTEXT BUILDING ---
 
-            # Add multi-user context
-            multi_user_context = self.history.build_multi_user_context(history)
-            if multi_user_context:
-                context_parts.append(f"\n[Context: {multi_user_context}]")
+            # 1. Gather all dynamic context strings
+            user_context_str = ""
+            rag_context_str = ""
 
-            # Add user profile context if enabled
+            # User Context
             if self.user_profiles and Config.USER_CONTEXT_IN_CHAT:
                 user_context = await self.user_profiles.get_user_context(user_id)
-                if (
-                    user_context
-                    and user_context != "New user - no profile information yet."
-                ):
-                    # Check for behavioral instructions in user profile
+                if user_context and user_context != "New user - no profile information yet.":
+                    user_context_str += f"User Profile: {user_context}\n"
+
+                    # Special Instructions from Profile
                     profile = await self.user_profiles.load_profile(user.id)
                     special_instructions = []
-
-                    # Look for "when you see" or "always say" type facts
                     for fact_entry in profile.get("facts", []):
-                        # Handle both dict (new format) and string (legacy format)
-                        if isinstance(fact_entry, dict):
-                            fact_text = fact_entry.get("fact", "")
-                        else:
-                            fact_text = str(fact_entry)
-
+                        fact_text = fact_entry.get("fact", "") if isinstance(fact_entry, dict) else str(fact_entry)
                         fact_lower = fact_text.lower()
-
-                        # Check for instructions
-                        if any(
-                            keyword in fact_lower
-                            for keyword in [
-                                "when you see",
-                                "always say",
-                                "greet with",
-                                "call them",
-                                "respond with",
-                                "call me",
-                            ]
-                        ):
+                        if any(k in fact_lower for k in ["when you see", "always say", "greet with", "call them", "respond with", "call me"]):
                             special_instructions.append(fact_text)
-
-                    # If there are special instructions, put them at the VERY TOP
                     if special_instructions:
-                        instruction_text = "\n".join(
-                            [f"- {inst}" for inst in special_instructions]
-                        )
-                        context_parts.insert(
-                            0,
-                            f"\n[CRITICAL USER-SPECIFIC INSTRUCTIONS - FOLLOW EXACTLY:\n{instruction_text}\n]",
-                        )
+                        user_context_str += "\nInstructions:\n" + "\n".join(f"- {inst}" for inst in special_instructions)
 
-                    # Add general user context
-                    context_parts.append(f"\n[User Info: {user_context}]")
-
-                # Add affection/relationship context if enabled
+                # Affection
                 if Config.USER_AFFECTION_ENABLED:
-                    affection_context = self.user_profiles.get_affection_context(
-                        user_id
-                    )
-                    if affection_context:
-                        context_parts.append(f"\n[Relationship: {affection_context}]")
+                    affection = self.user_profiles.get_affection_context(user_id)
+                    if affection:
+                        user_context_str += f"\nRelationship: {affection}"
 
-            # Add memory recall from past conversations
+            # Memory / Summarizer Context
             if self.summarizer:
-                memory_context = await self.summarizer.build_memory_context(
-                    message_content
-                )
-                if memory_context:
-                    context_parts.append(f"\n{memory_context}")
+                memory = await self.summarizer.build_memory_context(message_content)
+                if memory:
+                    user_context_str += f"\n\nMemories:\n{memory}"
 
-            # Add RAG context from documents (if enabled and has documents)
+            # RAG Context
             if self.rag and Config.RAG_IN_CHAT and self.rag.is_enabled():
-                # Boost documents matching the current persona
                 persona_boost = None
-                if self.current_persona:
-                    # Use explicitly configured category or fallback to persona name
-                    persona_boost = (
-                        self.current_persona.rag_boost_category
-                        or self.current_persona.name
-                    )
+                if self.compiled_persona:
+                     # Use framework purpose or character name as boost category logic
+                     persona_boost = self.compiled_persona.character.display_name
 
-                rag_context = self.rag.get_context(
-                    message_content, max_length=1000, boost_category=persona_boost
-                )
-                if rag_context:
-                    # CRITICAL: Insert RAG context at the VERY BEGINNING of context_parts
-                    # This ensures it overrides general personality traits
-                    context_parts.insert(
-                        0,
-                        f"\n[CRITICAL KNOWLEDGE - USE THIS TO ANSWER:\n{rag_context}\n]",
-                    )
+                rag_content = self.rag.get_context(message_content, max_length=1500, boost_category=persona_boost)
+                if rag_content:
+                    rag_context_str = rag_content
 
-            # Add emotional state context
-            emotional_context = self.enhancer.get_emotional_context()
-            if emotional_context:
-                context_parts.append(f"\n[{emotional_context}]")
-
-            # Track conversation topics for callbacks
-            if self.callbacks:
-                await self.callbacks.track_conversation_topic(
-                    channel_id, message_content, str(user.name)
-                )
-
-                # Check for callback opportunities
-                callback_prompt = await self.callbacks.get_callback_opportunity(
-                    channel_id, message_content
-                )
-                if callback_prompt:
-                    context_parts.append(f"\n{callback_prompt}")
-
-                # Add recent conversation context
-                recent_context = await self.callbacks.get_recent_context(channel_id)
-                if recent_context:
-                    context_parts.append(f"\n{recent_context}")
-
-            # Track message rhythm
-            if self.naturalness:
-                self.naturalness.track_message_rhythm(channel_id, len(message_content))
-
-                # Add rhythm-based style guidance
-                rhythm_prompt = self.naturalness.get_rhythm_style_prompt(channel_id)
-                if rhythm_prompt:
-                    context_parts.append(f"\n{rhythm_prompt}")
-
-                # Add voice context if applicable
-                if channel.guild:
-                    voice_context = self.naturalness.get_voice_context(channel.guild)
-                    if voice_context:
-                        context_parts.append(f"\n{voice_context}")
-
-            # Add web search results if query needs current information
+            # Web Search
             if self.web_search and await self.web_search.should_search(message_content):
                 try:
-                    search_context = await self.web_search.get_context(
-                        message_content, max_length=800
-                    )
-                    if search_context:
-                        context_parts.append(
-                            f"\n\n{'=' * 60}\n[REAL-TIME WEB SEARCH RESULTS - READ THIS EXACTLY]\n{'=' * 60}\n{search_context}\n{'=' * 60}\n[END OF WEB SEARCH RESULTS]\n{'=' * 60}\n\n[CRITICAL INSTRUCTIONS - VIOLATION WILL BE DETECTED]\n1. You MUST ONLY cite information that appears EXACTLY in the search results above\n2. COPY the exact URLs shown - DO NOT modify or create new ones\n3. If search results are irrelevant (e.g., wrong topic, unrelated content), tell the user: 'The search didn't return relevant results'\n4. DO NOT invent Steam pages, Reddit posts, YouTube videos, or patch notes\n5. If you cite a URL, it MUST be copied EXACTLY from the search results\n6. When in doubt, say 'I don't have current information' - DO NOT GUESS\n\nVIOLATING THESE RULES BY INVENTING INFORMATION WILL BE IMMEDIATELY DETECTED."
-                        )
-                        logger.info(
-                            f"Added web search context for: {message_content[:50]}..."
-                        )
+                    search_res = await self.web_search.get_context(message_content, max_length=1000)
+                    if search_res:
+                        rag_context_str += f"\n\n[WEB SEARCH RESULTS]\n{search_res}"
                 except Exception as e:
                     logger.error(f"Web search failed: {e}")
 
-            # Add mood context if naturalness service is available
-            if self.naturalness and Config.MOOD_SYSTEM_ENABLED:
-                mood_context = self.naturalness.get_mood_context()
-                if mood_context:
-                    context_parts.append(f"\n{mood_context}")
-
-            # Add user-specific adaptation guidance (Learning & Adaptation)
-            if self.pattern_learner:
-                adaptation_guidance = self.pattern_learner.get_adaptation_guidance(
-                    user.id
+            # Lorebook Scanning
+            lore_entries = []
+            if self.lorebook_service:
+                # Scan full text (history + current)
+                scan_text = message_content + "\n" + "\n".join([m['content'] for m in history[-5:]])
+                lore_entries = self.lorebook_service.scan_for_triggers(
+                    scan_text,
+                    self.lorebook_service.get_available_lorebooks()
                 )
-                if adaptation_guidance:
-                    context_parts.append(f"\n[User Adaptation: {adaptation_guidance}]")
-                    logger.debug(f"Added adaptation guidance for user {user.id}")
 
-            # Add AI Decision Engine style guidance if available
-            if suggested_style:
-                style_map = {
-                    "direct": "Be direct and to-the-point in your response.",
-                    "conversational": "Keep the conversation flowing naturally and casually.",
-                    "descriptive": "Provide detailed, descriptive responses.",
-                    "helpful": "Be helpful and informative.",
-                    "casual": "Keep it casual and relaxed.",
-                    "playful": "Be playful and engaging in your tone.",
-                    "corrective": "Provide corrections or clarifications confidently.",
-                    "engaged": "Show genuine interest and engagement with the topic.",
-                    "random": "Feel free to be spontaneous and unpredictable.",
-                }
-                style_guidance = style_map.get(
-                    suggested_style, f"Adopt a {suggested_style} tone."
+            # Determine Model for Token Counting
+            current_model = self.ollama.get_model_name() or "gpt-3.5-turbo"
+
+            # Build Final Messages with Token Budgeting
+            # If we have a compiled persona, use it. Otherwise create a temporary wrapper for legacy system prompt.
+            if self.compiled_persona:
+                persona_to_use = self.compiled_persona
+            else:
+                # Fallback: Wrap legacy system prompt in a dummy compiled persona structure
+                # This is a bit hacky but ensures compatibility with ContextManager
+                from services.persona_system import CompiledPersona, Character, Framework
+                dummy_char = Character("legacy", "Assistant", {}, {}, {}, {}, {})
+                dummy_fw = Framework("legacy", "Legacy", "Helpful", {}, {}, {}, {}, {}, {}, "")
+                persona_to_use = CompiledPersona(
+                    "legacy", dummy_char, dummy_fw,
+                    system_prompt=self.system_prompt,
+                    tools_required=[], config={}
                 )
-                context_parts.append(f"\n[Response Style: {style_guidance}]")
-                logger.debug(f"Added style guidance: {suggested_style}")
 
-            # Add response style guidance for natural conversation
-            context_parts.append("""
-[CONVERSATIONAL STYLE GUIDE - FOLLOW THIS CAREFULLY]
-• FLOW NATURALLY - Don't announce yourself, introduce yourself, or explain yourself
-• NEVER say "As [character name]..." or "[Character name] here" or "Speaking as..."
-• NEVER explain your status/nature mid-conversation ("I'm a god", "being immortal", etc.)
-• Just BE the character - respond naturally without meta-commentary
-• Avoid filler phrases like "Tell me more...", "How interesting...", "Fascinating..." (sounds fake)
-• Talk like a real person would talk
-• Use contractions (I'm, you're, don't, can't) frequently
-• Vary your sentence structure - mix short and long sentences
-• Express genuine reactions: "Oh nice!", "Hmm interesting", "Wait really?"
-• Match the user's energy and tone
-• Response length: Aim for 2-4 sentences typically. Simple acknowledgments can be 1 sentence, but questions about YOU deserve fuller responses with personality
-• NEVER give one-word answers unless it's truly appropriate (rare)
-• It's okay to be uncertain or admit when you don't know something
-• Use informal language when appropriate: "yeah", "nah", "totally", "pretty much"
-• Show personality consistent with your character
-• USE YOUR MEMORIES & KNOWLEDGE: If you see relevant info in the context, use it naturally as if it's your own memory
-]""")
-
-            # Inject all context into system prompt (CHARACTER FIRST, then context)
-            # CRITICAL: Put character instructions FIRST so they're not overridden by context
-            context_injected_prompt = (
-                f"{self.system_prompt}\n\n{''.join(context_parts)}"
+            # Use Context Manager to build optimized history
+            final_messages = await self.context_manager.build_context(
+                persona=persona_to_use,
+                history=history,
+                model_name=current_model,
+                lore_entries=lore_entries,
+                rag_content=rag_context_str,
+                user_context=user_context_str
             )
 
             # Log action for self-awareness
             if self.naturalness:
                 self.naturalness.log_action("chat", f"User: {str(user.name)}")
 
-            # Response optimization disabled - service removed
-            # if Config.DYNAMIC_MAX_TOKENS:
-            #     optimization = ResponseOptimizer.optimize_request_params(
-            #         message_content,
-            #         base_params={'max_tokens': Config.OLLAMA_MAX_TOKENS or 500},
-            #         enable_dynamic_tokens=True,
-            #         streaming_threshold=Config.STREAMING_TOKEN_THRESHOLD
-            #     )
-            #     optimal_max_tokens = optimization['max_tokens']
-            #     optimization_info = optimization.get('_optimization_info', {})
-            #
-            #     # Override streaming decision if optimizer suggests
-            #     if 'use_streaming' in optimization_info:
-            #         should_stream = optimization_info['use_streaming']
-            #         logger.debug(
-            #             f"Optimizer suggests streaming: {should_stream} "
-            #             f"(estimated {optimal_max_tokens} tokens)"
-            #         )
             # Use default values since optimizer is disabled
             optimal_max_tokens = Config.OLLAMA_MAX_TOKENS or 500
             should_stream = Config.RESPONSE_STREAMING_ENABLED
@@ -786,32 +659,34 @@ class ChatCog(commands.Cog):
                         # Convert to base64
                         image_base64 = image_to_base64(image_data)
 
-                        # Add image context to the message
-                        vision_message = f"{message_content}\n\n[Note: User is referencing an image from a recent message]"
+                        # Add image to last user message in final_messages
+                        # Note: This assumes the last message is from user. ContextManager preserves order.
+                        # Ollama expects "images" field in the message dict
+                        if final_messages and final_messages[-1]['role'] == 'user':
+                             final_messages[-1]['images'] = [image_base64]
+
+                        # Add explicit instruction about the image
+                        final_messages[-1]['content'] += "\n\n[Note: User is referencing the attached image]"
 
                         # Use vision model
-                        response = await self.ollama.chat_with_vision(
-                            prompt=vision_message,
-                            images=[image_base64],
-                            system_prompt=context_injected_prompt,
-                            model=Config.VISION_MODEL,
-                            max_tokens=optimal_max_tokens,
+                        # Note: standard chat endpoint supports images in Ollama now if model supports it
+                        response = await self.ollama.chat(
+                            final_messages,
+                            temperature=self.ollama.temperature,
                         )
 
                         logger.info("Successfully processed recent image with vision")
                     else:
                         # Fallback to text-only if download failed
                         response = await self.ollama.chat(
-                            history,
-                            system_prompt=context_injected_prompt,
+                            final_messages,
                             max_tokens=optimal_max_tokens,
                         )
                 except Exception as e:
                     logger.error(f"Vision processing failed for recent image: {e}")
                     # Fallback to text-only
                     response = await self._llm_chat(
-                        history,
-                        system_prompt=context_injected_prompt,
+                        final_messages,
                         max_tokens=optimal_max_tokens,
                     )
             else:
@@ -820,15 +695,20 @@ class ChatCog(commands.Cog):
                 # 1. Use Agentic Tools (ReAct) if available
                 # Note: Streaming is currently disabled for agentic tools to prevent showing tool calls to users
                 if self.agentic_tools:
-
-                    async def llm_generate(conv):
+                     async def llm_generate(conv):
                         # LLM chat with fallback if enabled; system prompt already in conv
                         return await self._llm_chat(conv, system_prompt=None)
 
-                    response = await self.agentic_tools.process_with_tools(
+                     # Extract user message from final_messages for tool processing
+                     user_msg_content = final_messages[-1]['content']
+
+                     # Extract system prompt from the first message
+                     system_prompt = final_messages[0]['content'] if final_messages and final_messages[0]['role'] == 'system' else ""
+
+                     response = await self.agentic_tools.process_with_tools(
                         llm_generate_func=llm_generate,
-                        user_message=message_content,
-                        system_prompt=context_injected_prompt,
+                        user_message=user_msg_content,
+                        system_prompt=system_prompt,
                         max_iterations=3,
                     )
 
@@ -869,9 +749,10 @@ class ChatCog(commands.Cog):
                                 edge_rate = "-10%"
 
                             # Create multiplexer for single LLM stream
+                            # Pass final_messages which already includes system prompt
                             llm_stream = self.ollama.chat_stream(
-                                history,
-                                system_prompt=context_injected_prompt,
+                                final_messages,
+                                system_prompt=None, # Already in messages
                                 max_tokens=optimal_max_tokens,
                             )
                             multiplexer = StreamMultiplexer(llm_stream)
@@ -933,8 +814,8 @@ class ChatCog(commands.Cog):
                         else:
                             # Fallback if voice cog not available
                             async for chunk in self.ollama.chat_stream(
-                                history,
-                                system_prompt=context_injected_prompt,
+                                final_messages,
+                                system_prompt=None,
                                 max_tokens=optimal_max_tokens,
                             ):
                                 response += chunk
@@ -971,8 +852,8 @@ class ChatCog(commands.Cog):
                     else:
                         # Standard text-only streaming (no voice or voice disabled)
                         async for chunk in self.ollama.chat_stream(
-                            history,
-                            system_prompt=context_injected_prompt,
+                            final_messages,
+                            system_prompt=None,
                             max_tokens=optimal_max_tokens,
                         ):
                             response += chunk
@@ -1034,8 +915,8 @@ class ChatCog(commands.Cog):
                 # 3. Standard Non-Streaming Fallback
                 else:
                     response = await self.ollama.chat(
-                        history,
-                        system_prompt=context_injected_prompt,
+                        final_messages,
+                        system_prompt=None,
                         max_tokens=optimal_max_tokens,
                     )
 
