@@ -5,7 +5,7 @@ import aiohttp
 from urllib.parse import quote_plus
 import asyncio
 import time
-from ddgs import DDGS
+from duckduckgo_search import DDGS
 # Query optimizer removed - feature was never fully integrated
 # from services.query_optimizer import get_query_optimizer
 import re
