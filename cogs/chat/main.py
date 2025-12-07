@@ -15,6 +15,7 @@ import asyncio
 
 from config import Config
 from services.ollama import OllamaService
+
 # Intent system removed - now AI-first with LLM tool calling
 # from services.intent_recognition import IntentRecognitionService, ConversationalResponder
 # from services.intent_handler import IntentHandler
@@ -79,6 +80,15 @@ class ChatCog(commands.Cog):
         self.persona_system = persona_system
         self.compiled_persona = compiled_persona
 
+        # Track background tasks for proper cleanup (MUST be initialized first)
+        self._background_tasks: set = set()
+
+        # Services that may be added later (prevent AttributeError)
+        self.naturalness = None
+        self.callbacks_system = None
+        self.curiosity_system = None
+        self.pattern_learner = None
+
         # Initialize modularized components (must be before _load_system_prompt)
         self.helpers = ChatHelpers()
         self.session_manager = SessionManager()
@@ -92,10 +102,7 @@ class ChatCog(commands.Cog):
 
         # Initialize Behavior Engine
         self.behavior_engine = BehaviorEngine(
-            bot,
-            ollama,
-            self.context_manager,
-            self.lorebook_service
+            bot, ollama, self.context_manager, self.lorebook_service
         )
         # Pass initial persona if available
         if self.compiled_persona:
@@ -120,9 +127,6 @@ class ChatCog(commands.Cog):
                 self.current_persona = default_persona
                 logger.info(f"Loaded default persona: {default_persona.display_name}")
 
-        # Track background tasks for proper cleanup
-        self._background_tasks: set = set()
-
         # Intent system removed - LLM handles intents via tool calling now
         self.intent_recognition = None
         self.intent_handler = None
@@ -139,7 +143,9 @@ class ChatCog(commands.Cog):
         self.agentic_tools = None  # TODO: Consolidate with enhanced_tools
 
         # Bind extracted response handler method
-        self._handle_chat_response = _handle_chat_response_func.__get__(self, type(self))
+        self._handle_chat_response = _handle_chat_response_func.__get__(
+            self, type(self)
+        )
 
     async def _llm_chat(
         self, messages, system_prompt=None, temperature=None, max_tokens=None
@@ -476,7 +482,7 @@ class ChatCog(commands.Cog):
             action = await self.behavior_engine.handle_message(original_message)
 
             # If behavior engine wants to reply proactively (e.g. interrupt), handle it
-            if action and action.get('reply'):
+            if action and action.get("reply"):
                 # We can either append it or handle it here
                 # But since we are already replying (we got triggered),
                 # we usually ignore the proactive suggestion unless it's a "interrupt"
@@ -506,19 +512,38 @@ class ChatCog(commands.Cog):
             # User Context
             if self.user_profiles and Config.USER_CONTEXT_IN_CHAT:
                 user_context = await self.user_profiles.get_user_context(user_id)
-                if user_context and user_context != "New user - no profile information yet.":
+                if (
+                    user_context
+                    and user_context != "New user - no profile information yet."
+                ):
                     user_context_str += f"User Profile: {user_context}\n"
 
                     # Special Instructions from Profile
                     profile = await self.user_profiles.load_profile(user.id)
                     special_instructions = []
                     for fact_entry in profile.get("facts", []):
-                        fact_text = fact_entry.get("fact", "") if isinstance(fact_entry, dict) else str(fact_entry)
+                        fact_text = (
+                            fact_entry.get("fact", "")
+                            if isinstance(fact_entry, dict)
+                            else str(fact_entry)
+                        )
                         fact_lower = fact_text.lower()
-                        if any(k in fact_lower for k in ["when you see", "always say", "greet with", "call them", "respond with", "call me"]):
+                        if any(
+                            k in fact_lower
+                            for k in [
+                                "when you see",
+                                "always say",
+                                "greet with",
+                                "call them",
+                                "respond with",
+                                "call me",
+                            ]
+                        ):
                             special_instructions.append(fact_text)
                     if special_instructions:
-                        user_context_str += "\nInstructions:\n" + "\n".join(f"- {inst}" for inst in special_instructions)
+                        user_context_str += "\nInstructions:\n" + "\n".join(
+                            f"- {inst}" for inst in special_instructions
+                        )
 
                 # Affection
                 if Config.USER_AFFECTION_ENABLED:
@@ -536,17 +561,21 @@ class ChatCog(commands.Cog):
             if self.rag and Config.RAG_IN_CHAT and self.rag.is_enabled():
                 persona_boost = None
                 if self.compiled_persona:
-                     # Use framework purpose or character name as boost category logic
-                     persona_boost = self.compiled_persona.character.display_name
+                    # Use framework purpose or character name as boost category logic
+                    persona_boost = self.compiled_persona.character.display_name
 
-                rag_content = self.rag.get_context(message_content, max_length=1500, boost_category=persona_boost)
+                rag_content = self.rag.get_context(
+                    message_content, max_length=1500, boost_category=persona_boost
+                )
                 if rag_content:
                     rag_context_str = rag_content
 
             # Web Search
             if self.web_search and await self.web_search.should_search(message_content):
                 try:
-                    search_res = await self.web_search.get_context(message_content, max_length=1000)
+                    search_res = await self.web_search.get_context(
+                        message_content, max_length=1000
+                    )
                     if search_res:
                         rag_context_str += f"\n\n[WEB SEARCH RESULTS]\n{search_res}"
                 except Exception as e:
@@ -556,10 +585,13 @@ class ChatCog(commands.Cog):
             lore_entries = []
             if self.lorebook_service:
                 # Scan full text (history + current)
-                scan_text = message_content + "\n" + "\n".join([m['content'] for m in history[-5:]])
+                scan_text = (
+                    message_content
+                    + "\n"
+                    + "\n".join([m["content"] for m in history[-5:]])
+                )
                 lore_entries = self.lorebook_service.scan_for_triggers(
-                    scan_text,
-                    self.lorebook_service.get_available_lorebooks()
+                    scan_text, self.lorebook_service.get_available_lorebooks()
                 )
 
             # Determine Model for Token Counting
@@ -572,13 +604,23 @@ class ChatCog(commands.Cog):
             else:
                 # Fallback: Wrap legacy system prompt in a dummy compiled persona structure
                 # This is a bit hacky but ensures compatibility with ContextManager
-                from services.persona_system import CompiledPersona, Character, Framework
+                from services.persona_system import (
+                    CompiledPersona,
+                    Character,
+                    Framework,
+                )
+
                 dummy_char = Character("legacy", "Assistant", {}, {}, {}, {}, {})
-                dummy_fw = Framework("legacy", "Legacy", "Helpful", {}, {}, {}, {}, {}, {}, "")
+                dummy_fw = Framework(
+                    "legacy", "Legacy", "Helpful", {}, {}, {}, {}, {}, {}, ""
+                )
                 persona_to_use = CompiledPersona(
-                    "legacy", dummy_char, dummy_fw,
+                    "legacy",
+                    dummy_char,
+                    dummy_fw,
                     system_prompt=self.system_prompt,
-                    tools_required=[], config={}
+                    tools_required=[],
+                    config={},
                 )
 
             # Use Context Manager to build optimized history
@@ -588,7 +630,7 @@ class ChatCog(commands.Cog):
                 model_name=current_model,
                 lore_entries=lore_entries,
                 rag_content=rag_context_str,
-                user_context=user_context_str
+                user_context=user_context_str,
             )
 
             # Log action for self-awareness
@@ -615,11 +657,13 @@ class ChatCog(commands.Cog):
                         # Add image to last user message in final_messages
                         # Note: This assumes the last message is from user. ContextManager preserves order.
                         # Ollama expects "images" field in the message dict
-                        if final_messages and final_messages[-1]['role'] == 'user':
-                             final_messages[-1]['images'] = [image_base64]
+                        if final_messages and final_messages[-1]["role"] == "user":
+                            final_messages[-1]["images"] = [image_base64]
 
                         # Add explicit instruction about the image
-                        final_messages[-1]['content'] += "\n\n[Note: User is referencing the attached image]"
+                        final_messages[-1]["content"] += (
+                            "\n\n[Note: User is referencing the attached image]"
+                        )
 
                         # Use vision model
                         # Note: standard chat endpoint supports images in Ollama now if model supports it
@@ -648,17 +692,22 @@ class ChatCog(commands.Cog):
                 # 1. Use Agentic Tools (ReAct) if available
                 # Note: Streaming is currently disabled for agentic tools to prevent showing tool calls to users
                 if self.agentic_tools:
-                     async def llm_generate(conv):
+
+                    async def llm_generate(conv):
                         # LLM chat with fallback if enabled; system prompt already in conv
                         return await self._llm_chat(conv, system_prompt=None)
 
-                     # Extract user message from final_messages for tool processing
-                     user_msg_content = final_messages[-1]['content']
+                    # Extract user message from final_messages for tool processing
+                    user_msg_content = final_messages[-1]["content"]
 
-                     # Extract system prompt from the first message
-                     system_prompt = final_messages[0]['content'] if final_messages and final_messages[0]['role'] == 'system' else ""
+                    # Extract system prompt from the first message
+                    system_prompt = (
+                        final_messages[0]["content"]
+                        if final_messages and final_messages[0]["role"] == "system"
+                        else ""
+                    )
 
-                     response = await self.agentic_tools.process_with_tools(
+                    response = await self.agentic_tools.process_with_tools(
                         llm_generate_func=llm_generate,
                         user_message=user_msg_content,
                         system_prompt=system_prompt,
@@ -705,7 +754,7 @@ class ChatCog(commands.Cog):
                             # Pass final_messages which already includes system prompt
                             llm_stream = self.ollama.chat_stream(
                                 final_messages,
-                                system_prompt=None, # Already in messages
+                                system_prompt=None,  # Already in messages
                                 max_tokens=optimal_max_tokens,
                             )
                             multiplexer = StreamMultiplexer(llm_stream)
@@ -1050,7 +1099,6 @@ class ChatCog(commands.Cog):
     async def end_session(self, interaction: discord.Interaction):
         """End the active conversation session in this channel."""
         await self.command_handler.end_session(interaction)
-
 
     async def _reset_status_delayed(self, delay: float = 5.0):
         """Reset dashboard status to Idle after a delay."""

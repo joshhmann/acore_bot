@@ -9,9 +9,9 @@ This module contains the core _handle_chat_response method which handles:
 
 Usage:
     In main.py, import and bind to the ChatCog instance:
-    
+
     from .response_handler import _handle_chat_response
-    
+
     class ChatCog:
         def __init__(self, ...):
             ...
@@ -40,6 +40,7 @@ from utils.helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
 
 async def _handle_chat_response(
     self,
@@ -76,9 +77,7 @@ async def _handle_chat_response(
             if interaction.response.is_done():
                 await interaction.followup.send(content, ephemeral=ephemeral)
             else:
-                await interaction.response.send_message(
-                    content, ephemeral=ephemeral
-                )
+                await interaction.response.send_message(content, ephemeral=ephemeral)
         else:
             if not ephemeral:  # Can't send ephemeral to channel
                 await channel.send(content)
@@ -86,9 +85,7 @@ async def _handle_chat_response(
     # Input validation
     if not isinstance(message_content, str):
         logger.warning(f"message_content is not a string: {type(message_content)}")
-        message_content = (
-            str(message_content) if message_content is not None else ""
-        )
+        message_content = str(message_content) if message_content is not None else ""
 
     if len(message_content) > 4000:
         await send_response(
@@ -108,9 +105,7 @@ async def _handle_chat_response(
         # Prepare user content (strip mention)
         user_content = message_content
         if self.bot.user in original_message.mentions:
-            user_content = message_content.replace(
-                f"<@{self.bot.user.id}>", ""
-            ).strip()
+            user_content = message_content.replace(f"<@{self.bot.user.id}>", "").strip()
 
         conversation = self.conversation_manager.get_conversation(channel.id)
         if conversation:
@@ -141,9 +136,7 @@ async def _handle_chat_response(
         # Prepare user content (strip mention)
         user_content = message_content
         if self.bot.user in original_message.mentions:
-            user_content = message_content.replace(
-                f"<@{self.bot.user.id}>", ""
-            ).strip()
+            user_content = message_content.replace(f"<@{self.bot.user.id}>", "").strip()
 
         server_id = original_message.guild.id if original_message.guild else None
         intent = self.intent_recognition.detect_intent(
@@ -157,9 +150,7 @@ async def _handle_chat_response(
             logger.info(
                 f"Detected intent: {intent.intent_type} (confidence: {intent.confidence}) for message: '{user_content[:50]}'"
             )
-            handled = await self.intent_handler.handle_intent(
-                intent, original_message
-            )
+            handled = await self.intent_handler.handle_intent(intent, original_message)
             logger.info(f"Intent {intent.intent_type} handled: {handled}")
             if handled:
                 # Intent was fully handled, no need for AI response
@@ -205,9 +196,7 @@ async def _handle_chat_response(
 
     # Also check if the current message HAS an image (implicit reference)
     has_attachment = False
-    if original_message and (
-        original_message.attachments or original_message.embeds
-    ):
+    if original_message and (original_message.attachments or original_message.embeds):
         has_attachment = True
         is_referencing_image = True  # Treat as referencing the attached image
 
@@ -248,9 +237,7 @@ async def _handle_chat_response(
                         for attachment in msg.attachments:
                             if is_image_attachment(attachment.filename):
                                 recent_image_url = attachment.url
-                                logger.info(
-                                    f"Found recent image: {recent_image_url}"
-                                )
+                                logger.info(f"Found recent image: {recent_image_url}")
                                 break
 
                     # Check for embeds with images
@@ -322,13 +309,13 @@ async def _handle_chat_response(
         # Add user message
         history.append({"role": "user", "content": message_content})
 
-        # Build system prompt with context using ContextBuilder
-        context_injected_prompt = await self.context_builder.build_context(
+        # Build system prompt with context using ContextManager
+        context_injected_prompt = await self.context_manager.build_context(
             user=user,
             channel=channel,
             user_content=message_content,
             history=history,
-            suggested_style=suggested_style
+            suggested_style=suggested_style,
         )
 
         # Log action for self-awareness
@@ -360,9 +347,7 @@ async def _handle_chat_response(
         # If we found a recent image, process it with vision
         if recent_image_url and Config.VISION_ENABLED:
             try:
-                logger.info(
-                    f"Processing recent image with vision: {recent_image_url}"
-                )
+                logger.info(f"Processing recent image with vision: {recent_image_url}")
                 # Download the image (returns bytes)
                 image_data = await download_attachment(recent_image_url)
 
@@ -445,10 +430,7 @@ async def _handle_chat_response(
 
                         # Update message periodically to avoid rate limits
                         current_time = time.time()
-                        if (
-                            current_time - last_update
-                            >= Config.STREAM_UPDATE_INTERVAL
-                        ):
+                        if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
                             if interaction:
                                 # Apply mention conversion for Discord display
                                 display_text = (
@@ -457,10 +439,8 @@ async def _handle_chat_response(
                                     else response
                                 )
                                 if not response_message:
-                                    response_message = (
-                                        await interaction.followup.send(
-                                            display_text[:2000]
-                                        )
+                                    response_message = await interaction.followup.send(
+                                        display_text[:2000]
                                     )
                                 else:
                                     try:
@@ -585,9 +565,7 @@ async def _handle_chat_response(
                 user_id=user.id,
             )
             # Use discord_response for history (with proper mention tags)
-            await self.history.add_message(
-                channel_id, "assistant", discord_response
-            )
+            await self.history.add_message(channel_id, "assistant", discord_response)
 
         # Start a conversation session
         await self.session_manager.start_session(channel_id, user.id)
@@ -653,4 +631,3 @@ async def _handle_chat_response(
             self.bot.metrics.record_error(error_type, str(e))
 
         await send_response(format_error(e))
-

@@ -1,11 +1,13 @@
 """Web Search service for retrieving real-time information from the internet."""
+
 import logging
 from typing import List, Dict, Optional, Tuple
 import aiohttp
 from urllib.parse import quote_plus
 import asyncio
 import time
-from duckduckgo_search import DDGS
+from ddgs import DDGS
+
 # Query optimizer removed - feature was never fully integrated
 # from services.query_optimizer import get_query_optimizer
 import re
@@ -19,7 +21,14 @@ class WebSearchService:
     Supports DuckDuckGo (no API key needed) and Google (requires API key).
     """
 
-    def __init__(self, engine: str = "duckduckgo", max_results: int = 3, google_api_key: str = None, google_cx_id: str = None, use_optimizer: bool = True):
+    def __init__(
+        self,
+        engine: str = "duckduckgo",
+        max_results: int = 3,
+        google_api_key: str = None,
+        google_cx_id: str = None,
+        use_optimizer: bool = True,
+    ):
         """Initialize web search service.
 
         Args:
@@ -43,7 +52,9 @@ class WebSearchService:
         # Query optimizer disabled - service removed
         self.optimizer = None  # Feature removed
 
-        logger.info(f"Web search service initialized (engine: {self.engine}, optimizer: {use_optimizer})")
+        logger.info(
+            f"Web search service initialized (engine: {self.engine}, optimizer: {use_optimizer})"
+        )
 
     async def initialize(self):
         """Initialize the HTTP session."""
@@ -96,7 +107,7 @@ class WebSearchService:
         start_words = ["is there", "are there", "have there been", "has there been"]
         for word in start_words:
             if cleaned.startswith(word):
-                cleaned = cleaned[len(word):].strip()
+                cleaned = cleaned[len(word) :].strip()
 
         # If query starts with "any recent/latest/new news/updates about/on X",
         # extract just the topic X + news/updates
@@ -104,7 +115,7 @@ class WebSearchService:
         import re
 
         # Pattern: "any [recent/latest/new] [news/updates/info] [on/about] TOPIC"
-        pattern = r'^(?:any\s+)?(?:recent|latest|new|current)?\s*(?:news|updates?|info|information)\s+(?:on|about|for|regarding)?\s*(.+)$'
+        pattern = r"^(?:any\s+)?(?:recent|latest|new|current)?\s*(?:news|updates?|info|information)\s+(?:on|about|for|regarding)?\s*(.+)$"
         match = re.search(pattern, cleaned)
         if match and match.group(1).strip():
             # Extract topic and add a temporal keyword
@@ -142,8 +153,13 @@ class WebSearchService:
 
         # Use query optimizer if enabled
         if self.optimizer:
-            optimized_query, optimization_metadata = await self.optimizer.optimize_query(query)
-            logger.info(f"Query optimization: '{query}' -> '{optimized_query}' (source: {optimization_metadata.get('source')})")
+            (
+                optimized_query,
+                optimization_metadata,
+            ) = await self.optimizer.optimize_query(query)
+            logger.info(
+                f"Query optimization: '{query}' -> '{optimized_query}' (source: {optimization_metadata.get('source')})"
+            )
             query = optimized_query
         else:
             # Fallback to basic cleaning
@@ -168,7 +184,7 @@ class WebSearchService:
                 transformed_query=query,
                 results_count=len(results),
                 success=success,
-                metadata=optimization_metadata
+                metadata=optimization_metadata,
             )
 
         return results
@@ -192,12 +208,11 @@ class WebSearchService:
                 ddgs = DDGS()
                 # Use text search which returns actual web results
                 # The new API expects query as first positional argument
-                results_raw = list(ddgs.text(
-                    query,
-                    region='wt-wt',
-                    safesearch='off',
-                    max_results=max_results
-                ))
+                results_raw = list(
+                    ddgs.text(
+                        query, region="wt-wt", safesearch="off", max_results=max_results
+                    )
+                )
                 return results_raw
 
             results_raw = await loop.run_in_executor(None, _do_search)
@@ -205,14 +220,18 @@ class WebSearchService:
             # Format results
             results = []
             for item in results_raw:
-                results.append({
-                    "title": item.get("title", "No title"),
-                    "snippet": item.get("body", ""),
-                    "url": item.get("href", ""),
-                    "source": "DuckDuckGo"
-                })
+                results.append(
+                    {
+                        "title": item.get("title", "No title"),
+                        "snippet": item.get("body", ""),
+                        "url": item.get("href", ""),
+                        "source": "DuckDuckGo",
+                    }
+                )
 
-            logger.info(f"DuckDuckGo search returned {len(results)} results for: {query}")
+            logger.info(
+                f"DuckDuckGo search returned {len(results)} results for: {query}"
+            )
             return results[:max_results]
 
         except Exception as e:
@@ -239,10 +258,12 @@ class WebSearchService:
                 "key": self.google_api_key,
                 "cx": self.google_cx_id,
                 "q": query,
-                "num": min(max_results, 10)  # Google max is 10
+                "num": min(max_results, 10),  # Google max is 10
             }
 
-            async with self.session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp:
+            async with self.session.get(
+                url, params=params, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
                 if resp.status != 200:
                     logger.error(f"Google search failed with status {resp.status}")
                     return []
@@ -251,21 +272,27 @@ class WebSearchService:
 
                 results = []
                 for item in data.get("items", []):
-                    results.append({
-                        "title": item.get("title", ""),
-                        "snippet": item.get("snippet", ""),
-                        "url": item.get("link", ""),
-                        "source": "Google"
-                    })
+                    results.append(
+                        {
+                            "title": item.get("title", ""),
+                            "snippet": item.get("snippet", ""),
+                            "url": item.get("link", ""),
+                            "source": "Google",
+                        }
+                    )
 
-                logger.info(f"Google search returned {len(results)} results for: {query}")
+                logger.info(
+                    f"Google search returned {len(results)} results for: {query}"
+                )
                 return results
 
         except Exception as e:
             logger.error(f"Google search error: {e}")
             return []
 
-    async def get_context(self, query: str, max_length: int = 1000, conversation_context: str = None) -> str:
+    async def get_context(
+        self, query: str, max_length: int = 1000, conversation_context: str = None
+    ) -> str:
         """Get formatted context from search results for AI.
 
         Args:
@@ -289,11 +316,15 @@ class WebSearchService:
             return ""
 
         # Filter results by quality/relevance
-        filtered_results, is_quality = self._filter_results_by_quality(results, query, min_relevance=0.3)
+        filtered_results, is_quality = self._filter_results_by_quality(
+            results, query, min_relevance=0.3
+        )
 
         # If quality is poor, return empty (let AI say it doesn't have info)
         if not is_quality or not filtered_results:
-            logger.warning(f"Search results for '{query}' are low quality - not providing to AI")
+            logger.warning(
+                f"Search results for '{query}' are low quality - not providing to AI"
+            )
             return ""
 
         context_parts = [f"Web search results for '{query}':"]
@@ -378,21 +409,71 @@ class WebSearchService:
         """
         # Remove common stopwords
         stopwords = {
-            'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for',
-            'of', 'with', 'by', 'from', 'as', 'is', 'are', 'was', 'were', 'be',
-            'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will',
-            'would', 'should', 'could', 'may', 'might', 'can', 'what', 'when',
-            'where', 'who', 'how', 'why', 'any', 'some', 'all', 'about', 'latest',
-            'recent', 'new', 'news', 'update', 'updates', '2024', '2025'
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "from",
+            "as",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "should",
+            "could",
+            "may",
+            "might",
+            "can",
+            "what",
+            "when",
+            "where",
+            "who",
+            "how",
+            "why",
+            "any",
+            "some",
+            "all",
+            "about",
+            "latest",
+            "recent",
+            "new",
+            "news",
+            "update",
+            "updates",
+            "2024",
+            "2025",
         }
 
         # Extract words, filter stopwords, keep meaningful terms
-        words = re.findall(r'\b\w+\b', query.lower())
+        words = re.findall(r"\b\w+\b", query.lower())
         keywords = [w for w in words if w not in stopwords and len(w) > 2]
 
         return keywords[:5]  # Return top 5 keywords
 
-    def _calculate_relevance_score(self, result: Dict, topic_keywords: List[str]) -> float:
+    def _calculate_relevance_score(
+        self, result: Dict, topic_keywords: List[str]
+    ) -> float:
         """Calculate relevance score for a search result.
 
         Args:
@@ -418,10 +499,7 @@ class WebSearchService:
         return score
 
     def _filter_results_by_quality(
-        self,
-        results: List[Dict],
-        query: str,
-        min_relevance: float = 0.4
+        self, results: List[Dict], query: str, min_relevance: float = 0.4
     ) -> Tuple[List[Dict], bool]:
         """Filter search results by quality and relevance.
 
@@ -454,13 +532,21 @@ class WebSearchService:
 
         # Check if we have quality results
         # Need at least 2 keyword matches on average for quality
-        avg_score = sum(s for _, s in scored_results) / len(scored_results) if scored_results else 0
+        avg_score = (
+            sum(s for _, s in scored_results) / len(scored_results)
+            if scored_results
+            else 0
+        )
         is_quality = avg_score >= min_relevance and len(filtered) >= 1
 
         if is_quality:
-            logger.info(f"Quality check PASSED: {len(filtered)}/{len(results)} results (avg score: {avg_score:.2f})")
+            logger.info(
+                f"Quality check PASSED: {len(filtered)}/{len(results)} results (avg score: {avg_score:.2f})"
+            )
         else:
-            logger.warning(f"Quality check FAILED: {len(filtered)}/{len(results)} results (avg score: {avg_score:.2f})")
+            logger.warning(
+                f"Quality check FAILED: {len(filtered)}/{len(results)} results (avg score: {avg_score:.2f})"
+            )
 
         return filtered, is_quality
 
@@ -489,4 +575,5 @@ async def test_search():
 
 if __name__ == "__main__":
     import asyncio
+
     asyncio.run(test_search())

@@ -1,4 +1,5 @@
 """Voice cog for TTS and RVC features."""
+
 import discord
 from discord import app_commands
 from discord.ext import commands
@@ -48,12 +49,13 @@ class VoiceCog(commands.Cog):
     def play_audio(self, guild_id: int, audio_file: Path):
         """Helper to play audio in a guild."""
         voice_client = self.voice_manager.get_voice_client(guild_id)
-        if not voice_client: return
+        if not voice_client:
+            return
 
         # Play audio with explicit FFmpeg options for proper conversion
         audio_source = discord.FFmpegPCMAudio(
             str(audio_file),
-            options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+            options="-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo",
         )
         voice_client.play(
             audio_source,
@@ -62,8 +64,11 @@ class VoiceCog(commands.Cog):
             ),
         )
 
-    @app_commands.command(name="voices", description="List available TTS and RVC voices")
-    async def voices(self, interaction: discord.Interaction):
+    # MOVED TO commands.py
+    # @app_commands.command(
+    #     name="voices", description="List available TTS and RVC voices"
+    # )
+    async def get_voices_info(self, interaction: discord.Interaction):
         """List available voices.
 
         Args:
@@ -81,14 +86,16 @@ class VoiceCog(commands.Cog):
             tts_info = self.tts.get_voice_info()
 
             # Build voice info string based on engine
-            if tts_info.get('engine') == 'kokoro':
+            if tts_info.get("engine") == "kokoro":
                 voice_details = f"**{tts_info['voice']}**\nEngine: Kokoro\nSpeed: {tts_info.get('speed', 1.0)}x"
-            elif tts_info.get('engine') == 'kokoro_api':
+            elif tts_info.get("engine") == "kokoro_api":
                 voice_details = f"**{tts_info['voice']}**\nEngine: Kokoro API\nSpeed: {tts_info.get('speed', 1.0)}x"
-            elif tts_info.get('engine') == 'supertonic':
+            elif tts_info.get("engine") == "supertonic":
                 voice_details = f"**{tts_info['voice']}**\nEngine: Supertonic\nSpeed: {tts_info.get('speed', 1.05)}x\nSteps: {tts_info.get('steps', 5)}"
             else:
-                voice_details = f"**{tts_info.get('engine', 'Unknown')}**\nEngine: Unknown"
+                voice_details = (
+                    f"**{tts_info.get('engine', 'Unknown')}**\nEngine: Unknown"
+                )
 
             embed.add_field(
                 name="Current TTS Voice",
@@ -112,17 +119,20 @@ class VoiceCog(commands.Cog):
                         value="No models found. Add .pth files to `data/voice_models/`",
                         inline=False,
                     )
-            
-            embed.set_footer(text="Use /list_kokoro_voices to see all available TTS voices.")
+
+            embed.set_footer(
+                text="Use /list_kokoro_voices to see all available TTS voices."
+            )
             await interaction.followup.send(embed=embed, ephemeral=True)
 
         except Exception as e:
             logger.error(f"Voices command failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="set_voice", description="Change the default TTS voice")
-    @app_commands.describe(voice="Voice name (e.g., af_bella, am_adam, bf_emma)")
-    async def set_voice(self, interaction: discord.Interaction, voice: str):
+    # MOVED TO commands.py
+    # @app_commands.command(name="set_voice", description="Change the default TTS voice")
+    # @app_commands.describe(voice="Voice name (e.g., af_bella, am_adam, bf_emma)")
+    async def change_voice(self, interaction: discord.Interaction, voice: str):
         """Change the default TTS voice.
 
         Args:
@@ -133,11 +143,11 @@ class VoiceCog(commands.Cog):
             # Update the voice based on current TTS engine
             if Config.TTS_ENGINE == "kokoro":
                 # Validate voice exists
-                if hasattr(self.tts, 'kokoro') and self.tts.kokoro:
+                if hasattr(self.tts, "kokoro") and self.tts.kokoro:
                     if voice not in self.tts.kokoro.get_voices():
                         await interaction.response.send_message(
                             f"❌ Invalid voice: **{voice}**. Use `/list_kokoro_voices` to see available options.",
-                            ephemeral=True
+                            ephemeral=True,
                         )
                         return
 
@@ -151,8 +161,7 @@ class VoiceCog(commands.Cog):
                 engine_name = "Supertonic"
             else:
                 await interaction.response.send_message(
-                    f"❌ Unknown TTS engine: **{Config.TTS_ENGINE}**",
-                    ephemeral=True
+                    f"❌ Unknown TTS engine: **{Config.TTS_ENGINE}**", ephemeral=True
                 )
                 return
 
@@ -165,9 +174,12 @@ class VoiceCog(commands.Cog):
             logger.error(f"Set_voice command failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="list_tts_voices", description="List all available TTS voices")
-    @app_commands.describe(language="Filter by language code (e.g., en, es, fr)")
-    async def list_tts_voices(
+    # MOVED TO commands.py (deprecated - use list_kokoro_voices instead)
+    # @app_commands.command(
+    #     name="list_tts_voices", description="List all available TTS voices"
+    # )
+    # @app_commands.describe(language="Filter by language code (e.g., en, es, fr)")
+    async def get_tts_voices_by_language(
         self, interaction: discord.Interaction, language: Optional[str] = None
     ):
         """List available TTS voices.
@@ -202,7 +214,9 @@ class VoiceCog(commands.Cog):
             # Create embed(s)
             embeds = []
             for lang, voice_list in sorted(voice_dict.items()):
-                voice_text = "\n".join([f"• {v}" for v in voice_list[:10]])  # Limit to 10 per lang
+                voice_text = "\n".join(
+                    [f"• {v}" for v in voice_list[:10]]
+                )  # Limit to 10 per lang
                 if len(voice_list) > 10:
                     voice_text += f"\n... and {len(voice_list) - 10} more"
 
@@ -223,8 +237,11 @@ class VoiceCog(commands.Cog):
             logger.error(f"List_tts_voices command failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="list_kokoro_voices", description="List all available Kokoro TTS voices")
-    async def list_kokoro_voices(self, interaction: discord.Interaction):
+    # MOVED TO commands.py
+    # @app_commands.command(
+    #     name="list_kokoro_voices", description="List all available Kokoro TTS voices"
+    # )
+    async def get_kokoro_voices_info(self, interaction: discord.Interaction):
         """List all available Kokoro voices with descriptions.
 
         Args:
@@ -234,7 +251,7 @@ class VoiceCog(commands.Cog):
 
         try:
             # Check if Kokoro is available
-            if not hasattr(self.tts, 'kokoro') or not self.tts.kokoro:
+            if not hasattr(self.tts, "kokoro") or not self.tts.kokoro:
                 await interaction.followup.send(
                     f"❌ Kokoro TTS (local) is not available. The bot is configured to use: {Config.TTS_ENGINE}",
                     ephemeral=True,
@@ -279,10 +296,12 @@ class VoiceCog(commands.Cog):
 
             # Add male voices
             if male_voices:
-                male_text = "\n".join([
-                    f"**{v}**\n{voice_descriptions.get(v, 'No description')}"
-                    for v in sorted(male_voices)[:8]
-                ])
+                male_text = "\n".join(
+                    [
+                        f"**{v}**\n{voice_descriptions.get(v, 'No description')}"
+                        for v in sorted(male_voices)[:8]
+                    ]
+                )
                 embed.add_field(
                     name="🎤 Male Voices",
                     value=male_text,
@@ -291,10 +310,12 @@ class VoiceCog(commands.Cog):
 
             # Add female voices
             if female_voices:
-                female_text = "\n".join([
-                    f"**{v}**\n{voice_descriptions.get(v, 'No description')}"
-                    for v in sorted(female_voices)[:8]
-                ])
+                female_text = "\n".join(
+                    [
+                        f"**{v}**\n{voice_descriptions.get(v, 'No description')}"
+                        for v in sorted(female_voices)[:8]
+                    ]
+                )
                 embed.add_field(
                     name="🎤 Female Voices",
                     value=female_text,
@@ -302,8 +323,10 @@ class VoiceCog(commands.Cog):
                 )
 
             # Show current voice
-            current_voice = getattr(self.tts, 'kokoro_voice', 'Unknown')
-            embed.set_footer(text=f"Current voice: {current_voice} | Total voices: {len(voices)}")
+            current_voice = getattr(self.tts, "kokoro_voice", "Unknown")
+            embed.set_footer(
+                text=f"Current voice: {current_voice} | Total voices: {len(voices)}"
+            )
 
             await interaction.followup.send(embed=embed, ephemeral=True)
 
@@ -311,9 +334,10 @@ class VoiceCog(commands.Cog):
             logger.error(f"List_kokoro_voices command failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="listen", description="Start smart listening with automatic speech detection")
-    @app_commands.checks.cooldown(1, 5.0)  # 1 use per 5 seconds per user (expensive operation)
-    async def listen(self, interaction: discord.Interaction):
+    # MOVED TO commands.py - keeping here for reference during refactor
+    # @app_commands.command(name="listen", description="Start smart listening with automatic speech detection")
+    # @app_commands.checks.cooldown(1, 5.0)  # 1 use per 5 seconds per user (expensive operation)
+    async def start_listening_session(self, interaction: discord.Interaction):
         """Start smart listening to voice channel with automatic transcription.
 
         Args:
@@ -370,8 +394,10 @@ class VoiceCog(commands.Cog):
                 """Called when bot should respond to the transcription."""
                 try:
                     # Update dashboard
-                    if hasattr(self.bot, 'web_dashboard'):
-                        self.bot.web_dashboard.set_status("Thinking", f"Processing voice input: {text[:30]}...")
+                    if hasattr(self.bot, "web_dashboard"):
+                        self.bot.web_dashboard.set_status(
+                            "Thinking", f"Processing voice input: {text[:30]}..."
+                        )
 
                     # Parse for voice commands
                     parser = VoiceCommandParser()
@@ -390,7 +416,9 @@ class VoiceCog(commands.Cog):
                             await channel.send("❌ Not connected to voice channel.")
                             return
 
-                        logger.info(f"Voice command detected: {command.type.value} (arg: {command.argument})")
+                        logger.info(
+                            f"Voice command detected: {command.type.value} (arg: {command.argument})"
+                        )
 
                         # Helper function to send both text and voice response
                         async def send_response(text: str, voice_text: str = None):
@@ -398,48 +426,76 @@ class VoiceCog(commands.Cog):
                             await channel.send(text)
                             if voice_text is None:
                                 # Strip emoji and markdown for voice
-                                voice_text = text.replace('**', '').replace('*', '')
-                                for emoji in ['🎵', '✅', '❌', '⏭️', '⏹️', '⏸️', '▶️', '🔊', '📋', '🔀']:
-                                    voice_text = voice_text.replace(emoji, '')
+                                voice_text = text.replace("**", "").replace("*", "")
+                                for emoji in [
+                                    "🎵",
+                                    "✅",
+                                    "❌",
+                                    "⏭️",
+                                    "⏹️",
+                                    "⏸️",
+                                    "▶️",
+                                    "🔊",
+                                    "📋",
+                                    "🔀",
+                                ]:
+                                    voice_text = voice_text.replace(emoji, "")
                                 voice_text = voice_text.strip()
 
                             # Speak the response
                             try:
-                                await self.speak_in_voice(voice_text, guild_id, priority=True)
+                                await self.speak_in_voice(
+                                    voice_text, guild_id, priority=True
+                                )
                             except Exception as e:
                                 logger.error(f"Failed to speak response: {e}")
 
                         # Route to appropriate music command
                         if command.type == CommandType.PLAY and command.argument:
-                            await send_response(f"🎵 Searching for: **{command.argument}**", f"Searching for {command.argument}")
+                            await send_response(
+                                f"🎵 Searching for: **{command.argument}**",
+                                f"Searching for {command.argument}",
+                            )
                             song = await music_cog.music_player.search_song(
-                                command.argument,
-                                requester="Voice Command"
+                                command.argument, requester="Voice Command"
                             )
                             if song:
-                                await music_cog.music_player.add_to_queue(guild_id, song)
+                                await music_cog.music_player.add_to_queue(
+                                    guild_id, song
+                                )
                                 # Don't speak "Playing..." - just send text and let music play
-                                await channel.send(f"✅ Added **{song.title}** to queue")
+                                await channel.send(
+                                    f"✅ Added **{song.title}** to queue"
+                                )
 
                                 # Wait for TTS to finish before starting music
                                 state = music_cog.music_player.get_state(guild_id)
                                 if not state.is_playing:
                                     # Wait for voice client to finish speaking
                                     if vc.is_playing():
-                                        logger.debug("Waiting for TTS to finish before starting music...")
+                                        logger.debug(
+                                            "Waiting for TTS to finish before starting music..."
+                                        )
                                         while vc.is_playing():
                                             await asyncio.sleep(0.1)
                                     await music_cog.music_player.play_next(guild_id, vc)
                             else:
-                                await send_response(f"❌ Could not find: {command.argument}", f"Sorry, I couldn't find {command.argument}")
+                                await send_response(
+                                    f"❌ Could not find: {command.argument}",
+                                    f"Sorry, I couldn't find {command.argument}",
+                                )
 
                         elif command.type == CommandType.SKIP:
                             current = music_cog.music_player.get_now_playing(guild_id)
                             if current:
                                 await music_cog.music_player.skip(guild_id, vc)
-                                await send_response(f"⏭️ Skipped **{current.title}**", "Skipping")
+                                await send_response(
+                                    f"⏭️ Skipped **{current.title}**", "Skipping"
+                                )
                             else:
-                                await send_response("❌ Nothing is playing", "Nothing is playing")
+                                await send_response(
+                                    "❌ Nothing is playing", "Nothing is playing"
+                                )
 
                         elif command.type == CommandType.STOP:
                             await music_cog.music_player.stop(guild_id, vc)
@@ -449,57 +505,95 @@ class VoiceCog(commands.Cog):
                             if await music_cog.music_player.pause(guild_id, vc):
                                 await send_response("⏸️ Paused", "Paused")
                             else:
-                                await send_response("❌ Nothing to pause", "Nothing to pause")
+                                await send_response(
+                                    "❌ Nothing to pause", "Nothing to pause"
+                                )
 
                         elif command.type == CommandType.RESUME:
                             if await music_cog.music_player.resume(guild_id, vc):
                                 await send_response("▶️ Resumed", "Resuming")
                             else:
-                                await send_response("❌ Nothing to resume", "Nothing to resume")
+                                await send_response(
+                                    "❌ Nothing to resume", "Nothing to resume"
+                                )
 
                         elif command.type == CommandType.VOLUME:
                             if command.argument:
                                 try:
-                                    if command.argument.startswith('+'):
-                                        state = music_cog.music_player.get_state(guild_id)
-                                        new_vol = min(100, int(state.volume * 100) + int(command.argument[1:]))
-                                    elif command.argument.startswith('-'):
-                                        state = music_cog.music_player.get_state(guild_id)
-                                        new_vol = max(0, int(state.volume * 100) - int(command.argument[1:]))
+                                    if command.argument.startswith("+"):
+                                        state = music_cog.music_player.get_state(
+                                            guild_id
+                                        )
+                                        new_vol = min(
+                                            100,
+                                            int(state.volume * 100)
+                                            + int(command.argument[1:]),
+                                        )
+                                    elif command.argument.startswith("-"):
+                                        state = music_cog.music_player.get_state(
+                                            guild_id
+                                        )
+                                        new_vol = max(
+                                            0,
+                                            int(state.volume * 100)
+                                            - int(command.argument[1:]),
+                                        )
                                     else:
                                         new_vol = int(command.argument)
-                                    music_cog.music_player.set_volume(guild_id, new_vol / 100, vc)
-                                    await send_response(f"🔊 Volume: **{new_vol}%**", f"Volume set to {new_vol} percent")
+                                    music_cog.music_player.set_volume(
+                                        guild_id, new_vol / 100, vc
+                                    )
+                                    await send_response(
+                                        f"🔊 Volume: **{new_vol}%**",
+                                        f"Volume set to {new_vol} percent",
+                                    )
                                 except ValueError:
-                                    await send_response("❌ Invalid volume", "Invalid volume")
+                                    await send_response(
+                                        "❌ Invalid volume", "Invalid volume"
+                                    )
 
                         elif command.type == CommandType.NOWPLAYING:
                             current = music_cog.music_player.get_now_playing(guild_id)
                             if current:
                                 await send_response(
                                     f"🎵 Now playing: **{current.title}** ({current.duration_str})",
-                                    f"Now playing {current.title}"
+                                    f"Now playing {current.title}",
                                 )
                             else:
-                                await send_response("❌ Nothing is playing", "Nothing is playing")
+                                await send_response(
+                                    "❌ Nothing is playing", "Nothing is playing"
+                                )
 
                         elif command.type == CommandType.QUEUE:
                             queue = music_cog.music_player.get_queue(guild_id)
                             if queue:
-                                queue_text = "\n".join([f"{i+1}. {s.title}" for i, s in enumerate(queue[:5])])
+                                queue_text = "\n".join(
+                                    [
+                                        f"{i + 1}. {s.title}"
+                                        for i, s in enumerate(queue[:5])
+                                    ]
+                                )
                                 await send_response(
                                     f"📋 Queue:\n{queue_text}",
-                                    f"There are {len(queue)} songs in the queue"
+                                    f"There are {len(queue)} songs in the queue",
                                 )
                             else:
-                                await send_response("📋 Queue is empty", "Queue is empty")
+                                await send_response(
+                                    "📋 Queue is empty", "Queue is empty"
+                                )
 
                         elif command.type == CommandType.SHUFFLE:
                             count = music_cog.music_player.shuffle_queue(guild_id)
                             if count:
-                                await send_response(f"🔀 Shuffled {count} songs", f"Shuffled {count} songs")
+                                await send_response(
+                                    f"🔀 Shuffled {count} songs",
+                                    f"Shuffled {count} songs",
+                                )
                             else:
-                                await send_response("❌ Not enough songs to shuffle", "Not enough songs to shuffle")
+                                await send_response(
+                                    "❌ Not enough songs to shuffle",
+                                    "Not enough songs to shuffle",
+                                )
 
                         elif command.type == CommandType.DISCONNECT:
                             music_cog.music_player.cleanup(guild_id)
@@ -521,8 +615,7 @@ class VoiceCog(commands.Cog):
 
                     # Generate response using Ollama
                     response = await chat_cog.ollama.chat(
-                        history,
-                        system_prompt=chat_cog.system_prompt
+                        history, system_prompt=chat_cog.system_prompt
                     )
 
                     if not response:
@@ -539,38 +632,47 @@ class VoiceCog(commands.Cog):
                     vc = self.voice_manager.get_voice_client(guild_id)
 
                     if vc and not vc.is_playing():
-                            try:
-                                # Generate TTS
-                                audio_file = Config.TEMP_DIR / f"voice_response_{uuid.uuid4()}.wav"
-                                await self.tts.generate(response, audio_file)
+                        try:
+                            # Generate TTS
+                            audio_file = (
+                                Config.TEMP_DIR / f"voice_response_{uuid.uuid4()}.wav"
+                            )
+                            await self.tts.generate(response, audio_file)
 
-                                # Apply RVC if enabled
-                                if self.rvc and self.rvc.is_enabled() and Config.RVC_ENABLED:
-                                    rvc_file = Config.TEMP_DIR / f"rvc_response_{uuid.uuid4()}.wav"
-                                    await self.rvc.convert(
-                    audio_file, rvc_file,
-                    model_name=Config.DEFAULT_RVC_MODEL,
-                    pitch_shift=Config.RVC_PITCH_SHIFT,
-                    index_rate=Config.RVC_INDEX_RATE,
-                    protect=Config.RVC_PROTECT
-                )
-                                    audio_file = rvc_file
+                            # Apply RVC if enabled
+                            if (
+                                self.rvc
+                                and self.rvc.is_enabled()
+                                and Config.RVC_ENABLED
+                            ):
+                                rvc_file = (
+                                    Config.TEMP_DIR / f"rvc_response_{uuid.uuid4()}.wav"
+                                )
+                                await self.rvc.convert(
+                                    audio_file,
+                                    rvc_file,
+                                    model_name=Config.DEFAULT_RVC_MODEL,
+                                    pitch_shift=Config.RVC_PITCH_SHIFT,
+                                    index_rate=Config.RVC_INDEX_RATE,
+                                    protect=Config.RVC_PROTECT,
+                                )
+                                audio_file = rvc_file
 
-                                # Play audio with explicit FFmpeg options for proper conversion
-                                audio_source = discord.FFmpegPCMAudio(
-                                    str(audio_file),
-                                    before_options='-f wav',
-                                    options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
-                                )
-                                vc.play(
-                                    audio_source,
-                                    after=lambda e: asyncio.run_coroutine_threadsafe(
-                                        self._cleanup_audio(audio_file, e), self.bot.loop
-                                    ),
-                                )
-                                logger.info("Playing voice response audio")
-                            except Exception as tts_error:
-                                logger.error(f"Failed to generate/play TTS: {tts_error}")
+                            # Play audio with explicit FFmpeg options for proper conversion
+                            audio_source = discord.FFmpegPCMAudio(
+                                str(audio_file),
+                                before_options="-f wav",
+                                options="-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo",
+                            )
+                            vc.play(
+                                audio_source,
+                                after=lambda e: asyncio.run_coroutine_threadsafe(
+                                    self._cleanup_audio(audio_file, e), self.bot.loop
+                                ),
+                            )
+                            logger.info("Playing voice response audio")
+                        except Exception as tts_error:
+                            logger.error(f"Failed to generate/play TTS: {tts_error}")
 
                 except Exception as e:
                     logger.error(f"Failed to generate bot response: {e}")
@@ -598,9 +700,11 @@ class VoiceCog(commands.Cog):
                     ephemeral=True,
                 )
                 logger.info(f"Started smart listening in guild {guild_id}")
-                
-                if hasattr(self.bot, 'web_dashboard'):
-                    self.bot.web_dashboard.set_status("Listening", "Smart voice detection active")
+
+                if hasattr(self.bot, "web_dashboard"):
+                    self.bot.web_dashboard.set_status(
+                        "Listening", "Smart voice detection active"
+                    )
             else:
                 await interaction.followup.send(
                     format_error("Failed to start smart voice detection"),
@@ -611,8 +715,11 @@ class VoiceCog(commands.Cog):
             logger.error(f"Listen command failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="stop_listening", description="Stop listening to voice channel")
-    async def stop_listening(self, interaction: discord.Interaction):
+    # MOVED TO commands.py - keeping here for reference during refactor
+    # @app_commands.command(
+    #     name="stop_listening", description="Stop listening to voice channel"
+    # )
+    async def stop_listening_session(self, interaction: discord.Interaction):
         """Stop listening and transcribe any remaining audio.
 
         Args:
@@ -672,10 +779,14 @@ class VoiceCog(commands.Cog):
                     ephemeral=True,
                 )
 
-                logger.info(f"Stopped listening - final transcription: {transcription[:100]}...")
+                logger.info(
+                    f"Stopped listening - final transcription: {transcription[:100]}..."
+                )
             else:
                 await interaction.followup.send(
-                    format_success(f"✅ Stopped listening (session: {duration:.1f}s)\nNo final audio to transcribe."),
+                    format_success(
+                        f"✅ Stopped listening (session: {duration:.1f}s)\nNo final audio to transcribe."
+                    ),
                     ephemeral=True,
                 )
 
@@ -683,8 +794,9 @@ class VoiceCog(commands.Cog):
             logger.error(f"Stop listening command failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
 
-    @app_commands.command(name="stt_status", description="Check speech-to-text status")
-    async def stt_status(self, interaction: discord.Interaction):
+    # MOVED TO commands.py
+    # @app_commands.command(name="stt_status", description="Check speech-to-text status")
+    async def get_stt_status_info(self, interaction: discord.Interaction):
         """Check Whisper STT service status.
 
         Args:
@@ -758,9 +870,9 @@ class VoiceCog(commands.Cog):
             embed.add_field(
                 name="Smart Features",
                 value="• Auto-silence detection\n"
-                      "• Smart response triggers\n"
-                      "• Question detection\n"
-                      "• Bot mention detection",
+                "• Smart response triggers\n"
+                "• Question detection\n"
+                "• Bot mention detection",
                 inline=False,
             )
 
@@ -821,7 +933,9 @@ class VoiceCog(commands.Cog):
 
             # Add status info
             status = "🟢 Enabled" if sound_effects.enabled else "🔴 Disabled"
-            embed.set_footer(text=f"Status: {status} | Volume: {int(sound_effects.global_volume * 100)}%")
+            embed.set_footer(
+                text=f"Status: {status} | Volume: {int(sound_effects.global_volume * 100)}%"
+            )
 
             await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -866,7 +980,9 @@ class VoiceCog(commands.Cog):
         try:
             # Check if connected to voice
             if guild_id not in self.voice_clients:
-                logger.warning(f"Cannot speak in voice - not connected to guild {guild_id}")
+                logger.warning(
+                    f"Cannot speak in voice - not connected to guild {guild_id}"
+                )
                 return
             voice_client = self.voice_manager.get_voice_client(guild_id)
 
@@ -883,11 +999,12 @@ class VoiceCog(commands.Cog):
             if self.rvc and self.rvc.is_enabled() and Config.RVC_ENABLED:
                 rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.mp3"
                 await self.rvc.convert(
-                    audio_file, rvc_file,
+                    audio_file,
+                    rvc_file,
                     model_name=Config.DEFAULT_RVC_MODEL,
                     pitch_shift=Config.RVC_PITCH_SHIFT,
                     index_rate=Config.RVC_INDEX_RATE,
-                    protect=Config.RVC_PROTECT
+                    protect=Config.RVC_PROTECT,
                 )
                 audio_file = rvc_file
 
@@ -898,7 +1015,7 @@ class VoiceCog(commands.Cog):
             # Play audio with explicit FFmpeg options for proper conversion
             audio_source = discord.FFmpegPCMAudio(
                 str(audio_file),
-                options='-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo'
+                options="-vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo",
             )
             # Mark as TTS for smart barge-in
             audio_source._is_tts = True
