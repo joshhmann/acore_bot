@@ -108,34 +108,53 @@ A Discord bot with:
 
 ---
 
-## Current Codebase Structure
+## Current Codebase Structure (Post-Restructure)
 
 ```
-acore_bot/
-├── main.py                     # Bot entry point (733 lines - needs slimming)
-├── config.py                   # All configuration
+services/
+├── voice/              # Audio I/O (5 files)
+│   ├── tts.py          # TTS orchestrator
+│   ├── listener.py     # Voice listener
+│   ├── rvc.py          # Voice conversion
+│   └── commands.py     # Voice commands
 │
-├── services/                   # 45+ files - NEEDS CLEANUP
-│   ├── parakeet_api_client.py  # NEW - STT API client
-│   ├── parakeet_stt.py         # LEGACY - In-process model (can remove)
-│   ├── kokoro_api_client.py    # TTS API client
-│   ├── ollama.py               # LLM client
-│   ├── openrouter.py           # LLM client (cloud)
-│   ├── rvc_http.py             # RVC API client
-│   ├── tts.py                  # TTS orchestrator
-│   ├── enhanced_voice_listener.py
-│   ├── rag.py
-│   ├── user_profiles.py
-│   ├── ambient_mode.py
-│   ├── ... (35+ more)
+├── llm/                # LLM backends (6 files)
+│   ├── ollama.py       # Local LLM
+│   ├── openrouter.py   # Cloud LLM
+│   ├── cache.py        # Response caching
+│   ├── fallback.py     # Fallback logic
+│   └── tools.py        # Tool calling
 │
-├── cogs/                       # Discord commands
-│   ├── chat/                   # Chat cog (refactored)
-│   ├── voice/                  # Voice cog (partially refactored)
-│   ├── music.py
-│   └── ... (others)
+├── memory/             # Memory/context (5 files)
+│   ├── conversation.py # Conversation manager
+│   ├── summarizer.py   # Summarization
+│   ├── long_term.py    # Long-term memory
+│   └── rag.py          # RAG retrieval
 │
-└── utils/                      # Helpers
+├── persona/            # Character system (4 files)
+│   ├── system.py       # Persona definitions
+│   ├── behavior.py     # Behavior engine
+│   └── lorebook.py     # Lorebook
+│
+├── discord/            # Discord utilities (6 files)
+│   ├── music.py        # Music player
+│   ├── reminders.py    # Reminders
+│   ├── notes.py        # Notes
+│   ├── profiles.py     # User profiles
+│   └── web_search.py   # Web search
+│
+├── core/               # Infrastructure (5 files)
+│   ├── factory.py      # Service factory
+│   ├── metrics.py      # Metrics
+│   ├── rate_limiter.py
+│   └── context.py
+│
+├── clients/            # External API clients (4 files)
+│   ├── tts_client.py   # Kokoro API
+│   ├── stt_client.py   # Parakeet API
+│   └── rvc_client.py   # RVC API
+│
+└── deprecated/         # Archived code
 ```
 
 ---
