@@ -258,52 +258,83 @@ class PersonaSystem:
     def compile_persona(
         self,
         character_id: str,
-        framework_id: str,
+        framework_id: str = None,
         force_recompile: bool = False
     ) -> Optional[CompiledPersona]:
         """
-        Compile character + framework into complete persona.
+        Compile character (+ optional framework) into complete persona.
 
         Args:
             character_id: Character to use
-            framework_id: Framework to apply
+            framework_id: Framework to apply (optional, uses card's system_prompt if None)
             force_recompile: Recompile even if cached
 
         Returns:
             CompiledPersona or None if compilation fails
         """
-        persona_id = f"{character_id}_{framework_id}"
+        persona_id = f"{character_id}_{framework_id}" if framework_id else character_id
 
         # Check cache unless forced
         if not force_recompile and persona_id in self.compiled_personas:
             return self.compiled_personas[persona_id]
 
-        # Load components
+        # Load character
         character = self.load_character(character_id)
-        framework = self.load_framework(framework_id)
-
-        if not character or not framework:
-            logger.error(f"Cannot compile persona: missing character or framework")
+        if not character:
+            logger.error(f"Cannot compile persona: character {character_id} not found")
             return None
+
+        # Load framework (optional)
+        framework = None
+        if framework_id:
+            framework = self.load_framework(framework_id)
+            if not framework:
+                logger.warning(f"Framework {framework_id} not found, using character card only")
 
         try:
             # Build system prompt
-            system_prompt = self._build_system_prompt(character, framework)
+            if framework:
+                # Legacy: combine character + framework
+                system_prompt = self._build_system_prompt(character, framework)
+                tools_required = framework.tool_requirements.get("required", [])
+                tools_required.extend(framework.tool_requirements.get("optional", []))
+                config = {
+                    "character": character.character_id,
+                    "framework": framework.framework_id,
+                    "behavioral_patterns": framework.behavioral_patterns,
+                    "decision_making": framework.decision_making,
+                    "interaction_style": framework.interaction_style,
+                    "anti_hallucination": framework.anti_hallucination,
+                    "context_needs": framework.context_requirements,
+                }
+            else:
+                # V2 Card: use card's system_prompt directly
+                if character.system_prompt_override:
+                    system_prompt = character.system_prompt_override
+                else:
+                    # Build from V2 card fields
+                    system_prompt = self._build_v2_system_prompt(character)
+                
+                tools_required = []
+                config = {
+                    "character": character.character_id,
+                    "framework": None,
+                }
 
-            # Collect required tools
-            tools_required = framework.tool_requirements.get("required", [])
-            tools_required.extend(framework.tool_requirements.get("optional", []))
-
-            # Create config dictionary
-            config = {
-                "character": character.character_id,
-                "framework": framework.framework_id,
-                "behavioral_patterns": framework.behavioral_patterns,
-                "decision_making": framework.decision_making,
-                "interaction_style": framework.interaction_style,
-                "anti_hallucination": framework.anti_hallucination,
-                "context_needs": framework.context_requirements,
-            }
+            # Create a minimal framework wrapper if none provided
+            if not framework:
+                framework = Framework(
+                    framework_id="none",
+                    name="No Framework",
+                    purpose="Pure Character Card",
+                    behavioral_patterns={},
+                    tool_requirements={},
+                    decision_making={},
+                    context_requirements={},
+                    interaction_style={},
+                    anti_hallucination={},
+                    prompt_template=""
+                )
 
             # Compile persona
             persona = CompiledPersona(
@@ -318,7 +349,7 @@ class PersonaSystem:
             # Cache it
             self.compiled_personas[persona_id] = persona
 
-            logger.info(f"Compiled persona: {persona_id}")
+            logger.info(f"Compiled persona: {persona_id} (framework: {framework_id or 'none'})")
 
             # Save compiled version
             self._save_compiled_persona(persona)
@@ -410,6 +441,35 @@ Purpose: {framework.purpose}
 Stay in character. Be engaging. Be memorable.
 """
         return full_prompt
+
+    def _build_v2_system_prompt(self, character: Character) -> str:
+        """Build system prompt from V2 character card fields (SillyTavern style)."""
+        prompt = f"""You are {character.display_name}.
+
+=== DESCRIPTION ===
+{character.description}
+
+=== PERSONALITY ===
+{character.identity.get('personality', '')}
+
+=== SCENARIO ===
+{character.scenario}
+"""
+        # Add example dialogue if provided
+        if character.mes_example:
+            prompt += f"""
+=== EXAMPLE DIALOGUE ===
+{character.mes_example}
+"""
+        
+        # Add response_style if in legacy character
+        if character.voice_and_tone.get('response_style'):
+            prompt += f"""
+=== RESPONSE STYLE ===
+{character.voice_and_tone['response_style']}
+"""
+        
+        return prompt
 
     def _build_opinions_section(self, opinions: Dict[str, Any]) -> str:
         """Build opinions section of prompt."""
