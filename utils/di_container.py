@@ -269,7 +269,7 @@ def create_bot_services_container() -> DIContainer:
 
     # RVC Service (if enabled)
     if Config.RVC_ENABLED:
-        from services.rvc_http import RVCHTTPClient
+        from services.clients.rvc_client import RVCHTTPClient
         c.register("rvc", lambda: RVCHTTPClient(
             base_url=Config.RVC_WEBUI_URL,
             default_model=Config.DEFAULT_RVC_MODEL,

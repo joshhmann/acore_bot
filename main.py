@@ -27,7 +27,7 @@ from services.memory_manager import MemoryManager
 from services.conversation_summarizer import ConversationSummarizer
 from services.rag import RAGService
 from services.whisper_stt import WhisperSTTService, VoiceActivityDetector
-from services.parakeet_api_client import ParakeetAPIService
+from services.clients.stt_client import ParakeetAPIService
 from services.enhanced_voice_listener import EnhancedVoiceListener
 from utils.helpers import ChatHistoryManager
 from cogs.chat import ChatCog

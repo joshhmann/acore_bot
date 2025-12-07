@@ -12,7 +12,7 @@ except ImportError:
     KOKORO_AVAILABLE = False
 
 try:
-    from services.kokoro_api_client import KokoroAPIClient
+    from services.clients.tts_client import KokoroAPIClient
     KOKORO_API_AVAILABLE = True
 except ImportError:
     KOKORO_API_AVAILABLE = False

@@ -32,7 +32,7 @@ class UnifiedRVCService:
 
         if self.mode == "webui":
             try:
-                from services.rvc_http import RVCHTTPClient
+                from services.clients.rvc_client import RVCHTTPClient
                 self.backend = RVCHTTPClient(base_url=webui_url, default_model=default_model)
                 logger.info(f"RVC initialized in WebUI mode: {webui_url}")
             except Exception as e:
