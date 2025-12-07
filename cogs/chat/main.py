@@ -99,6 +99,10 @@ class ChatCog(commands.Cog):
         # Initialize new services
         self.context_manager = ContextManager()
         self.lorebook_service = LorebookService()
+        
+        # Initialize context router for channel-aware context
+        from services.memory.context_router import ContextRouter
+        self.context_router = ContextRouter(history_manager, summarizer)
 
         # Initialize Behavior Engine
         self.behavior_engine = BehaviorEngine(
@@ -495,10 +499,22 @@ class ChatCog(commands.Cog):
             channel_id = channel.id
             user_id = user.id
 
-            # Load conversation history
+            # Load conversation history with context router
             history = []
+            context_summary = None
             if Config.CHAT_HISTORY_ENABLED:
-                history = await self.history.load_history(channel_id)
+                # Use context router for channel-aware context
+                context_result = await self.context_router.get_context(
+                    channel, user, message_content
+                )
+                history = context_result.history
+                context_summary = context_result.summary
+                
+                logger.debug(
+                    f"Context: {len(history)} msgs, "
+                    f"summary: {len(context_summary) if context_summary else 0} chars, "
+                    f"strategy: {context_result.strategy.channel_type}"
+                )
 
             # Add user message
             history.append({"role": "user", "content": message_content})
@@ -556,6 +572,10 @@ class ChatCog(commands.Cog):
                 memory = await self.summarizer.build_memory_context(message_content)
                 if memory:
                     user_context_str += f"\n\nMemories:\n{memory}"
+            
+            # Conversation Summary (from context router)
+            if context_summary:
+                user_context_str += f"\n\n[Earlier Conversation Summary]:\n{context_summary}"
 
             # RAG Context
             if self.rag and Config.RAG_IN_CHAT and self.rag.is_enabled():
