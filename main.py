@@ -40,7 +40,7 @@ from services.reminders import RemindersService
 from services.notes import NotesService
 from services.proactive_callbacks import ProactiveCallbacksSystem
 from services.curiosity_system import CuriositySystem
-from services.pattern_learner import PatternLearner
+# from services.pattern_learner import PatternLearner  # REMOVED: Was for intent system
 from cogs.reminders import RemindersCog
 from cogs.notes import NotesCog
 from services.web_search import WebSearchService
@@ -387,9 +387,8 @@ class OllamaBot(commands.Bot):
             self.curiosity_system.set_persona(self.current_persona)
         logger.info("Curiosity system initialized")
 
-        # Initialize Pattern Learner (Learning & Adaptation)
-        self.pattern_learner = PatternLearner()
-        logger.info("Pattern learner initialized with user adaptation")
+        # Pattern Learner removed - was for intent pattern learning
+        self.pattern_learner = None
 
         # Initialize Ambient Mode (after PersonaSystem so we can pass persona components)
         self.ambient_mode = None
@@ -453,7 +452,7 @@ class OllamaBot(commands.Bot):
                 decision_engine=self.decision_engine,
                 callbacks_system=self.callbacks_system,
                 curiosity_system=self.curiosity_system,
-                pattern_learner=self.pattern_learner,
+                pattern_learner=None,  # Removed
                 llm_fallback=self.llm_fallback,
             )
         )

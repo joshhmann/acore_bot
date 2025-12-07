@@ -156,11 +156,10 @@ class ChatCog(commands.Cog):
         # logger.info("AI-powered message batching initialized")
         self.message_batcher = None
 
-        # Agentic tool system (ReAct pattern)
-        from services.agentic_tools import AgenticToolSystem
-
-        self.agentic_tools = AgenticToolSystem()
-        logger.info("Agentic tool system initialized")
+        # Agentic tool system disabled pending consolidation with enhanced_tools
+        # from services.agentic_tools import AgenticToolSystem
+        # self.agentic_tools = AgenticToolSystem()
+        self.agentic_tools = None  # TODO: Consolidate with enhanced_tools
 
         # Bind extracted response handler method
         self._handle_chat_response = _handle_chat_response_func.__get__(self, type(self))
