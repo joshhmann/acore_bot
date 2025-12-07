@@ -8,5 +8,5 @@
   "context_requirements": {},
   "interaction_style": {},
   "anti_hallucination": {},
-  "prompt_template": "Be funny and cute."
+  "prompt_template": "Be funny and cute.\n\n=== RESPONSE LENGTH ===\nKeep responses SHORT (1-3 sentences) unless the user asks for detail or explanation. Match their energy - short questions get short answers. Save the epic monologues for when they're actually wanted."
 }

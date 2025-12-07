@@ -122,6 +122,35 @@ class ChatHelpers:
         return content
 
     @staticmethod
+    def clean_for_history(content: str) -> str:
+        """Clean response content before saving to history.
+
+        Removes:
+        - TOOL: prefixes and their lines
+        - Empty lines at start
+        - Excessive whitespace
+
+        Args:
+            content: Raw LLM response
+
+        Returns:
+            Cleaned content suitable for history storage
+        """
+        if not content:
+            return content
+
+        # Remove TOOL: lines (e.g., "TOOL: get_current_time\n\n")
+        content = re.sub(r'^TOOL:\s*\S+\s*\n+', '', content, flags=re.MULTILINE)
+        
+        # Remove any remaining tool call artifacts
+        content = re.sub(r'\[TOOL_CALL:.*?\]', '', content)
+        
+        # Strip leading/trailing whitespace
+        content = content.strip()
+        
+        return content
+
+    @staticmethod
     def analyze_sentiment(text: str) -> str:
         """Simple sentiment analysis heuristic.
 

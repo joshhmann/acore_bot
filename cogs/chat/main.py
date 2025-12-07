@@ -1002,8 +1002,10 @@ class ChatCog(commands.Cog):
                     user_id=user.id,
                 )
                 # Use discord_response for history (with proper mention tags)
+                # Clean TOOL: artifacts before saving
+                clean_response = ChatHelpers.clean_for_history(discord_response)
                 await self.history.add_message(
-                    channel_id, "assistant", discord_response
+                    channel_id, "assistant", clean_response
                 )
 
             # Start a conversation session
