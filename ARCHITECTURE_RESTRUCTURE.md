@@ -62,14 +62,16 @@ A Discord bot with:
 ### Phase 4: AI-First Cleanup ✅
 **Completed: 2024-12-06**
 
-**Deprecated 12 files, ~5,642 lines total:**
+**Deprecated 14 files, ~6,377 lines total:**
 | File | Lines | Reason |
 |------|-------|--------|
 | `services/web_dashboard.py` | 2,009 | Unused |
 | `services/intent_recognition.py` | 720 | Replaced by LLM tool calling |
 | `services/trivia.py` | 473 | Not core |
+| `services/pattern_learner.py` | 482 | Was for intent system |
 | `services/intent_handler.py` | 328 | Part of intent system |
 | `services/custom_intents.py` | 368 | Part of intent system |
+| `services/agentic_tools.py` | 253 | Duplicate of enhanced_tools |
 | `services/parakeet_stt.py` | 238 | Replaced by API |
 | `services/kokoro_tts.py` | 222 | Using Kokoro API |
 | `services/supertonic_tts.py` | 195 | Unused alternative |
@@ -78,7 +80,31 @@ A Discord bot with:
 | `cogs/games.py` | 95 | Not core |
 | `cogs/intent_commands.py` | 376 | Part of intent system |
 
-**Key change:** Bot is now **AI-first** - the LLM handles intents via tool calling instead of hardcoded regex patterns.
+**Key change:** Bot is now **AI-first** - LLM handles intents via tool calling.
+
+---
+
+### Phase 5: BehaviorEngine (PLANNED)
+**Last Updated: 2024-12-06 23:15 PST**
+
+**Goal:** Consolidate 7 scattered behavior files (~3,339 lines) into one unified engine (~650 lines)
+
+| File | Lines | Action |
+|------|-------|--------|
+| `naturalness.py` | 931 | → BehaviorEngine |
+| `ambient_mode.py` | 656 | → BehaviorEngine |
+| `proactive_engagement.py` | 391 | → BehaviorEngine |
+| `mood_system.py` | 383 | → BehaviorEngine |
+| `environmental_awareness.py` | 383 | → BehaviorEngine |
+| `proactive_callbacks.py` | 337 | → BehaviorEngine |
+| `curiosity_system.py` | 259 | → BehaviorEngine |
+
+**Keep Separate:** `persona_system.py` (core), `enhanced_tools.py` (LLM tools)
+
+**Design Decisions:**
+- ✓ No emotional persistence - infer from context
+- ✓ Hybrid rate limiting - simple timers + LLM decides content
+- ✓ LLM makes all behavioral decisions based on persona
 
 ---
 
