@@ -33,7 +33,7 @@ from utils.helpers import ChatHistoryManager
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
 from cogs.music import MusicCog
-from services.web_dashboard import WebDashboard
+# from services.web_dashboard import WebDashboard  # REMOVED: Not used
 from services.ambient_mode import AmbientMode
 from services.naturalness import NaturalnessService
 from services.reminders import RemindersService
@@ -44,8 +44,8 @@ from services.pattern_learner import PatternLearner
 from cogs.reminders import RemindersCog
 from cogs.notes import NotesCog
 from services.web_search import WebSearchService
-from services.trivia import TriviaService
-from cogs.trivia import TriviaCog
+# from services.trivia import TriviaService  # REMOVED: Not core
+# from cogs.trivia import TriviaCog  # REMOVED: Not core
 from services.conversation_manager import MultiTurnConversationManager
 from services.persona_system import PersonaSystem
 from services.ai_decision_engine import AIDecisionEngine
@@ -300,8 +300,8 @@ class OllamaBot(commands.Bot):
 
             logger.info(f"Enhanced voice listener initialized with {Config.STT_ENGINE} engine")
 
-        # Initialize Web Dashboard
-        self.web_dashboard = WebDashboard(self)
+        # Web Dashboard removed - not used
+        self.web_dashboard = None
 
         # Initialize Naturalness Service
         self.naturalness = None
@@ -340,14 +340,8 @@ class OllamaBot(commands.Bot):
             )
             logger.info(f"Web search service created (engine: {Config.WEB_SEARCH_ENGINE})")
 
-        # Initialize Trivia Service
+        # Trivia service removed - not core
         self.trivia_service = None
-        if Config.TRIVIA_ENABLED:
-            self.trivia_service = TriviaService(
-                data_dir=Config.DATA_DIR,
-                web_search=self.web_search,
-            )
-            logger.info("Trivia service initialized")
 
         # Initialize Multi-Turn Conversation Manager
         self.conversation_manager = MultiTurnConversationManager()
@@ -489,10 +483,7 @@ class OllamaBot(commands.Bot):
             await self.add_cog(NotesCog(self, self.notes_service))
             logger.info("Loaded NotesCog")
 
-        # Load TriviaCog
-        if self.trivia_service:
-            await self.add_cog(TriviaCog(self, self.trivia_service))
-            logger.info("Loaded TriviaCog")
+        # TriviaCog removed - not core
 
         # Load additional modular cogs
         # These cogs split up the massive chat.py into organized modules
@@ -503,9 +494,7 @@ class OllamaBot(commands.Bot):
         await self.load_extension("cogs.search_commands")
         await self.load_extension("cogs.intent_commands")  # Custom intent management
 
-        # Load Interactive Cogs
-        await self.load_extension("cogs.game_helper")
-        await self.load_extension("cogs.games")
+        # Game cogs removed - not core
         await self.load_extension("cogs.help")
 
         # Load EventListenersCog for natural reactions
@@ -537,8 +526,8 @@ class OllamaBot(commands.Bot):
         if self.user_profiles:
             await self.user_profiles.start_background_saver()
 
-        # Start Web Dashboard
-        await self.web_dashboard.start(port=8080)
+        # Web Dashboard removed - not used
+        # await self.web_dashboard.start(port=8080)
 
         # Start Ambient Mode
         if self.ambient_mode:
