@@ -987,29 +987,25 @@ class ChatCog(commands.Cog):
                 # AI-powered learning from conversation (runs in background)
                 if Config.USER_PROFILES_AUTO_LEARN:
                     # Run in background to avoid blocking response
-                    # FIXME: _safe_learn_from_conversation missing (PatternLearner removed)
-                    pass
-                    # self._create_background_task(
-                    #     self._safe_learn_from_conversation(
-                    #         user_id=user_id,
-                    #         username=str(user.name),
-                    #         user_message=message_content,
-                    #         bot_response=response,
-                    #     )
-                    # )
+                    self._create_background_task(
+                        self._safe_learn_from_conversation(
+                            user_id=user_id,
+                            username=str(user.name),
+                            user_message=message_content,
+                            bot_response=response,
+                        )
+                    )
 
                 # Update affection score if enabled
                 if Config.USER_AFFECTION_ENABLED:
                     # Run in background
-                    # FIXME: _safe_update_affection missing
-                    pass
-                    # self._create_background_task(
-                    #     self._safe_update_affection(
-                    #         user_id=user_id,
-                    #         message=message_content,
-                    #         response_sentiment=sentiment,
-                    #     )
-                    # )
+                    self._create_background_task(
+                        self._safe_update_affection(
+                            user_id=user_id,
+                            message=message_content,
+                            bot_response=response,
+                        )
+                    )
 
             # Save to history with user attribution
             if Config.CHAT_HISTORY_ENABLED:
@@ -1142,6 +1138,35 @@ class ChatCog(commands.Cog):
             response = await self.bot.naturalness.on_reaction_add(reaction, user)
             if response:
                 await reaction.message.channel.send(response)
+
+
+
+    async def _safe_learn_from_conversation(self, user_id: int, username: str, user_message: str, bot_response: str):
+        """Wrapper to safely call user profile learning."""
+        if not self.user_profiles: return
+        
+        try:
+            await self.user_profiles.learn_from_conversation(
+                user_id=user_id,
+                username=username,
+                user_message=user_message,
+                bot_response=bot_response
+            )
+        except Exception as e:
+            logger.warning(f"Failed to learn from conversation: {e}")
+
+    async def _safe_update_affection(self, user_id: int, message: str, bot_response: str):
+        """Wrapper to safely call affection update."""
+        if not self.user_profiles: return
+        
+        try:
+            await self.user_profiles.update_affection(
+                user_id=user_id,
+                message=message,
+                bot_response=bot_response
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update affection: {e}")
 
 
 async def setup(bot: commands.Bot):
