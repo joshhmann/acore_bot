@@ -987,25 +987,29 @@ class ChatCog(commands.Cog):
                 # AI-powered learning from conversation (runs in background)
                 if Config.USER_PROFILES_AUTO_LEARN:
                     # Run in background to avoid blocking response
-                    self._create_background_task(
-                        self._safe_learn_from_conversation(
-                            user_id=user_id,
-                            username=str(user.name),
-                            user_message=message_content,
-                            bot_response=response,
-                        )
-                    )
+                    # FIXME: _safe_learn_from_conversation missing (PatternLearner removed)
+                    pass
+                    # self._create_background_task(
+                    #     self._safe_learn_from_conversation(
+                    #         user_id=user_id,
+                    #         username=str(user.name),
+                    #         user_message=message_content,
+                    #         bot_response=response,
+                    #     )
+                    # )
 
                 # Update affection score if enabled
                 if Config.USER_AFFECTION_ENABLED:
                     # Run in background
-                    self._create_background_task(
-                        self._safe_update_affection(
-                            user_id=user_id,
-                            message=message_content,
-                            bot_response=response,
-                        )
-                    )
+                    # FIXME: _safe_update_affection missing
+                    pass
+                    # self._create_background_task(
+                    #     self._safe_update_affection(
+                    #         user_id=user_id,
+                    #         message=message_content,
+                    #         response_sentiment=sentiment,
+                    #     )
+                    # )
 
             # Save to history with user attribution
             if Config.CHAT_HISTORY_ENABLED:

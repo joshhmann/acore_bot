@@ -124,16 +124,22 @@ class BehaviorEngine:
         # TODO: Use lightweight local NLP or regex if needed
 
         # 2. Decision: React?
-        reaction = await self._decide_reaction(message)
-        if reaction:
-            await message.add_reaction(reaction)
-
+        reaction_emoji = await self._decide_reaction(message)
+        
         # 3. Decision: Proactive Reply? (Jump in)
         # Only if not mentioned (handled by ChatCog) and not a reply to bot
+        engagement = None
         if not self.bot.user in message.mentions and not (message.reference and message.reference.resolved and message.reference.resolved.author == self.bot.user):
              engagement = await self._decide_proactive_engagement(message, state)
-             if engagement:
-                 return {"reply": engagement, "reason": "proactive"}
+
+        if reaction_emoji or engagement:
+            return {
+                "should_respond": bool(engagement),
+                "reaction": reaction_emoji,
+                "reply": engagement,
+                "reason": "proactive" if engagement else "reaction",
+                "suggested_style": None
+            }
 
         return None
 

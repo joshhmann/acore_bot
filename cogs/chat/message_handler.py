@@ -337,17 +337,26 @@ JSON only:"""
                 # BehaviorEngine uses handle_message instead of should_respond
                 decision = await self.cog.behavior_engine.handle_message(message)
 
-                if decision and decision.get("should_respond"):
-                    should_respond = True
-                    response_reason = f"behavior_engine:{decision.get('reason', 'unknown')}"
-                    suggested_style = decision.get("suggested_style")
-                    logger.info(
-                        f"✨ AI Decision Engine: RESPOND - Reason: {decision.get('reason')}, Style: {suggested_style}"
-                    )
-                else:
-                    logger.debug(
-                        f"AI Decision Engine: SKIP - Reason: {decision.get('reason')}"
-                    )
+                if decision:
+                    # Handle reactions
+                    if decision.get("reaction"):
+                        try:
+                            await message.add_reaction(decision["reaction"])
+                            logger.info(f"✨ Behavior Engine: Reacted with {decision['reaction']}")
+                        except Exception as e:
+                            logger.warning(f"Failed to add reaction: {e}")
+
+                    if decision.get("should_respond"):
+                        should_respond = True
+                        response_reason = f"behavior_engine:{decision.get('reason', 'unknown')}"
+                        suggested_style = decision.get("suggested_style")
+                        logger.info(
+                            f"✨ Behavior Engine: RESPOND - Reason: {decision.get('reason')}, Style: {suggested_style}"
+                        )
+                    else:
+                        logger.debug(
+                            f"Behavior Engine: SKIP - Reason: {decision.get('reason')}"
+                        )
 
             except Exception as e:
                 logger.warning(f"AI Decision Engine failed: {e}")
