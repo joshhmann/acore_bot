@@ -950,10 +950,8 @@ class ChatCog(commands.Cog):
             if self.naturalness and Config.SELF_AWARENESS_ENABLED:
                 response = self.naturalness.enhance_response(response, context="chat")
 
-            # Apply AI-first persona framework effects (spontaneity, chaos, etc.)
-            if hasattr(self.bot, "decision_engine") and self.bot.decision_engine:
-                response = await self.bot.decision_engine.enhance_response(response)
-                logger.debug("Applied decision engine framework effects to response")
+            # BehaviorEngine handles framework effects via handle_message
+            # No need for separate enhance_response call here
 
             # Clean up response (remove trailing backslashes, extra whitespace)
             response = response.rstrip("\\").rstrip()

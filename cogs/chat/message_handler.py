@@ -323,8 +323,8 @@ JSON only:"""
                     except Exception:
                         pass
 
-        # 5. AI Decision Engine
-        if not should_respond and self.cog.decision_engine:
+        # 5. Behavior Engine (replaced decision_engine)
+        if not should_respond and hasattr(self.cog, 'behavior_engine') and self.cog.behavior_engine:
             try:
                 decision_context = {
                     "channel_id": message.channel.id,
@@ -334,13 +334,12 @@ JSON only:"""
                     "message_length": len(message.content),
                 }
 
-                decision = await self.cog.decision_engine.should_respond(
-                    message.content, decision_context
-                )
+                # BehaviorEngine uses handle_message instead of should_respond
+                decision = await self.cog.behavior_engine.handle_message(message)
 
-                if decision.get("should_respond"):
+                if decision and decision.get("should_respond"):
                     should_respond = True
-                    response_reason = f"ai_decision:{decision.get('reason', 'unknown')}"
+                    response_reason = f"behavior_engine:{decision.get('reason', 'unknown')}"
                     suggested_style = decision.get("suggested_style")
                     logger.info(
                         f"✨ AI Decision Engine: RESPOND - Reason: {decision.get('reason')}, Style: {suggested_style}"
