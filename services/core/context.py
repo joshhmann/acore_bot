@@ -71,7 +71,8 @@ class ContextManager:
         lore_entries: List[LoreEntry] = None,
         rag_content: str = None,
         user_context: str = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        llm_service=None  # NEW: pass LLM service to get context_length
     ) -> List[Dict[str, str]]:
         """
         Build the final list of messages for the LLM, respecting the token limit.
@@ -90,14 +91,22 @@ class ContextManager:
             rag_content: Content retrieved from RAG
             user_context: User profile information
             max_tokens: Override config limit
+            llm_service: LLM service instance (to get context_length)
 
         Returns:
             List of messages ready for the API
         """
         # Determine Token Limit
         limit = max_tokens
+        
+        # Try LLM service's fetched context_length first
+        if not limit and llm_service and hasattr(llm_service, 'context_length'):
+            limit = llm_service.context_length
+            if limit:
+                logger.debug(f"Using LLM service context limit: {limit}")
+        
         if not limit:
-            # Check model specific limit first
+            # Check model specific limit from config
             limit = Config.MODEL_CONTEXT_LIMITS.get(model_name)
         if not limit:
             # Fallback to global default

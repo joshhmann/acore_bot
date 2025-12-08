@@ -651,6 +651,7 @@ class ChatCog(commands.Cog):
                 lore_entries=lore_entries,
                 rag_content=rag_context_str,
                 user_context=user_context_str,
+                llm_service=self.ollama,  # Pass LLM service for context limit
             )
 
             # Log action for self-awareness

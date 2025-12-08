@@ -73,6 +73,9 @@ class OpenRouterService(LLMInterface):
         self.average_response_time = 0.0
         self._metrics_start_time = time.time()
 
+        # Model context length (fetched from API)
+        self.context_length: Optional[int] = None
+
         # Initialize LLM response cache
         self.cache = LLMCache(
             max_size=Config.LLM_CACHE_MAX_SIZE,
@@ -81,7 +84,7 @@ class OpenRouterService(LLMInterface):
         )
 
     async def initialize(self):
-        """Initialize the HTTP session."""
+        """Initialize the HTTP session and fetch model info."""
         if not self.session:
             self.session = aiohttp.ClientSession(
                 headers={
@@ -91,6 +94,9 @@ class OpenRouterService(LLMInterface):
                     "Content-Type": "application/json",
                 }
             )
+            
+            # Fetch model context limit
+            await self._fetch_model_info()
 
     async def close(self):
         """Close the HTTP session."""
@@ -496,6 +502,27 @@ class OpenRouterService(LLMInterface):
         except Exception as e:
             logger.warning(f"OpenRouter health check failed: {e}")
             return False
+
+    async def _fetch_model_info(self):
+        """Fetch model information including context length from OpenRouter API."""
+        try:
+            url = "https://openrouter.ai/api/v1/models"
+            async with self.session.get(
+                url, timeout=aiohttp.ClientTimeout(total=10)
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Find our model
+                    for model_data in data.get("data", []):
+                        if model_data.get("id") == self.model:
+                            self.context_length = model_data.get("context_length")
+                            logger.info(f"Fetched context limit for {self.model}: {self.context_length}")
+                            return
+                    logger.warning(f"Model {self.model} not found in OpenRouter API")
+        except Exception as e:
+            logger.warning(f"Failed to fetch model info: {e}")
+            # Default to config value
+            self.context_length = Config.MODEL_CONTEXT_LIMITS.get(self.model)
 
     async def list_models(self) -> List[str]:
         """List available models on OpenRouter."""
