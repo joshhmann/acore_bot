@@ -84,7 +84,7 @@ class ChatCog(commands.Cog):
         self._background_tasks: set = set()
 
         # Services that may be added later (prevent AttributeError)
-        self.naturalness = None
+        # naturalness/enhancer removed - replaced by BehaviorEngine
         self.callbacks_system = None
         self.curiosity_system = None
         self.pattern_learner = None
@@ -655,8 +655,7 @@ class ChatCog(commands.Cog):
             )
 
             # Log action for self-awareness
-            if self.naturalness:
-                self.naturalness.log_action("chat", f"User: {str(user.name)}")
+            # Logging handled by BehaviorEngine
 
             # Use default values since optimizer is disabled
             optimal_max_tokens = Config.OLLAMA_MAX_TOKENS or 500
@@ -947,8 +946,7 @@ class ChatCog(commands.Cog):
             response = ResponseValidator.validate_response(response)
 
             # Enhance response with self-awareness features if enabled
-            if self.naturalness and Config.SELF_AWARENESS_ENABLED:
-                response = self.naturalness.enhance_response(response, context="chat")
+            # BehaviorEngine handles response enhancement
 
             # BehaviorEngine handles framework effects via handle_message
             # No need for separate enhance_response call here
@@ -969,7 +967,8 @@ class ChatCog(commands.Cog):
                 tts_response = response
 
             # Update mood based on interaction
-            if self.naturalness and Config.MOOD_UPDATE_FROM_INTERACTIONS:
+            # BehaviorEngine handles mood updates
+            if False:
                 # Analyze sentiment
                 sentiment = self.helpers.analyze_sentiment(message_content)
                 # Check if conversation is interesting (has questions, details, etc.)

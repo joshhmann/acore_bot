@@ -262,21 +262,24 @@ async def _handle_chat_response(
                 logger.error(f"Error fetching recent images: {e}")
 
     # Check for trigger word reactions FIRST (before defer)
-    trigger_reaction = self.enhancer.check_trigger_words(message_content)
+    # BehaviorEngine handles trigger reactions
+    trigger_reaction = None
     if trigger_reaction:
         await send_response(trigger_reaction)
         logger.info(f"Sent trigger word reaction: {trigger_reaction[:50]}...")
         return
 
     # Check for fake glitch
-    glitch = self.enhancer.should_glitch()
+    # BehaviorEngine handles glitch behavior
+    glitch = None
     if glitch:
         await send_response(glitch)
         logger.info(f"Sent glitch message: {glitch[:50]}...")
         return
 
     # Calculate natural thinking delay
-    thinking_delay = self.enhancer.calculate_thinking_delay(message_content)
+    # BehaviorEngine handles thinking delays
+    thinking_delay = 0
 
     if interaction:
         await interaction.response.defer(thinking=True)
@@ -290,12 +293,12 @@ async def _handle_chat_response(
         user_id = user.id
 
         # Update emotional state based on message
-        sentiment_deltas = self.enhancer.analyze_message_sentiment(message_content)
-        for emotion, delta in sentiment_deltas.items():
-            self.enhancer.update_emotion(emotion, delta)
+        # BehaviorEngine handles sentiment analysis
+        pass
 
         # Check if we should use a sarcastic short response
-        short_response = self.enhancer.should_use_short_response(message_content)
+        # Response length controlled by max_tokens and persona
+        short_response = False
         if short_response:
             await send_response(short_response)
             logger.info(f"Sent short response: {short_response}")
@@ -319,8 +322,7 @@ async def _handle_chat_response(
         )
 
         # Log action for self-awareness
-        if self.naturalness:
-            self.naturalness.log_action("chat", f"User: {str(user.name)}")
+        # Logging handled by BehaviorEngine
 
         # Response optimization disabled - service removed
         # if Config.DYNAMIC_MAX_TOKENS:
@@ -488,9 +490,7 @@ async def _handle_chat_response(
         # Validate and clean response (remove thinking tags, fix hallucinations)
         response = ResponseValidator.validate_response(response)
 
-        # Enhance response with self-awareness features if enabled
-        if self.naturalness and Config.SELF_AWARENESS_ENABLED:
-            response = self.naturalness.enhance_response(response, context="chat")
+        # BehaviorEngine handles response enhancement
 
         # BehaviorEngine handles framework effects
         # No need for separate enhance_response call here
@@ -511,7 +511,8 @@ async def _handle_chat_response(
             tts_response = response
 
         # Update mood based on interaction
-        if self.naturalness and Config.MOOD_UPDATE_FROM_INTERACTIONS:
+        # BehaviorEngine handles mood updates
+        if False:
             # Analyze sentiment
             sentiment = self.helpers.analyze_sentiment(message_content)
             # Check if conversation is interesting (has questions, details, etc.)
