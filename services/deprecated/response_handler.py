@@ -312,14 +312,13 @@ async def _handle_chat_response(
         # Add user message
         history.append({"role": "user", "content": message_content})
 
-        # Build system prompt with context using ContextManager
-        context_injected_prompt = await self.context_manager.build_context(
-            user=user,
-            channel=channel,
-            user_content=message_content,
-            history=history,
-            suggested_style=suggested_style,
-        )
+        # FIXME: This old context building is broken - response_handler needs rewrite
+        # Use the working version from main.py instead
+        # For now, construct minimal messages
+        context_injected_prompt = [
+            {"role": "system", "content": self.system_prompt or "You are a helpful assistant."},
+            *history
+        ]
 
         # Log action for self-awareness
         # Logging handled by BehaviorEngine

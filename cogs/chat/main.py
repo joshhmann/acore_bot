@@ -36,7 +36,7 @@ from utils.response_validator import ResponseValidator
 from .helpers import ChatHelpers
 from .session_manager import SessionManager
 from .voice_integration import VoiceIntegration
-from .response_handler import _handle_chat_response as _handle_chat_response_func
+# response_handler deprecated - using _handle_chat_response method directly
 from .message_handler import MessageHandler
 from .commands import ChatCommandHandler
 
@@ -146,10 +146,7 @@ class ChatCog(commands.Cog):
         # self.agentic_tools = AgenticToolSystem()
         self.agentic_tools = None  # TODO: Consolidate with enhanced_tools
 
-        # Bind extracted response handler method
-        self._handle_chat_response = _handle_chat_response_func.__get__(
-            self, type(self)
-        )
+        # response_handler.py deprecated - _handle_chat_response is defined below as a method
 
     async def _llm_chat(
         self, messages, system_prompt=None, temperature=None, max_tokens=None
