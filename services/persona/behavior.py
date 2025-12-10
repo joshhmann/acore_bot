@@ -58,21 +58,26 @@ class BehaviorEngine:
         bot,
         ollama: OllamaService,
         context_manager: ContextManager,
-        lorebook_service: LorebookService = None
+        lorebook_service: LorebookService = None,
+        thinking_service = None
     ):
         self.bot = bot
         self.ollama = ollama
         self.context_manager = context_manager
         self.lorebook_service = lorebook_service
+        self.thinking_service = thinking_service  # Cheap/fast LLM for decisions
 
         # State tracking
         self.states: Dict[int, BehaviorState] = defaultdict(BehaviorState)
         self.voice_states: Dict[int, Dict] = {} # guild_id -> voice state info
 
-        # Configuration (derived from Config or defaults)
+        # Configuration (from Config)
+        from config import Config
         self.reaction_chance = 0.15
-        self.ambient_interval_min = 600 # 10 mins
-        self.proactive_cooldown = 300   # 5 mins
+        self.ambient_interval_min = Config.AMBIENT_MIN_INTERVAL  # Default 600s, should be higher
+        self.ambient_chance = Config.AMBIENT_CHANCE  # Default 0.3, reduce to prevent spam
+        self.proactive_enabled = Config.PROACTIVE_ENGAGEMENT_ENABLED
+        self.proactive_cooldown = Config.PROACTIVE_COOLDOWN  # Seconds between proactive engagements
 
         # Background task
         self._running = False
@@ -155,22 +160,109 @@ class BehaviorEngine:
 
     async def _check_ambient_triggers(self, channel_id: int, state: BehaviorState):
         """Check if we should say something during a lull."""
+        # Skip if proactive engagement is disabled
+        if not self.proactive_enabled:
+            return
+            
         now = datetime.now()
         silence_duration = (now - state.last_message_time).total_seconds()
 
-        # Lull Detection (> 10 mins silence, but < 2 hours)
-        if silence_duration > 600 and silence_duration < 7200:
+        # Lull Detection: Only trigger after LONG silence (1+ hours, but < 8 hours)
+        # Much more conservative than before to prevent spam
+        if silence_duration > 3600 and silence_duration < 28800:  # 1-8 hours
             time_since_last_ambient = (now - state.last_ambient_trigger).total_seconds()
 
-            if time_since_last_ambient > self.ambient_interval_min:
-                # 10% chance to speak
-                if random.random() < 0.1:
+            # Only allow ambient message every 6+ hours minimum
+            if time_since_last_ambient > max(self.ambient_interval_min, 21600):  # At least 6 hours
+                # 1/6 chance to speak (as requested by user)
+                if random.random() < (1/6):  # ~16.7%
                     channel = self.bot.get_channel(channel_id)
-                    if channel:
+                    if channel and isinstance(channel, discord.TextChannel):
+                        # AI-FIRST SPAM CHECK: Let thinking model decide if speaking would be annoying
+                        try:
+                            recent_msgs = [msg async for msg in channel.history(limit=6)]
+                            if recent_msgs:
+                                # Build context for LLM to evaluate
+                                history_summary = []
+                                for msg in reversed(recent_msgs):
+                                    author_type = "BOT" if (msg.author.bot or msg.webhook_id) else "HUMAN"
+                                    history_summary.append(f"[{author_type}] {msg.author.display_name}: {msg.content[:100]}")
+                                
+                                history_text = "\n".join(history_summary)
+                                
+                                decision_prompt = f"""You are evaluating whether to send an ambient/proactive message in a Discord channel.
+
+Here are the last few messages in the channel:
+{history_text}
+
+Question: Should you (the bot) send a casual message to spark conversation, or would that be annoying/spammy?
+
+Consider:
+- If the last several messages are ALL from bots with no human response, you're probably being ignored
+- If a human recently spoke, it might be okay to engage
+- If you already sent multiple messages with no response, STOP
+
+Respond with ONLY one word: YES or NO"""
+
+                                # Use thinking service if available, else fall back to main LLM
+                                if self.thinking_service:
+                                    should_speak = await self.thinking_service.decide(decision_prompt, default=False)
+                                else:
+                                    decision = await self.ollama.generate(decision_prompt, max_tokens=10)
+                                    should_speak = "YES" in decision.strip().upper()
+                                
+                                if not should_speak:
+                                    logger.info(f"AI decided NOT to send ambient message in {channel.name} (spam prevention)")
+                                    return
+                                    
+                        except Exception as e:
+                            logger.warning(f"AI spam check failed, using fallback: {e}")
+                            # Fallback: simple check for any human in last 5
+                            human_found = any(not m.author.bot and not m.webhook_id for m in recent_msgs[:5])
+                            if not human_found:
+                                return
+                        
                         msg = await self._generate_ambient_thought(channel, state)
                         if msg:
-                            await channel.send(msg)
+                            # Send via webhook to appear as persona
+                            await self._send_as_persona(channel, msg)
                             state.last_ambient_trigger = now
+                            logger.info(f"Sent ambient lull message in {channel.name}")
+
+    async def _send_as_persona(self, channel: discord.TextChannel, message: str):
+        """Send a message via webhook as the current persona."""
+        try:
+            # Use internal persona state first
+            persona = self.current_persona
+            
+            # Fallback to ChatCog if missing
+            if not persona:
+                chat_cog = self.bot.get_cog("ChatCog")
+                if chat_cog:
+                    persona = chat_cog.current_persona
+            
+            if not persona:
+                # Fallback to regular send if no persona
+                await channel.send(message)
+                return
+            display_name = persona.character.display_name
+            avatar_url = persona.character.avatar_url
+            
+            # Get or create webhook
+            webhooks = await channel.webhooks()
+            webhook = next((w for w in webhooks if w.name == "PersonaBot_Proxy"), None)
+            if not webhook:
+                webhook = await channel.create_webhook(name="PersonaBot_Proxy")
+            
+            await webhook.send(
+                content=message,
+                username=display_name,
+                avatar_url=avatar_url
+            )
+        except Exception as e:
+            logger.error(f"Failed to send ambient message via webhook: {e}")
+            # Fallback to regular send
+            await channel.send(message)
 
     async def handle_voice_update(self, member, before, after):
         """Handle voice state changes (Environmental Awareness)."""

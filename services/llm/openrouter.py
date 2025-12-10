@@ -182,6 +182,7 @@ class OpenRouterService(LLMInterface):
             # Pass extra parameters that might be supported by specific models
             "top_k": self.top_k,
             "min_p": self.min_p,
+            "stop": ["\nUser:", "User:", "\nSystem:", "\n\nUser", "\n\nSystem"],
         }
 
         # Start timing
@@ -333,6 +334,7 @@ class OpenRouterService(LLMInterface):
             "presence_penalty": self.presence_penalty,
             "top_k": self.top_k,
             "min_p": self.min_p,
+            "stop": ["\nUser:", "User:", "\nSystem:", "\n\nUser", "\n\nSystem"],
         }
 
         # Streaming metrics
@@ -419,10 +421,10 @@ class OpenRouterService(LLMInterface):
             logger.error(f"OpenRouter streaming request failed: {e}")
             raise Exception(f"Failed to connect to OpenRouter: {e}")
 
-    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    async def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
         """Generate a response from a single prompt."""
         messages = [{"role": "user", "content": prompt}]
-        return await self.chat(messages, system_prompt=system_prompt)
+        return await self.chat(messages, system_prompt=system_prompt, **kwargs)
 
     async def chat_with_vision(
         self,

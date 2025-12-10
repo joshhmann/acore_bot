@@ -36,6 +36,8 @@ class Character:
     opinions: Dict[str, Any]
     voice_and_tone: Dict[str, Any]
     quirks: Dict[str, Any]
+    # Visuals
+    avatar_url: Optional[str] = None
     # New V2 Card fields
     description: str = ""
     scenario: str = ""
@@ -164,31 +166,26 @@ class PersonaSystem:
             if character_file.suffix == '.png':
                 return self._load_v2_character_card(character_file, character_id)
             else:
-                return self._load_legacy_character(character_file, character_id)
+                # Inspect JSON to see if it's V2 or Legacy
+                with open(character_file, 'r') as f:
+                    data = json.load(f)
+                
+                # Check for V2 spec signatures
+                if "spec" in data and "data" in data:
+                    # It's a V2 card in JSON format
+                    character = self._parse_v2_data(data, character_id)
+                    self.characters[character_id] = character
+                    logger.info(f"Loaded V2 character (JSON): {character_id}")
+                    return character
+                else:
+                    logger.error(f"Legacy character format not supported for {character_id}. Please migrate to V2.")
+                    return None
 
         except Exception as e:
             logger.error(f"Error loading character {character_id}: {e}")
             return None
 
-    def _load_legacy_character(self, filepath: Path, character_id: str) -> Character:
-        """Load character from legacy JSON format."""
-        with open(filepath, 'r') as f:
-            data = json.load(f)
 
-        character = Character(
-            character_id=data["character_id"],
-            display_name=data["display_name"],
-            identity=data["identity"],
-            knowledge_domain=data["knowledge_domain"],
-            opinions=data["opinions"],
-            voice_and_tone=data["voice_and_tone"],
-            quirks=data["quirks"]
-        )
-
-        # Cache it
-        self.characters[character_id] = character
-        logger.info(f"Loaded legacy character: {character_id}")
-        return character
 
     def _load_v2_character_card(self, filepath: Path, character_id: str) -> Character:
         """Load character from V2 PNG Character Card."""
@@ -207,44 +204,7 @@ class PersonaSystem:
                     # Fallback for some cards that might store raw text in 'Description' or similar (less common for V2)
                     raise ValueError("No V2 character data found in PNG metadata")
 
-            # Map V2 spec fields to our Character class
-            data = card_data.get('data', card_data) # Sometimes wrapped in 'data'
-
-            name = data.get('name', character_id)
-            description = data.get('description', '')
-            personality = data.get('personality', '')
-            scenario = data.get('scenario', '')
-            first_message = data.get('first_mes', '')
-            mes_example = data.get('mes_example', '')
-
-            # Construct identity dict from flat V2 data
-            identity = {
-                "who": name,
-                "core_traits": [t.strip() for t in data.get('tags', [])],
-                "description": description,
-                "personality": personality
-            }
-
-            character = Character(
-                character_id=character_id,
-                display_name=name,
-                identity=identity,
-                knowledge_domain={}, # V2 cards don't structure this explicitly
-                opinions={}, # V2 cards don't structure this explicitly
-                voice_and_tone={}, # V2 cards don't structure this explicitly
-                quirks={},
-                # V2 Specifics
-                description=description,
-                scenario=scenario,
-                first_message=first_message,
-                mes_example=mes_example,
-                alternate_greetings=data.get('alternate_greetings', []),
-                creator_notes=data.get('creator_notes', ''),
-                tags=data.get('tags', []),
-                creator=data.get('creator', ''),
-                character_version=data.get('character_version', ''),
-                system_prompt_override=data.get('system_prompt', '')
-            )
+            character = self._parse_v2_data(card_data, character_id)
 
             # Cache it
             self.characters[character_id] = character
@@ -254,6 +214,49 @@ class PersonaSystem:
         except Exception as e:
             logger.error(f"Failed to parse V2 card {filepath}: {e}")
             raise
+
+    def _parse_v2_data(self, card_data: Dict[str, Any], character_id: str) -> Character:
+        """Parse V2 character card data into Character object."""
+        # Map V2 spec fields to our Character class
+        data = card_data.get('data', card_data) # Sometimes wrapped in 'data'
+
+        name = data.get('name', character_id)
+        description = data.get('description', '')
+        personality = data.get('personality', '')
+        scenario = data.get('scenario', '')
+        first_message = data.get('first_mes', '')
+        mes_example = data.get('mes_example', '')
+
+        # Construct identity dict from flat V2 data
+        identity = {
+            "who": name,
+            "core_traits": [t.strip() for t in data.get('tags', [])],
+            "description": description,
+            "personality": personality
+        }
+
+        character = Character(
+            character_id=character_id,
+            display_name=name,
+            identity=identity,
+            knowledge_domain={}, # V2 cards don't structure this explicitly
+            opinions={}, # V2 cards don't structure this explicitly
+            voice_and_tone={}, # V2 cards don't structure this explicitly
+            quirks={},
+            # V2 Specifics
+            description=description,
+            scenario=scenario,
+            first_message=first_message,
+            mes_example=mes_example,
+            alternate_greetings=data.get('alternate_greetings', []),
+            creator_notes=data.get('creator_notes', ''),
+            tags=data.get('tags', []),
+            creator=data.get('creator', ''),
+            character_version=data.get('character_version', ''),
+            system_prompt_override=data.get('system_prompt', ''),
+            avatar_url=data.get('avatar_url')
+        )
+        return character
 
     def compile_persona(
         self,
@@ -291,6 +294,21 @@ class PersonaSystem:
             if not framework:
                 logger.warning(f"Framework {framework_id} not found, using character card only")
 
+        # Create a minimal framework wrapper if none provided (or if ignoring)
+        if not framework:
+             framework = Framework(
+                framework_id="none",
+                name="No Framework",
+                purpose="Pure Character Card",
+                behavioral_patterns={},
+                tool_requirements={},
+                decision_making={},
+                context_requirements={},
+                interaction_style={},
+                anti_hallucination={},
+                prompt_template=""
+            )
+
         try:
             # Build system prompt
             if framework:
@@ -321,20 +339,7 @@ class PersonaSystem:
                     "framework": None,
                 }
 
-            # Create a minimal framework wrapper if none provided
-            if not framework:
-                framework = Framework(
-                    framework_id="none",
-                    name="No Framework",
-                    purpose="Pure Character Card",
-                    behavioral_patterns={},
-                    tool_requirements={},
-                    decision_making={},
-                    context_requirements={},
-                    interaction_style={},
-                    anti_hallucination={},
-                    prompt_template=""
-                )
+
 
             # Compile persona
             persona = CompiledPersona(
@@ -383,9 +388,7 @@ class PersonaSystem:
 {framework.prompt_template}
 """
 
-        # Legacy Prompt Building Logic
-        if character.identity.get('core_traits'):
-             return self._build_legacy_system_prompt(character, framework)
+
 
         # V2 Card Prompt Construction (Standard SillyTavern style)
         prompt = f"""You are {character.display_name}.
@@ -405,42 +408,7 @@ class PersonaSystem:
 """
         return prompt
 
-    def _build_legacy_system_prompt(self, character: Character, framework: Framework) -> str:
-        """Build prompt for legacy JSON characters."""
-        identity_section = f"""
-=== WHO YOU ARE ===
-{character.identity.get('who', 'AI Assistant')}
-{f"From: {character.identity.get('from')}" if character.identity.get('from') else ''}
-{f"Current State: {character.identity.get('current_state')}" if character.identity.get('current_state') else ''}
 
-Core Traits:
-{self._format_list(character.identity.get('core_traits', []))}
-
-Speaking Style:
-{self._format_list(character.identity.get('speaking_style', []))}
-"""
-        opinions_section = self._build_opinions_section(character.opinions)
-        framework_section = framework.prompt_template
-        quirks_section = self._build_quirks_section(character.quirks)
-        expertise_section = f"""
-=== YOUR EXPERTISE ===
-{self._format_list(character.knowledge_domain.get('expertise', []))}
-"""
-        full_prompt = f"""
-{identity_section}
-{opinions_section}
-{expertise_section}
-{framework_section}
-{quirks_section}
-
-=== REMEMBER ===
-You are {character.identity.get('who', 'yourself')}.
-Framework: {framework.name}
-Purpose: {framework.purpose}
-
-Stay in character. Be engaging. Be memorable.
-"""
-        return full_prompt
 
     def _build_v2_system_prompt(self, character: Character) -> str:
         """Build system prompt from V2 character card fields (SillyTavern style)."""
@@ -471,58 +439,7 @@ Stay in character. Be engaging. Be memorable.
         
         return prompt
 
-    def _build_opinions_section(self, opinions: Dict[str, Any]) -> str:
-        """Build opinions section of prompt."""
-        loves = opinions.get('loves', {})
-        hates = opinions.get('hates', {})
-        hot_takes = opinions.get('hot_takes', [])
 
-        section = "=== YOUR OPINIONS ===\n\n"
-
-        if loves:
-            section += "You LOVE:\n"
-            for category, items in loves.items():
-                if items:
-                    section += f"  {category.title()}: {', '.join(items)}\n"
-
-        if hates:
-            section += "\nYou HATE:\n"
-            for category, items in hates.items():
-                if items:
-                    section += f"  {category.title()}: {', '.join(items)}\n"
-
-        if hot_takes:
-            section += "\nYour Hot Takes:\n"
-            section += self._format_list(hot_takes)
-
-        return section
-
-    def _build_quirks_section(self, quirks: Dict[str, Any]) -> str:
-        """Build quirks section of prompt."""
-        section = "=== YOUR QUIRKS & PATTERNS ===\n\n"
-
-        catchphrases = quirks.get('catchphrases', [])
-        if catchphrases:
-            section += "Catchphrases you might use:\n"
-            section += self._format_list(catchphrases)
-            section += "\n"
-
-        meta_jokes = quirks.get('meta_jokes', [])
-        if meta_jokes:
-            section += "Meta jokes you make:\n"
-            section += self._format_list(meta_jokes)
-            section += "\n"
-
-        spontaneous = quirks.get('spontaneous_thoughts', [])
-        if spontaneous:
-            section += "Random thoughts (for spontaneous moments):\n"
-            section += self._format_list(spontaneous)
-
-        return section
-
-    def _format_list(self, items: List[str]) -> str:
-        """Format list with bullet points."""
-        return "\n".join(f"- {item}" for item in items)
 
     def _save_compiled_persona(self, persona: CompiledPersona):
         """Save compiled persona to disk for reference."""
@@ -575,11 +492,17 @@ Stay in character. Be engaging. Be memorable.
             try:
                 with open(file, 'r') as f:
                     data = json.load(f)
-                    characters.append({
-                        "id": data["character_id"],
-                        "name": data["display_name"],
-                        "from": data["identity"].get("from", "Unknown")
-                    })
+                    
+                    if "spec" in data and "data" in data:
+                        # V2 Character
+                        v2_data = data["data"]
+                        characters.append({
+                            "id": file.stem,
+                            "name": v2_data.get("name", file.stem),
+                            "from": "V2 Card"
+                        })
+                    else:
+                        pass # Skip legacy files
             except Exception as e:
                 logger.warning(f"Could not read character {file}: {e}")
 

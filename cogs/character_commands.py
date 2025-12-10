@@ -172,6 +172,152 @@ class CharacterCommandsCog(commands.Cog):
             logger.error(f"Failed to set character: {e}", exc_info=True)
             await interaction.followup.send(format_error(e), ephemeral=True)
 
+    @app_commands.command(name="interact", description="Make two characters talk to each other")
+    @app_commands.describe(
+        initiator="Character starting the conversation (e.g. dagoth_ur)",
+        target="Character to speak to (e.g. scav)",
+        topic="Topic for them to discuss"
+    )
+    async def interact(
+        self,
+        interaction: discord.Interaction,
+        initiator: str,
+        target: str,
+        topic: str
+    ):
+        """Force two characters to interact."""
+        await interaction.response.defer()
+        
+        chat_cog = self.bot.get_cog("ChatCog")
+        if not chat_cog:
+             await interaction.followup.send("❌ Chat system unavailable.")
+             return
+
+        # Helper for fuzzy matching
+        def find_persona(name):
+            # 1. Try router's lookup (exact or ID)
+            p = chat_cog.persona_router.get_persona_by_name(name)
+            if p: return p
+            
+            # 2. Try partial matching
+            name_lower = name.lower()
+            for p in chat_cog.persona_router.get_all_personas():
+                # Check ID
+                if name_lower == p.character.character_id.lower(): return p
+                # Check Display Name parts
+                p_name_lower = p.character.display_name.lower()
+                if name_lower in p_name_lower: return p
+                
+            return None
+
+        # Resolve personas
+        p1 = find_persona(initiator)
+        p2 = find_persona(target)
+        
+        if not p1 or not p2:
+            active = [p.character.display_name for p in chat_cog.persona_router.get_all_personas()]
+            missing = []
+            if not p1: missing.append(initiator)
+            if not p2: missing.append(target)
+            await interaction.followup.send(f"❌ Could not find characters: {', '.join(missing)}.\nActive: {active}")
+            return
+
+        # Generate Starter
+        prompt = f"""You are {p1.character.display_name}.
+        Start a conversation with {p2.character.display_name} about: {topic}.
+        IMPORTANT: Mention them by name ("{p2.character.display_name}") so they hear you.
+        Keep it in character, short (under 200 chars), and engaging."""
+        
+        response = await chat_cog.ollama.generate(prompt, max_tokens=200)
+        
+        try:
+             channel = interaction.channel
+             webhooks = await channel.webhooks()
+             webhook = next((w for w in webhooks if w.name == "PersonaBot_Proxy"), None)
+             if not webhook:
+                 webhook = await channel.create_webhook(name="PersonaBot_Proxy")
+             
+             await webhook.send(
+                 content=response,
+                 username=p1.character.display_name,
+                 avatar_url=p1.character.avatar_url
+             )
+             
+             await interaction.followup.send(f"🎬 Action! {p1.character.display_name} started talking to {p2.character.display_name}.", ephemeral=True)
+             
+        except Exception as e:
+             await interaction.followup.send(f"❌ Error sending webhook: {e}")
+
+             await interaction.followup.send(f"❌ Error sending webhook: {e}")
+    
+    @commands.command(name="interact")
+    async def interact_cmd(self, ctx, initiator: str, target: str, *, topic: str):
+        """Force two characters to interact (Prefix command for immediate use).
+        Usage: !interact <char1> <char2> <topic>
+        Example: !interact toad dagoth scream at him
+        """
+        chat_cog = self.bot.get_cog("ChatCog")
+        if not chat_cog:
+             await ctx.send("❌ Chat system unavailable.")
+             return
+
+        # Helper for fuzzy matching
+        def find_persona(name):
+            # 1. Try router's lookup (exact or ID)
+            p = chat_cog.persona_router.get_persona_by_name(name)
+            if p: return p
+            
+            # 2. Try partial matching
+            name_lower = name.lower()
+            for p in chat_cog.persona_router.get_all_personas():
+                # Check ID
+                if name_lower == p.character.character_id.lower(): return p
+                # Check Display Name parts
+                p_name_lower = p.character.display_name.lower()
+                if name_lower in p_name_lower: return p
+                
+            return None
+
+        # Resolve personas
+        p1 = find_persona(initiator)
+        p2 = find_persona(target)
+        
+        if not p1 or not p2:
+            active = [p.character.display_name for p in chat_cog.persona_router.get_all_personas()]
+            missing = []
+            if not p1: missing.append(initiator)
+            if not p2: missing.append(target)
+            await ctx.send(f"❌ Could not find characters: {', '.join(missing)}.\nActive: {active}")
+            return
+
+        # Generate Starter
+        prompt = f"""You are {p1.character.display_name}.
+        Start a conversation with {p2.character.display_name} about: {topic}.
+        IMPORTANT: Mention them by name ("{p2.character.display_name}") so they hear you.
+        Keep it in character, short (under 200 chars), and engaging."""
+        
+        try:
+             response = await chat_cog.ollama.generate(prompt, max_tokens=200)
+
+             channel = ctx.channel
+             webhooks = await channel.webhooks()
+             webhook = next((w for w in webhooks if w.name == "PersonaBot_Proxy"), None)
+             if not webhook:
+                 webhook = await channel.create_webhook(name="PersonaBot_Proxy")
+             
+             await webhook.send(
+                 content=response,
+                 username=p1.character.display_name,
+                 avatar_url=p1.character.avatar_url
+             )
+             
+             # Also try to trigger the auto-reply logic for the SECOND character?
+             # The webhook message will trigger on_message -> loop prevention -> strict checks.
+             # If target is explicitly mentioned in response, they SHOULD respond.
+             
+        except Exception as e:
+             await ctx.send(f"❌ Error: {e}")
+
     @app_commands.command(name="list_characters", description="List available characters and frameworks")
     async def list_characters(self, interaction: discord.Interaction):
         """List all available characters and frameworks."""
@@ -241,6 +387,180 @@ class CharacterCommandsCog(commands.Cog):
         except Exception as e:
             logger.error(f"List characters failed: {e}")
             await interaction.followup.send(format_error(e), ephemeral=True)
+
+    @app_commands.command(name="import_character", description="Import a SillyTavern character card (PNG with embedded data)")
+    async def import_character(self, interaction: discord.Interaction):
+        """Import a character card from attached PNG.
+        
+        Usage: /import_character (then attach a PNG)
+        """
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        
+        try:
+            # Check for attachment
+            if not interaction.message or not interaction.message.attachments:
+                # For slash commands, we need to handle this differently
+                await interaction.followup.send(
+                    "📎 Please use the prefix command `!import` and attach a PNG file.\n"
+                    "Example: Send `!import` with a character card PNG attached.",
+                    ephemeral=True
+                )
+                return
+                
+        except Exception as e:
+            logger.error(f"Import character failed: {e}")
+            await interaction.followup.send(format_error(e), ephemeral=True)
+
+    @commands.command(name="import")
+    async def import_character_prefix(self, ctx: commands.Context):
+        """Import a SillyTavern character card from attached PNG.
+        
+        Usage: !import (attach a PNG file)
+        """
+        if not ctx.message.attachments:
+            await ctx.send("❌ Please attach a SillyTavern character card PNG to import.")
+            return
+        
+        attachment = ctx.message.attachments[0]
+        if not attachment.filename.lower().endswith('.png'):
+            await ctx.send("❌ Please attach a PNG file (SillyTavern character card).")
+            return
+        
+        await ctx.send("⏳ Importing character card...")
+        
+        try:
+            from services.persona.character_importer import CharacterCardImporter
+            import tempfile
+            import os
+            
+            # Download the PNG
+            temp_dir = Path(tempfile.gettempdir())
+            temp_path = temp_dir / attachment.filename
+            await attachment.save(temp_path)
+            
+            # Import the card
+            importer = CharacterCardImporter()
+            result = importer.import_card(temp_path)
+            
+            # Clean up temp file
+            os.unlink(temp_path)
+            
+            if result:
+                # Read the imported character to show details
+                import json
+                with open(result, 'r') as f:
+                    char_data = json.load(f)
+                
+                embed = discord.Embed(
+                    title="✅ Character Imported!",
+                    description=f"**{char_data['display_name']}** is ready to use.",
+                    color=discord.Color.green()
+                )
+                embed.add_field(name="ID", value=char_data['id'], inline=True)
+                embed.add_field(name="Source", value=char_data.get('source_format', 'unknown'), inline=True)
+                embed.add_field(
+                    name="Description", 
+                    value=char_data.get('description', 'No description')[:200] + "...",
+                    inline=False
+                )
+                embed.add_field(
+                    name="Next Steps",
+                    value=f"1. Add `\"{char_data['id']}.json\"` to `ACTIVE_PERSONAS` in config.py\n"
+                          f"2. Restart the bot\n"
+                          f"3. Use `/set_character {char_data['id']}`",
+                    inline=False
+                )
+                
+                await ctx.send(embed=embed)
+                
+                # Notify about reloading
+                chat_cog = self.bot.get_cog("ChatCog")
+                if chat_cog and hasattr(chat_cog, 'persona_router'):
+                    await ctx.send("💡 Tip: Use `!reload_characters` to load new characters without restart.")
+            else:
+                await ctx.send("❌ Failed to import character. Check logs for details.")
+                
+        except Exception as e:
+            logger.error(f"Import failed: {e}", exc_info=True)
+            await ctx.send(f"❌ Import failed: {e}")
+
+    @commands.command(name="reload_characters")
+    async def reload_characters(self, ctx: commands.Context):
+        """Reload all characters from disk without restarting."""
+        chat_cog = self.bot.get_cog("ChatCog")
+        if not chat_cog or not hasattr(chat_cog, 'persona_router'):
+            await ctx.send("❌ Chat system not available.")
+            return
+        
+        await ctx.send("🔄 Reloading characters...")
+        
+        try:
+            await chat_cog.persona_router.initialize()
+            personas = chat_cog.persona_router.get_all_personas()
+            names = [p.character.display_name for p in personas]
+            
+            await ctx.send(f"✅ Reloaded {len(personas)} characters:\n" + ", ".join(names))
+        except Exception as e:
+            logger.error(f"Reload failed: {e}")
+            await ctx.send(f"❌ Reload failed: {e}")
+
+    @commands.command(name="import_folder")
+    async def import_folder(self, ctx: commands.Context):
+        """Import all character cards from data/import_cards folder.
+        
+        Usage: 
+        1. Place PNG character cards in: data/import_cards/
+        2. Run !import_folder
+        """
+        import_dir = Path("./data/import_cards")
+        
+        if not import_dir.exists():
+            import_dir.mkdir(parents=True, exist_ok=True)
+            await ctx.send(f"📁 Created import folder: `{import_dir}`\n"
+                          f"Place your PNG character cards there and run `!import_folder` again.")
+            return
+        
+        png_files = list(import_dir.glob("*.png"))
+        if not png_files:
+            await ctx.send(f"📁 No PNG files found in `{import_dir}`\n"
+                          f"Place SillyTavern character card PNGs there and try again.")
+            return
+        
+        await ctx.send(f"⏳ Found {len(png_files)} PNG files. Importing...")
+        
+        try:
+            from services.persona.character_importer import CharacterCardImporter
+            
+            importer = CharacterCardImporter()
+            results = importer.import_from_directory(import_dir)
+            
+            if results:
+                # Read names of imported characters
+                import json
+                names = []
+                for path in results:
+                    with open(path, 'r') as f:
+                        data = json.load(f)
+                        names.append(data['display_name'])
+                
+                embed = discord.Embed(
+                    title=f"✅ Imported {len(results)} Characters!",
+                    description="\n".join([f"• {name}" for name in names]),
+                    color=discord.Color.green()
+                )
+                embed.add_field(
+                    name="Next Steps",
+                    value="1. Add character IDs to `ACTIVE_PERSONAS` in config.py\n"
+                          "2. Run `!reload_characters` or restart bot",
+                    inline=False
+                )
+                await ctx.send(embed=embed)
+            else:
+                await ctx.send("❌ No valid character cards found in the PNGs.")
+                
+        except Exception as e:
+            logger.error(f"Folder import failed: {e}", exc_info=True)
+            await ctx.send(f"❌ Import failed: {e}")
 
 
 async def setup(bot):

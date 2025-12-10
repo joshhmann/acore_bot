@@ -2,6 +2,7 @@
 
 import logging
 from typing import List, Dict, Optional, Tuple
+from datetime import datetime
 import tiktoken
 
 from config import Config
@@ -136,6 +137,18 @@ class ContextManager:
         # Combine all system-level content
         full_system_content = system_content + "\n".join(context_additions)
 
+        # MULTI-PERSONA STABILITY FIX
+        # Explicitly instruct the model to ignore identity bleeding from previous turns
+        # (e.g. if Dagoth Ur called the user Nerevar, Scav shouldn't start doing it)
+        full_system_content += (
+            f"\n\n[SYSTEM INSTRUCTION]\n"
+            f"Current Date and Time: {datetime.now().astimezone().strftime('%Y-%m-%d %H:%M:%S %Z')}\n"
+            f"You are currently {persona.character.display_name}.\n"
+            f"Note: The chat history may contain messages from other characters/personas.\n"
+            f"DO NOT adopt their nicknames for the user (like 'Nerevar') or their speaking style.\n"
+            f"Strictly maintain your identity as {persona.character.display_name}."
+        )
+
         # Initial messages list
         final_messages = [
             {"role": "system", "content": full_system_content}
@@ -161,7 +174,22 @@ class ContextManager:
             msg_tokens = self.count_message_tokens([msg], model_name)
 
             if remaining_tokens - msg_tokens >= 0:
-                history_to_include.append(msg)
+                # Format message for LLM
+                clean_msg = {
+                    "role": msg.get("role", "user"),
+                    "content": msg.get("content", "")
+                }
+                
+                # Add name info if available
+                username = msg.get("username") or msg.get("name")
+                if username:
+                    clean_msg["name"] = username
+                    # Prepend name to content for stronger identity awareness
+                    # (Helpful for models that ignore 'name' field)
+                    if clean_msg["role"] == "user":
+                         clean_msg["content"] = f"{username}: {clean_msg['content']}"
+
+                history_to_include.append(clean_msg)
                 remaining_tokens -= msg_tokens
             else:
                 logger.info(f"Context limit reached. Dropping {len(history) - len(history_to_include)} older messages.")

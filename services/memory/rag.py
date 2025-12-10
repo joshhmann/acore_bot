@@ -239,7 +239,7 @@ class RAGService:
 
         logger.info(f"Indexing complete! {self.collection.count()} embeddings in vector store")
 
-    def search(self, query: str, top_k: Optional[int] = None, category: Optional[str] = None, boost_category: Optional[str] = None) -> List[dict]:
+    def search(self, query: str, top_k: Optional[int] = None, category: Optional[str] = None, categories: Optional[List[str]] = None, boost_category: Optional[str] = None) -> List[dict]:
         """Search for relevant documents.
 
         Uses vector similarity if available, falls back to keyword search.
@@ -247,7 +247,8 @@ class RAGService:
         Args:
             query: Search query
             top_k: Number of results to return
-            category: Filter by category
+            category: Filter by single category
+            categories: Filter by list of categories (one of)
             boost_category: Boost score for documents in this category
 
         Returns:
@@ -257,12 +258,12 @@ class RAGService:
 
         # Try vector search first
         if self.use_vector_search and self.collection and self.embedding_model:
-            return self._vector_search(query, k, category, boost_category)
+            return self._vector_search(query, k, category, categories, boost_category)
         else:
             # Fallback to keyword search
             return self._keyword_search(query, k, category, boost_category)
 
-    def _vector_search(self, query: str, top_k: int, category: Optional[str], boost_category: Optional[str]) -> List[dict]:
+    def _vector_search(self, query: str, top_k: int, category: Optional[str], categories: Optional[List[str]], boost_category: Optional[str]) -> List[dict]:
         """Perform vector similarity search."""
         try:
             # Generate query embedding
@@ -291,6 +292,12 @@ class RAGService:
             where_filter = None
             if category:
                 where_filter = {"category": category}
+            elif categories:
+                 # Support list of categories
+                 if len(categories) == 1:
+                     where_filter = {"category": categories[0]}
+                 else:
+                     where_filter = {"category": {"$in": categories}}
 
             # Search with more results than needed for boosting
             search_k = top_k * 3 if boost_category else top_k
@@ -421,13 +428,14 @@ class RAGService:
 
         return top_results
 
-    def get_context(self, query: str, max_length: int = 1000, category: Optional[str] = None, boost_category: Optional[str] = None) -> str:
+    def get_context(self, query: str, max_length: int = 1000, category: Optional[str] = None, categories: Optional[List[str]] = None, boost_category: Optional[str] = None) -> str:
         """Get relevant context for a query.
 
         Args:
             query: User query
             max_length: Maximum character length of context
             category: Filter by category
+            categories: Filter by list of categories
             boost_category: Boost documents in this category
 
         Returns:
@@ -437,16 +445,24 @@ class RAGService:
         caller = traceback.extract_stack()[-2]
         logger.debug(f"get_context called from {caller.filename}:{caller.lineno} in {caller.name}")
 
-        results = self.search(query, category=category, boost_category=boost_category)
+        results = self.search(query, category=category, categories=categories, boost_category=boost_category)
 
         if not results:
+            return ""
+
+        # Filter out low relevance results to prevent context pollution
+        # Keep results if score > 0.5 (tunable)
+        relevant_results = [r for r in results if r.get('relevance_score', 0) > 0.5]
+        
+        if not relevant_results:
+            logger.debug(f"Matches found but below relevance threshold (0.5). Best: {results[0].get('relevance_score', 0):.2f}")
             return ""
 
         # Combine relevant documents
         context_parts = []
         total_length = 0
 
-        for result in results:
+        for result in relevant_results:
             content = result["content"]
             filename = result["filename"]
 

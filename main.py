@@ -132,6 +132,7 @@ class OllamaBot(commands.Bot):
                 persona_system=self.services.get('persona_system'),
                 compiled_persona=self.services.get('compiled_persona'),
                 llm_fallback=self.services.get('llm_fallback'),
+                persona_relationships=self.services.get('persona_relationships'),
             )
         )
         logger.info("Loaded ChatCog")

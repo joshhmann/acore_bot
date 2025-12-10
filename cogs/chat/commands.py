@@ -25,60 +25,60 @@ class ChatCommandHandler:
     async def ambient(self, interaction: discord.Interaction, action: str = "status"):
         """Control ambient mode."""
         try:
-            ambient = getattr(self.cog.bot, "ambient_mode", None)
+            # Use BehaviorEngine instead of legacy AmbientMode
+            engine = getattr(self.cog, "behavior_engine", None)
 
-            if not ambient:
+            if not engine:
                 await interaction.response.send_message(
-                    "❌ Ambient mode is not configured.", ephemeral=True
+                    "❌ Behavior Engine is not configured.", ephemeral=True
                 )
                 return
 
             if action == "status":
-                stats = ambient.get_stats()
+                running = getattr(engine, "_running", False)
+                active_count = len(engine.states)
+                
                 embed = discord.Embed(
-                    title="🌙 Ambient Mode Status", color=discord.Color.purple()
+                    title="🌙 Ambient Mode (Behavior Engine)", color=discord.Color.purple()
                 )
                 embed.add_field(
                     name="Status",
-                    value="🟢 Running" if stats["running"] else "🔴 Stopped",
+                    value="🟢 Running" if running else "🔴 Stopped",
                     inline=True,
                 )
                 embed.add_field(
                     name="Active Channels",
-                    value=str(stats["active_channels"]),
+                    value=str(active_count),
                     inline=True,
                 )
                 embed.add_field(
                     name="Trigger Chance",
-                    value=f"{int(stats['chance'] * 100)}%",
+                    value=f"{int(engine.ambient_chance * 100)}%",
                     inline=True,
                 )
                 embed.add_field(
-                    name="Lull Timeout", value=f"{stats['lull_timeout']}s", inline=True
-                )
-                embed.add_field(
-                    name="Min Interval", value=f"{stats['min_interval']}s", inline=True
+                    name="Min Interval", value=f"{engine.ambient_interval_min}s", inline=True
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
 
             elif action == "enable":
-                if ambient.running:
+                if getattr(engine, "_running", False):
                     await interaction.response.send_message(
                         "✅ Ambient mode is already running.", ephemeral=True
                     )
                 else:
-                    await ambient.start()
+                    await engine.start()
                     await interaction.response.send_message(
                         "✅ Ambient mode enabled!", ephemeral=True
                     )
 
             elif action == "disable":
-                if not ambient.running:
+                if not getattr(engine, "_running", False):
                     await interaction.response.send_message(
                         "❌ Ambient mode is already stopped.", ephemeral=True
                     )
                 else:
-                    await ambient.stop()
+                    await engine.stop()
                     await interaction.response.send_message(
                         "✅ Ambient mode disabled.", ephemeral=True
                     )
@@ -93,9 +93,14 @@ class ChatCommandHandler:
             channel_id = interaction.channel_id
             if await self.cog.session_manager.is_session_active(channel_id):
                 await self.cog.session_manager.end_session(channel_id)
+                
+                # Also clear the chat history to ensure a fresh start
+                if hasattr(self.cog, "history"):
+                    await self.cog.history.clear_history(channel_id)
+                    
                 await interaction.response.send_message(
                     format_success(
-                        f"Conversation session ended. Use @mention or `/chat` to start a new session."
+                        f"Conversation session ended & history cleared. Use @mention or `/chat` to start a new session."
                     ),
                     ephemeral=True,
                 )
