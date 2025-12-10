@@ -235,7 +235,7 @@ def create_bot_services_container() -> DIContainer:
 
     # LLM Service (Ollama or OpenRouter)
     if Config.LLM_PROVIDER == "openrouter":
-        from services.openrouter import OpenRouterService
+        from services.llm.openrouter import OpenRouterService
         c.register("llm", lambda: OpenRouterService(
             api_key=Config.OPENROUTER_API_KEY,
             model=Config.OPENROUTER_MODEL,
@@ -243,7 +243,7 @@ def create_bot_services_container() -> DIContainer:
             max_tokens=Config.LLM_MAX_TOKENS,
         ))
     else:  # ollama
-        from services.ollama import OllamaService
+        from services.llm.ollama import OllamaService
         c.register("llm", lambda: OllamaService(
             host=Config.OLLAMA_HOST,
             model=Config.OLLAMA_MODEL,
@@ -252,7 +252,7 @@ def create_bot_services_container() -> DIContainer:
         ))
 
     # TTS Service
-    from services.tts import TTSService
+    from services.voice.tts import TTSService
     c.register("tts", lambda: TTSService(
         engine=Config.TTS_ENGINE,
         kokoro_api_url=Config.KOKORO_API_URL,
@@ -269,7 +269,7 @@ def create_bot_services_container() -> DIContainer:
 
     # RVC Service (if enabled)
     if Config.RVC_ENABLED:
-        from services.rvc_http import RVCHTTPClient
+        from services.clients.rvc_client import RVCHTTPClient
         c.register("rvc", lambda: RVCHTTPClient(
             base_url=Config.RVC_WEBUI_URL,
             default_model=Config.DEFAULT_RVC_MODEL,
@@ -281,7 +281,7 @@ def create_bot_services_container() -> DIContainer:
 
     # User Profiles (if enabled)
     if Config.USER_PROFILES_ENABLED:
-        from services.user_profiles import UserProfileService
+        from services.discord.profiles import UserProfileService
         c.register("user_profiles", lambda: UserProfileService(Config.DATA_DIR))
 
     # RAG Service (if enabled)

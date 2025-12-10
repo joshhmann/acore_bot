@@ -122,52 +122,54 @@ class ChatHelpers:
         return content
 
     @staticmethod
-    def analyze_sentiment(text: str) -> str:
-        """Simple sentiment analysis heuristic.
+    def clean_for_history(content: str) -> str:
+        """Clean response content before saving to history.
+
+        Removes:
+        - TOOL: prefixes and their lines
+        - Empty lines at start
+        - Excessive whitespace
 
         Args:
-            text: Text to analyze
+            content: Raw LLM response
 
         Returns:
-            Sentiment classification: "positive", "negative", or "neutral"
+            Cleaned content suitable for history storage
         """
+        if not content:
+            return content
+
+        # Remove TOOL: lines (e.g., "TOOL: get_current_time\n\n")
+        content = re.sub(r'^TOOL:\s*\S+\s*\n+', '', content, flags=re.MULTILINE)
+        
+        # Remove any remaining tool call artifacts
+        content = re.sub(r'\[TOOL_CALL:.*?\]', '', content)
+        
+        # Strip leading/trailing whitespace
+        content = content.strip()
+        
+        return content
+
+    @staticmethod
+    def analyze_sentiment(text: str) -> dict:
+        """Analyze sentiment of text.
+        
+        Returns:
+            Dict with 'compound', 'pos', 'neg', 'neu' scores.
+        """
+        # Simple heuristic since NLTK/VADER usage might be missing
         text = text.lower()
-        positive_words = [
-            "!",
-            "awesome",
-            "great",
-            "love",
-            "amazing",
-            "excited",
-            "happy",
-            "yay",
-            "wow",
-            "excellent",
-            "good",
-            "haha",
-        ]
-        negative_words = [
-            "sorry",
-            "sad",
-            "unfortunate",
-            "regret",
-            "bad",
-            "terrible",
-            "awful",
-            "depressed",
-            "grief",
-            "miss",
-            "pain",
-        ]
-
-        pos_score = sum(1 for w in positive_words if w in text)
-        neg_score = sum(1 for w in negative_words if w in text)
-
-        if pos_score > neg_score:
-            return "positive"
-        elif neg_score > pos_score:
-            return "negative"
-        return "neutral"
+        positive_words = {"love", "amazing", "good", "great", "excellent", "happy"}
+        negative_words = {"bad", "terrible", "sad", "awful", "sorry", "hate"}
+        
+        pos = sum(1 for w in positive_words if w in text)
+        neg = sum(1 for w in negative_words if w in text)
+        
+        compound = 0.0
+        if pos > neg: compound = 0.5
+        elif neg > pos: compound = -0.5
+        
+        return {"compound": compound, "pos": pos, "neg": neg, "neu": 1.0}
 
     @staticmethod
     def load_system_prompt(prompt_file: Path, default_prompt: str) -> str:
@@ -191,3 +193,34 @@ class ChatHelpers:
                 logger.warning(f"Failed to load system prompt from file: {e}")
 
         return default_prompt
+
+    @staticmethod
+    def clean_response(content: str) -> str:
+        """Clean LLM response (remove thinking tags, artifacts)."""
+        if not content:
+            return ""
+
+        # Remove <think> blocks
+        cleaned = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+        
+        # Sanitize mass mentions (prevent @everyone/@here pings)
+        cleaned = cleaned.replace("@everyone", "@\u200beveryone")
+        cleaned = cleaned.replace("@here", "@\u200bhere")
+        
+        # Remove empty lines
+        cleaned = cleaned.strip()
+        
+        return cleaned
+
+    @staticmethod
+    def clean_for_history(content: str) -> str:
+        """Clean response for history storage."""
+        return ChatHelpers.clean_response(content)
+
+    @staticmethod
+    def calculate_max_tokens(messages: list, model_name: str) -> int:
+        """Calculate optimal max tokens for the response."""
+        # For now, just return the configured default.
+        # In future, this could dynamically adjust based on context length or model interaction.
+        from config import Config
+        return Config.OLLAMA_MAX_TOKENS

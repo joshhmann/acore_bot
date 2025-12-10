@@ -63,15 +63,16 @@ class VoiceIntegration:
                 edge_rate = "-10%"
 
             # Generate TTS
-            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.mp3"
+            audio_file = Config.TEMP_DIR / f"tts_{uuid.uuid4()}.wav"
             await voice_cog.tts.generate(
                 text, audio_file, speed=kokoro_speed, rate=edge_rate
             )
 
             # Apply RVC if enabled
             if voice_cog.rvc and voice_cog.rvc.is_enabled() and Config.RVC_ENABLED:
-                rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.mp3"
-                await voice_cog.rvc.convert(
+                rvc_file = Config.TEMP_DIR / f"rvc_{uuid.uuid4()}.wav"
+                # Use result path in case it changed extension (e.g. fallback to wav)
+                audio_file = await voice_cog.rvc.convert(
                     audio_file,
                     rvc_file,
                     model_name=Config.DEFAULT_RVC_MODEL,
@@ -79,7 +80,6 @@ class VoiceIntegration:
                     index_rate=Config.RVC_INDEX_RATE,
                     protect=Config.RVC_PROTECT,
                 )
-                audio_file = rvc_file
 
             # Play audio with explicit FFmpeg options for proper conversion
             # Log detailed audio file info

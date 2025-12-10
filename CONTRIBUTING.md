@@ -62,7 +62,7 @@ acore_bot/
 ├── prompts/             # Persona prompt files
 ├── docs/                # Documentation
 │   ├── setup/          # Setup guides
-│   └── features/       # Feature docs
+│   └── codebase_summary/  # Comprehensive documentation
 └── tests/              # Test scripts
 ```
 

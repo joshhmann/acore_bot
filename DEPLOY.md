@@ -127,7 +127,7 @@ For character voices like GOTHMOMMY:
    - Linux: `sudo apt install ffmpeg`
    - Mac: `brew install ffmpeg`
 
-2. **Setup RVC-WebUI** (see [RVC Setup Guide](docs/setup/RVC_INTEGRATION_COMPLETE.md))
+2. **Setup RVC-WebUI** (see [RVC Setup Guide](docs/setup/RVC_WEBUI_SETUP.md))
 
 3. **Enable in .env**:
 ```env
@@ -216,7 +216,7 @@ DEFAULT_PERSONA=chief
 ## Next Steps
 
 - [Full README](README.md) - Complete feature list
-- [RVC Voice Setup](docs/setup/RVC_INTEGRATION_COMPLETE.md) - Character voices
+- [RVC Voice Setup](docs/setup/RVC_WEBUI_SETUP.md) - Character voices
 - [Contributing Guide](CONTRIBUTING.md) - Add features
 
 ---

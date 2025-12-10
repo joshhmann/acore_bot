@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 
 from config import Config
-from services.reminders import RemindersService, TimeParser
+from services.discord.reminders import RemindersService, TimeParser
 from utils.helpers import format_error, format_success
 
 logger = logging.getLogger(__name__)

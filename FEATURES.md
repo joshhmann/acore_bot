@@ -255,7 +255,7 @@ These features exist in code but are **not in FEATURE_ROADMAP.md**:
 ## 🔗 See Also
 
 - [FEATURE_ROADMAP.md](FEATURE_ROADMAP.md) - Planned feature bundles
-- [docs/features/](docs/features/) - Detailed feature documentation
-- [docs/PERFORMANCE.md](docs/PERFORMANCE.md) - Performance optimizations
-- [docs/MONITORING.md](docs/MONITORING.md) - Logging and debugging
+- [docs/codebase_summary/](docs/codebase_summary/) - Comprehensive documentation (4,824 lines)
+- [docs/codebase_summary/03_services.md](docs/codebase_summary/03_services.md) - Performance optimizations
+- [docs/codebase_summary/03_services.md](docs/codebase_summary/03_services.md) - Logging and debugging
 - [README.md](README.md) - Getting started guide
