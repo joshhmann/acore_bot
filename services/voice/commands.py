@@ -1,7 +1,7 @@
 """Voice command parser for detecting music and other commands from speech."""
 import logging
 import re
-from typing import Optional, Tuple
+from typing import Optional
 from dataclasses import dataclass
 from enum import Enum
 

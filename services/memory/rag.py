@@ -1,11 +1,9 @@
 """RAG (Retrieval-Augmented Generation) service for context-aware responses."""
+
 import logging
 from pathlib import Path
 from typing import List, Optional, Dict
-import json
 import aiofiles
-import asyncio
-from functools import lru_cache
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +19,13 @@ class RAGService:
     - Cached embeddings for performance
     """
 
-    def __init__(self, documents_path: str, vector_store_path: str, top_k: int = 3, use_vector_search: bool = True):
+    def __init__(
+        self,
+        documents_path: str,
+        vector_store_path: str,
+        top_k: int = 3,
+        use_vector_search: bool = True,
+    ):
         """Initialize RAG service.
 
         Args:
@@ -63,30 +67,34 @@ class RAGService:
         try:
             # Force disable telemetry before import
             import os
+
             os.environ["ANONYMIZED_TELEMETRY"] = "False"
-            
+
             import chromadb
             from sentence_transformers import SentenceTransformer
 
             logger.info("Initializing vector store...")
 
             # Initialize ChromaDB client
-            self.chroma_client = chromadb.PersistentClient(path=str(self.vector_store_path))
+            self.chroma_client = chromadb.PersistentClient(
+                path=str(self.vector_store_path)
+            )
 
             # Get or create collection
             try:
                 self.collection = self.chroma_client.get_collection(name="documents")
-                logger.info(f"Loaded existing collection with {self.collection.count()} embeddings")
+                logger.info(
+                    f"Loaded existing collection with {self.collection.count()} embeddings"
+                )
             except Exception:
                 self.collection = self.chroma_client.create_collection(
-                    name="documents",
-                    metadata={"hnsw:space": "cosine"}
+                    name="documents", metadata={"hnsw:space": "cosine"}
                 )
                 logger.info("Created new collection")
 
             # Initialize embedding model (all-MiniLM-L6-v2 is fast and good)
             logger.info("Loading embedding model (this may take a moment)...")
-            self.embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+            self.embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
             logger.info("Embedding model loaded successfully")
 
             # Index documents if collection is empty
@@ -128,23 +136,27 @@ class RAGService:
                     if category == self.documents_path.name.lower():
                         category = "general"
 
-                    async with aiofiles.open(file_path, 'r', encoding='utf-8', errors='replace') as f:
+                    async with aiofiles.open(
+                        file_path, "r", encoding="utf-8", errors="replace"
+                    ) as f:
                         content = await f.read()
 
                         # Chunk large documents
                         chunks = self._chunk_document(content, file_path.name)
 
                         for i, chunk in enumerate(chunks):
-                            self.documents.append({
-                                "id": f"{file_path.name}_{i}",
-                                "path": str(file_path),
-                                "content": chunk,
-                                "content_lower": chunk.lower(),
-                                "filename": file_path.name,
-                                "category": category,
-                                "chunk_index": i,
-                                "total_chunks": len(chunks)
-                            })
+                            self.documents.append(
+                                {
+                                    "id": f"{file_path.name}_{i}",
+                                    "path": str(file_path),
+                                    "content": chunk,
+                                    "content_lower": chunk.lower(),
+                                    "filename": file_path.name,
+                                    "category": category,
+                                    "chunk_index": i,
+                                    "total_chunks": len(chunks),
+                                }
+                            )
 
                         count += 1
                         if count % 100 == 0:
@@ -153,12 +165,16 @@ class RAGService:
                 except Exception as e:
                     logger.error(f"Error reading {file_path}: {e}")
 
-            logger.info(f"Successfully loaded {len(self.documents)} document chunks from {count} files")
+            logger.info(
+                f"Successfully loaded {len(self.documents)} document chunks from {count} files"
+            )
 
         except Exception as e:
             logger.error(f"Failed to load RAG documents: {e}")
 
-    def _chunk_document(self, content: str, filename: str, chunk_size: int = 500, overlap: int = 50) -> List[str]:
+    def _chunk_document(
+        self, content: str, filename: str, chunk_size: int = 500, overlap: int = 50
+    ) -> List[str]:
         """Split document into overlapping chunks.
 
         Args:
@@ -183,7 +199,7 @@ class RAGService:
             # Try to end at a sentence boundary
             if end < len(content):
                 # Look for sentence endings near the chunk boundary
-                for punct in ['. ', '.\n', '! ', '!\n', '? ', '?\n']:
+                for punct in [". ", ".\n", "! ", "!\n", "? ", "?\n"]:
                     last_punct = content[start:end].rfind(punct)
                     if last_punct > chunk_size * 0.7:  # At least 70% through chunk
                         end = start + last_punct + len(punct)
@@ -208,7 +224,7 @@ class RAGService:
         # Batch processing for efficiency
         batch_size = 100
         for i in range(0, len(self.documents), batch_size):
-            batch = self.documents[i:i + batch_size]
+            batch = self.documents[i : i + batch_size]
 
             # Prepare data
             ids = [doc["id"] for doc in batch]
@@ -218,28 +234,38 @@ class RAGService:
                     "filename": doc["filename"],
                     "category": doc["category"],
                     "chunk_index": doc["chunk_index"],
-                    "path": doc["path"]
+                    "path": doc["path"],
                 }
                 for doc in batch
             ]
 
             # Generate embeddings
-            embeddings = self.embedding_model.encode(documents, show_progress_bar=False).tolist()
+            embeddings = self.embedding_model.encode(
+                documents, show_progress_bar=False
+            ).tolist()
 
             # Add to collection
             self.collection.add(
-                ids=ids,
-                documents=documents,
-                embeddings=embeddings,
-                metadatas=metadatas
+                ids=ids, documents=documents, embeddings=embeddings, metadatas=metadatas
             )
 
             if (i + batch_size) % 500 == 0:
-                logger.info(f"Indexed {min(i + batch_size, len(self.documents))}/{len(self.documents)} chunks...")
+                logger.info(
+                    f"Indexed {min(i + batch_size, len(self.documents))}/{len(self.documents)} chunks..."
+                )
 
-        logger.info(f"Indexing complete! {self.collection.count()} embeddings in vector store")
+        logger.info(
+            f"Indexing complete! {self.collection.count()} embeddings in vector store"
+        )
 
-    def search(self, query: str, top_k: Optional[int] = None, category: Optional[str] = None, categories: Optional[List[str]] = None, boost_category: Optional[str] = None) -> List[dict]:
+    def search(
+        self,
+        query: str,
+        top_k: Optional[int] = None,
+        category: Optional[str] = None,
+        categories: Optional[List[str]] = None,
+        boost_category: Optional[str] = None,
+    ) -> List[dict]:
         """Search for relevant documents.
 
         Uses vector similarity if available, falls back to keyword search.
@@ -247,23 +273,43 @@ class RAGService:
         Args:
             query: Search query
             top_k: Number of results to return
-            category: Filter by single category
-            categories: Filter by list of categories (one of)
-            boost_category: Boost score for documents in this category
+            category: Filter by single category (deprecated, use categories)
+            categories: Filter by list of categories - only documents in these categories will be returned
+            boost_category: Boost relevance score for documents in this category
 
         Returns:
-            List of relevant document chunks
+            List of relevant document chunks with metadata
+
+        Example:
+            # Filter to only Dagoth's documents
+            results = rag.search("gaming opinions", categories=["dagoth"])
+
+            # Multiple categories (OR logic)
+            results = rag.search("biblical teaching", categories=["jesus", "biblical"])
         """
         k = top_k or self.top_k
+
+        # Log filtering parameters
+        if categories:
+            logger.debug(f"RAG search with category filter: {categories}")
+        elif category:
+            logger.debug(f"RAG search with category filter: [{category}]")
 
         # Try vector search first
         if self.use_vector_search and self.collection and self.embedding_model:
             return self._vector_search(query, k, category, categories, boost_category)
         else:
             # Fallback to keyword search
-            return self._keyword_search(query, k, category, boost_category)
+            return self._keyword_search(query, k, category, boost_category, categories)
 
-    def _vector_search(self, query: str, top_k: int, category: Optional[str], categories: Optional[List[str]], boost_category: Optional[str]) -> List[dict]:
+    def _vector_search(
+        self,
+        query: str,
+        top_k: int,
+        category: Optional[str],
+        categories: Optional[List[str]],
+        boost_category: Optional[str],
+    ) -> List[dict]:
         """Perform vector similarity search."""
         try:
             # Generate query embedding
@@ -293,11 +339,11 @@ class RAGService:
             if category:
                 where_filter = {"category": category}
             elif categories:
-                 # Support list of categories
-                 if len(categories) == 1:
-                     where_filter = {"category": categories[0]}
-                 else:
-                     where_filter = {"category": {"$in": categories}}
+                # Support list of categories
+                if len(categories) == 1:
+                    where_filter = {"category": categories[0]}
+                else:
+                    where_filter = {"category": {"$in": categories}}
 
             # Search with more results than needed for boosting
             search_k = top_k * 3 if boost_category else top_k
@@ -306,53 +352,70 @@ class RAGService:
                 query_embeddings=[query_embedding],
                 n_results=min(search_k, self.collection.count()),
                 where=where_filter,
-                include=["documents", "metadatas", "distances"]
+                include=["documents", "metadatas", "distances"],
             )
 
-            if not results or not results['documents'][0]:
+            if not results or not results["documents"][0]:
                 return []
 
             # Format results
             formatted_results = []
-            for i, (doc, metadata, distance) in enumerate(zip(
-                results['documents'][0],
-                results['metadatas'][0],
-                results['distances'][0]
-            )):
+            for i, (doc, metadata, distance) in enumerate(
+                zip(
+                    results["documents"][0],
+                    results["metadatas"][0],
+                    results["distances"][0],
+                )
+            ):
                 # Convert distance to similarity score (cosine distance to similarity)
                 similarity = 1 - distance
 
                 # Apply category boost
                 score = similarity
-                if boost_category and metadata['category'] == boost_category.lower():
+                if boost_category and metadata["category"] == boost_category.lower():
                     score *= 5.0
 
-                formatted_results.append({
-                    "filename": metadata['filename'],
-                    "path": metadata['path'],
-                    "content": doc,
-                    "category": metadata['category'],
-                    "relevance_score": score,
-                    "similarity": similarity,
-                    "search_method": "vector"
-                })
+                formatted_results.append(
+                    {
+                        "filename": metadata["filename"],
+                        "path": metadata["path"],
+                        "content": doc,
+                        "category": metadata["category"],
+                        "relevance_score": score,
+                        "similarity": similarity,
+                        "search_method": "vector",
+                    }
+                )
 
             # Re-sort after boosting
             formatted_results.sort(key=lambda x: x["relevance_score"], reverse=True)
             top_results = formatted_results[:top_k]
 
             if top_results:
-                logger.info(f"Vector Search '{query}' found {len(top_results)} results:")
+                logger.info(
+                    f"Vector Search '{query}' found {len(top_results)} results:"
+                )
                 for i, res in enumerate(top_results[:3]):
-                    logger.info(f"  {i+1}. {res['filename']} (Score: {res['relevance_score']:.2f}, Similarity: {res['similarity']:.2f})")
+                    logger.info(
+                        f"  {i + 1}. {res['filename']} (Score: {res['relevance_score']:.2f}, Similarity: {res['similarity']:.2f})"
+                    )
 
             return top_results
 
         except Exception as e:
             logger.error(f"Vector search failed: {e}, falling back to keyword search")
-            return self._keyword_search(query, top_k, category, boost_category)
+            return self._keyword_search(
+                query, top_k, category, boost_category, categories
+            )
 
-    def _keyword_search(self, query: str, top_k: int, category: Optional[str], boost_category: Optional[str]) -> List[dict]:
+    def _keyword_search(
+        self,
+        query: str,
+        top_k: int,
+        category: Optional[str],
+        boost_category: Optional[str],
+        categories: Optional[List[str]] = None,
+    ) -> List[dict]:
         """Perform keyword-based search (fallback)."""
         if not self.documents:
             return []
@@ -364,7 +427,78 @@ class RAGService:
             return []
 
         # Extract meaningful keywords
-        stop_words = {'the', 'a', 'an', 'and', 'or', 'but', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must', 'about', 'what', 'when', 'where', 'who', 'why', 'how', 'which', 'this', 'that', 'these', 'those', 'it', 'its', 'they', 'them', 'their', 'he', 'him', 'his', 'she', 'her', 'hers', 'you', 'your', 'yours', 'we', 'us', 'our', 'ours', 'i', 'me', 'my', 'mine'}
+        stop_words = {
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "is",
+            "are",
+            "was",
+            "were",
+            "be",
+            "been",
+            "being",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "shall",
+            "should",
+            "can",
+            "could",
+            "may",
+            "might",
+            "must",
+            "about",
+            "what",
+            "when",
+            "where",
+            "who",
+            "why",
+            "how",
+            "which",
+            "this",
+            "that",
+            "these",
+            "those",
+            "it",
+            "its",
+            "they",
+            "them",
+            "their",
+            "he",
+            "him",
+            "his",
+            "she",
+            "her",
+            "hers",
+            "you",
+            "your",
+            "yours",
+            "we",
+            "us",
+            "our",
+            "ours",
+            "i",
+            "me",
+            "my",
+            "mine",
+        }
 
         keywords = [w for w in query_words if w not in stop_words and len(w) >= 2]
 
@@ -373,9 +507,16 @@ class RAGService:
 
         results = []
         for doc in self.documents:
-            # Filter by category
+            # Filter by category (singular) - backward compatibility
             if category and doc["category"] != category.lower():
                 continue
+
+            # Filter by categories (plural) - persona-specific RAG filtering
+            # Only documents matching one of the specified categories will be included
+            if categories:
+                categories_lower = [c.lower() for c in categories]
+                if doc["category"] not in categories_lower:
+                    continue  # Skip documents outside allowed categories
 
             content_lower = doc["content_lower"]
 
@@ -389,10 +530,10 @@ class RAGService:
                     matched_keywords.append(word)
                 else:
                     # Fuzzy check
-                    if word.endswith('s') and word[:-1] in content_lower:
+                    if word.endswith("s") and word[:-1] in content_lower:
                         matches += 0.8
                         matched_keywords.append(word)
-                    elif word + 's' in content_lower:
+                    elif word + "s" in content_lower:
                         matches += 0.8
                         matched_keywords.append(word)
 
@@ -407,15 +548,17 @@ class RAGService:
                 if boost_category and doc["category"] == boost_category.lower():
                     score *= 5.0
 
-                results.append({
-                    "filename": doc["filename"],
-                    "path": doc["path"],
-                    "content": doc["content"],
-                    "category": doc["category"],
-                    "relevance_score": score,
-                    "matched_keywords": matched_keywords,
-                    "search_method": "keyword"
-                })
+                results.append(
+                    {
+                        "filename": doc["filename"],
+                        "path": doc["path"],
+                        "content": doc["content"],
+                        "category": doc["category"],
+                        "relevance_score": score,
+                        "matched_keywords": matched_keywords,
+                        "search_method": "keyword",
+                    }
+                )
 
         # Sort and return top k
         results.sort(key=lambda x: x["relevance_score"], reverse=True)
@@ -424,11 +567,20 @@ class RAGService:
         if top_results:
             logger.info(f"Keyword Search '{query}' found {len(top_results)} results:")
             for i, res in enumerate(top_results[:3]):
-                logger.info(f"  {i+1}. {res['filename']} (Score: {res['relevance_score']:.2f})")
+                logger.info(
+                    f"  {i + 1}. {res['filename']} (Score: {res['relevance_score']:.2f})"
+                )
 
         return top_results
 
-    def get_context(self, query: str, max_length: int = 1000, category: Optional[str] = None, categories: Optional[List[str]] = None, boost_category: Optional[str] = None) -> str:
+    def get_context(
+        self,
+        query: str,
+        max_length: int = 1000,
+        category: Optional[str] = None,
+        categories: Optional[List[str]] = None,
+        boost_category: Optional[str] = None,
+    ) -> str:
         """Get relevant context for a query.
 
         Args:
@@ -442,20 +594,30 @@ class RAGService:
             Combined context string from relevant documents
         """
         import traceback
-        caller = traceback.extract_stack()[-2]
-        logger.debug(f"get_context called from {caller.filename}:{caller.lineno} in {caller.name}")
 
-        results = self.search(query, category=category, categories=categories, boost_category=boost_category)
+        caller = traceback.extract_stack()[-2]
+        logger.debug(
+            f"get_context called from {caller.filename}:{caller.lineno} in {caller.name}"
+        )
+
+        results = self.search(
+            query,
+            category=category,
+            categories=categories,
+            boost_category=boost_category,
+        )
 
         if not results:
             return ""
 
         # Filter out low relevance results to prevent context pollution
         # Keep results if score > 0.5 (tunable)
-        relevant_results = [r for r in results if r.get('relevance_score', 0) > 0.5]
-        
+        relevant_results = [r for r in results if r.get("relevance_score", 0) > 0.5]
+
         if not relevant_results:
-            logger.debug(f"Matches found but below relevance threshold (0.5). Best: {results[0].get('relevance_score', 0):.2f}")
+            logger.debug(
+                f"Matches found but below relevance threshold (0.5). Best: {results[0].get('relevance_score', 0):.2f}"
+            )
             return ""
 
         # Combine relevant documents
@@ -474,13 +636,15 @@ class RAGService:
             else:
                 remaining = max_length - total_length
                 if remaining > 100:
-                    truncated = content[:remaining - 50] + "..."
+                    truncated = content[: remaining - 50] + "..."
                     context_parts.append(f"[From {filename}]\n{truncated}\n")
                 break
 
         return "\n---\n".join(context_parts)
 
-    async def add_document(self, filename: str, content: str, category: str = "general") -> bool:
+    async def add_document(
+        self, filename: str, content: str, category: str = "general"
+    ) -> bool:
         """Add a new document to the RAG system.
 
         Args:
@@ -497,7 +661,7 @@ class RAGService:
             category_dir.mkdir(exist_ok=True)
 
             file_path = category_dir / filename
-            async with aiofiles.open(file_path, 'w', encoding='utf-8') as f:
+            async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
                 await f.write(content)
 
             # Reload documents and re-index
@@ -524,8 +688,7 @@ class RAGService:
             try:
                 self.chroma_client.delete_collection("documents")
                 self.collection = self.chroma_client.create_collection(
-                    name="documents",
-                    metadata={"hnsw:space": "cosine"}
+                    name="documents", metadata={"hnsw:space": "cosine"}
                 )
                 await self._index_documents()
             except Exception as e:
@@ -559,7 +722,7 @@ class RAGService:
             "total_documents": len(set(doc["filename"] for doc in self.documents)),
             "total_chunks": len(self.documents),
             "search_method": "vector" if self.use_vector_search else "keyword",
-            "categories": {}
+            "categories": {},
         }
 
         # Count by category

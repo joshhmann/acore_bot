@@ -15,12 +15,10 @@ Usage:
 """
 
 import argparse
-import asyncio
 import cProfile
 import io
 import pstats
 import sys
-import time
 from pathlib import Path
 from datetime import datetime
 
@@ -41,7 +39,6 @@ def profile_with_cprofile(duration_seconds: int):
 
     # Import and run bot
     try:
-        import main
 
         # Note: This would need the bot to be structured to run for a specific duration
         # For now, this is a template - actual implementation depends on bot structure

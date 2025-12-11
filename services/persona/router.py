@@ -2,17 +2,22 @@
 
 Handles probabilistic selection of which character responds to a message.
 """
+
 import logging
 import random
 import asyncio
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, TYPE_CHECKING, Union
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
+
+if TYPE_CHECKING:
+    import discord
 
 from config import Config
 from services.persona.system import PersonaSystem, CompiledPersona
 
 logger = logging.getLogger(__name__)
+
 
 class PersonaRouter:
     """Routes messages to one of multiple active personas."""
@@ -21,95 +26,264 @@ class PersonaRouter:
         self.profiles_dir = Path(profiles_dir)
         self.personas: Dict[str, CompiledPersona] = {}
         self.loaded = False
-        
+
         # Track last responder per channel for "sticky" conversations
         # {channel_id: {"persona": CompiledPersona, "time": datetime}}
         self.last_responder: Dict[int, Dict] = {}
         self.sticky_timeout = 300  # 5 minutes - stick to same persona
-        
+
         # Core system for compiling/loading individual personas
         # PersonaSystem expects base_path containing 'characters/' subdir
         # profiles_dir is .../characters, so we pass parent (.../prompts)
         self.persona_system = PersonaSystem(self.profiles_dir.parent)
 
-    async def initialize(self):
-        """Load all active personas."""
-        if self.loaded:
-            return
+        # Concurrency protection
+        self._reload_lock = asyncio.Lock()
 
-        logger.info("Initializing Multi-Persona Router...")
-        
-        active_list = Config.ACTIVE_PERSONAS
-        if not active_list:
-            logger.warning("No ACTIVE_PERSONAS configured! Falling back to dagoth_ur.json")
-            active_list = ["dagoth_ur.json"]
+    async def initialize(self, force_reload: bool = False):
+        """Load all active personas.
 
-        count = 0
-        for filename in active_list:
-            try:
-                # We reuse PersonaSystem to load each one
-                # Note: PersonaSystem is designed for single-use, but we can reuse its static logic
-                # or just use it as a loader helper.
-                
-                # Effectively we are creating a CompiledPersona for each
-                # Let's check how PersonaSystem loads - it takes 'framework' and 'character_file'
-                
-                # We need to construct the full path
-                char_path = self.profiles_dir / filename
-                if not char_path.exists():
-                     logger.warning(f"Character file not found: {char_path}")
-                     continue
+        Args:
+            force_reload: If True, clear cache and reload all personas from disk
+        """
+        async with self._reload_lock:
+            if self.loaded and not force_reload:
+                return
 
-                # Extract ID (e.g. 'scav.json' -> 'scav')
-                char_id = Path(filename).stem
+            if force_reload:
+                logger.info("Force reloading all personas...")
+                self.personas.clear()
+                self.persona_system.clear_cache()
+                self.loaded = False
 
-                # Load & Compile (Synchronous)
-                persona = self.persona_system.compile_persona(
-                    character_id=char_id,
-                    framework_id=None # Use embedded/default
+            logger.info("Initializing Multi-Persona Router...")
+
+            active_list = Config.ACTIVE_PERSONAS
+            if not active_list:
+                logger.warning(
+                    "No ACTIVE_PERSONAS configured! Falling back to dagoth_ur.json"
                 )
-                
-                if persona:
-                    self.personas[filename] = persona
-                    logger.info(f"Loaded persona: {persona.character.display_name} ({filename})")
-                    count += 1
-            except Exception as e:
-                logger.error(f"Failed to load persona {filename}: {e}")
+                active_list = ["dagoth_ur.json"]
 
-        logger.info(f"Persona Router initialized with {count} active characters.")
-        self.loaded = True
+            count = 0
+            for filename in active_list:
+                try:
+                    # We reuse PersonaSystem to load each one
+                    # Note: PersonaSystem is designed for single-use, but we can reuse its static logic
+                    # or just use it as a loader helper.
 
-    def select_persona(self, message_content: str, channel_id: int = None) -> Optional[CompiledPersona]:
+                    # Effectively we are creating a CompiledPersona for each
+                    # Let's check how PersonaSystem loads - it takes 'framework' and 'character_file'
+
+                    # We need to construct the full path
+                    char_path = self.profiles_dir / filename
+                    if not char_path.exists():
+                        logger.warning(f"Character file not found: {char_path}")
+                        continue
+
+                    # Extract ID (e.g. 'scav.json' -> 'scav')
+                    char_id = Path(filename).stem
+
+                    # Load & Compile (Synchronous)
+                    persona = self.persona_system.compile_persona(
+                        character_id=char_id,
+                        framework_id=None,  # Use embedded/default
+                    )
+
+                    if persona:
+                        self.personas[filename] = persona
+                        logger.info(
+                            f"Loaded persona: {persona.character.display_name} ({filename})"
+                        )
+                        count += 1
+                except Exception as e:
+                    logger.error(f"Failed to load persona {filename}: {e}")
+
+            logger.info(f"Persona Router initialized with {count} active characters.")
+            self.loaded = True
+
+    def _get_user_activity(self, user) -> Optional[Dict[str, str]]:
+        """Extract Discord activity information from user.
+
+        Args:
+            user: Discord Member object (or User)
+
+        Returns:
+            Dict with activity info or None if no activity
+            Format: {"type": "game|music|streaming|watching|custom", "name": str, "details": str}
+        """
+        if not user or not hasattr(user, "activities"):
+            return None
+
+        for activity in user.activities:
+            # Import locally to avoid circular imports
+            import discord
+
+            activity_info = {"type": "unknown", "name": "", "details": ""}
+
+            if isinstance(activity, discord.Game):
+                activity_info["type"] = "game"
+                activity_info["name"] = activity.name or ""
+                activity_info["details"] = ""
+            elif isinstance(activity, discord.Streaming):
+                activity_info["type"] = "streaming"
+                activity_info["name"] = activity.name or ""
+                activity_info["details"] = activity.details or ""
+            elif isinstance(activity, discord.Activity):
+                # Spotify and other activities
+                if activity.type == discord.ActivityType.listening:
+                    activity_info["type"] = "music"
+                    activity_info["name"] = activity.name or ""
+                    activity_info["details"] = getattr(activity, "details", "") or ""
+                elif activity.type == discord.ActivityType.watching:
+                    activity_info["type"] = "watching"
+                    activity_info["name"] = activity.name or ""
+                    activity_info["details"] = getattr(activity, "details", "") or ""
+                elif activity.type == discord.ActivityType.custom:
+                    activity_info["type"] = "custom"
+                    activity_info["name"] = activity.name or ""
+                    activity_info["details"] = getattr(activity, "state", "") or ""
+                else:
+                    continue
+
+            # Return first valid activity found
+            if activity_info["name"] or activity_info["details"]:
+                logger.debug(
+                    f"Detected user activity: {activity_info['type']} - {activity_info['name']}"
+                )
+                return activity_info
+
+        return None
+
+    def _match_activity_to_persona(
+        self, activity: Dict[str, str], personas: List[CompiledPersona]
+    ) -> Optional[Tuple[CompiledPersona, int]]:
+        """Match activity to persona based on activity_preferences.
+
+        Args:
+            activity: Activity dict from _get_user_activity
+            personas: List of personas to match against
+
+        Returns:
+            Tuple of (matched_persona, score) or None if no match
+            Scoring: exact match (100), category match (50), keyword match (25)
+        """
+        if not activity or not personas:
+            return None
+
+        activity_type = activity["type"]
+        activity_name = activity["name"].lower()
+        activity_details = activity["details"].lower()
+        activity_text = f"{activity_name} {activity_details}".strip()
+
+        best_match = None
+        best_score = 0
+
+        for persona in personas:
+            if not hasattr(persona.character, "activity_preferences"):
+                continue
+
+            prefs = persona.character.activity_preferences
+            if not isinstance(prefs, dict) or not prefs:
+                continue
+
+            score = 0
+
+            # Check if persona has preferences for this activity type
+            for pref_category, pref_keywords in prefs.items():
+                pref_category_lower = pref_category.lower()
+
+                # Category match (e.g., "gaming" matches game activities)
+                if activity_type == "game" and pref_category_lower in [
+                    "gaming",
+                    "games",
+                    "game",
+                ]:
+                    score += 50
+                elif activity_type == "music" and pref_category_lower in [
+                    "music",
+                    "listening",
+                ]:
+                    score += 50
+                elif (
+                    activity_type == "streaming" and pref_category_lower == "streaming"
+                ):
+                    score += 50
+                elif activity_type == "watching" and pref_category_lower in [
+                    "watching",
+                    "movies",
+                    "tv",
+                    "shows",
+                ]:
+                    score += 50
+
+                # Keyword matching within preferences
+                if isinstance(pref_keywords, list):
+                    for keyword in pref_keywords:
+                        keyword_lower = keyword.lower()
+
+                        # Exact match (game name, artist, etc.)
+                        if keyword_lower == activity_name:
+                            score += 100
+                        # Partial match in name or details
+                        elif keyword_lower in activity_text:
+                            score += 25
+
+            if score > best_score:
+                best_score = score
+                best_match = persona
+
+        if best_match and best_score > 0:
+            logger.info(
+                f"Activity match: {best_match.character.display_name} (score: {best_score}) for {activity_type} - {activity_name}"
+            )
+            return (best_match, best_score)
+
+        return None
+
+    def select_persona(
+        self,
+        message_content: str,
+        channel_id: Optional[int] = None,
+        user: Optional[Union["discord.Member", "discord.User"]] = None,
+    ) -> Optional[CompiledPersona]:
         """Select a persona to respond to this message.
-        
-        Priority:
+
+        Priority (T17 - Activity-Based Routing):
         1. Explicit name mention in message
-        2. Sticky: Same persona that last responded (within timeout)
-        3. Random selection (only if no context)
-        
+        2. Activity-based match (if user provided and has activity)
+        3. Sticky: Same persona that last responded (within timeout)
+        4. Random selection (only if no context)
+
         Args:
             message_content: The message text
             channel_id: Channel ID for sticky persona tracking
+            user: Discord Member for activity-based routing (T17)
+
+        Returns:
+            Selected persona or None
         """
         if not self.personas:
             return None
 
         content_lower = message_content.lower()
-        
+
         # Sort by name length desc to match "Dagoth Ur" before "Dagoth"
         sorted_personas = sorted(
-            self.personas.values(), 
-            key=lambda p: len(p.character.display_name), 
-            reverse=True
+            self.personas.values(),
+            key=lambda p: len(p.character.display_name),
+            reverse=True,
         )
 
         # Phase 1: Full Name Match (explicit mention)
         for p in sorted_personas:
             name = p.character.display_name.lower()
             if name in content_lower:
-                logger.info(f"Routing to {p.character.display_name} (full name mentioned)")
+                logger.info(
+                    f"Routing to {p.character.display_name} (full name mentioned)"
+                )
                 return p
-        
+
         # Phase 2: First Name / Nickname Match (for "Dagoth" -> "Dagoth Ur")
         for p in sorted_personas:
             display_name = p.character.display_name.lower()
@@ -117,32 +291,49 @@ class PersonaRouter:
                 first_name = display_name.split(" ")[0]
                 # Ensure first name is not too short to avoid matching common words
                 if len(first_name) >= 3 and first_name in content_lower:
-                    logger.info(f"Routing to {p.character.display_name} (first name mentioned)")
+                    logger.info(
+                        f"Routing to {p.character.display_name} (first name mentioned)"
+                    )
                     return p
 
-        # Phase 3: STICKY - Use last responder for this channel if recent
+        # Phase 3: Activity-Based Match (T17)
+        if user:
+            activity = self._get_user_activity(user)
+            if activity:
+                match_result = self._match_activity_to_persona(
+                    activity, list(self.personas.values())
+                )
+                if match_result:
+                    matched_persona, score = match_result
+                    # Only use activity match if score is significant (>= 50)
+                    if score >= 50:
+                        logger.info(
+                            f"Routing to {matched_persona.character.display_name} (activity match - score: {score})"
+                        )
+                        return matched_persona
+
+        # Phase 4: STICKY - Use last responder for this channel if recent
         if channel_id and channel_id in self.last_responder:
             last = self.last_responder[channel_id]
             time_since = (datetime.now() - last["time"]).total_seconds()
-            
+
             if time_since < self.sticky_timeout:
                 persona = last["persona"]
-                logger.info(f"Routing to {persona.character.display_name} (sticky - last responder)")
+                logger.info(
+                    f"Routing to {persona.character.display_name} (sticky - last responder)"
+                )
                 return persona
 
-        # Phase 4: Random Selection (no context, first message)
+        # Phase 5: Random Selection (no context, first message)
         candidate_key = random.choice(list(self.personas.keys()))
         candidate = self.personas[candidate_key]
         logger.info(f"Routing to {candidate.character.display_name} (random selection)")
-        
+
         return candidate
 
     def record_response(self, channel_id: int, persona: CompiledPersona):
         """Record that a persona responded in a channel (for sticky tracking)."""
-        self.last_responder[channel_id] = {
-            "persona": persona,
-            "time": datetime.now()
-        }
+        self.last_responder[channel_id] = {"persona": persona, "time": datetime.now()}
 
     def get_all_personas(self) -> List[CompiledPersona]:
         return list(self.personas.values())
@@ -150,17 +341,17 @@ class PersonaRouter:
     def get_persona_by_name(self, name: str) -> Optional[CompiledPersona]:
         """Get persona by display name or filename (fuzzy)."""
         name_lower = name.lower()
-        
+
         # Exact match first
         for key, p in self.personas.items():
             if key == name or p.character.display_name.lower() == name_lower:
                 return p
-        
+
         # Partial match (for "Dagoth" -> "Dagoth Ur")
         for key, p in self.personas.items():
             if name_lower in p.character.display_name.lower():
                 return p
             if name_lower in key.lower():
                 return p
-                
+
         return None

@@ -186,10 +186,15 @@ async def _prepare_final_messages():
     if context_summary:
         user_context_str += f"\n\n[Earlier Conversation Summary]:\n{context_summary}"
 
-    # RAG Context
-    rag_context_str = ""
-    if rag.is_enabled():
-        persona_categories = selected_persona.character.knowledge_domain.get("rag_categories")
+    # RAG Context - **UPDATED 2025-12-10** with persona filtering
+    persona_categories = None
+    if selected_persona and hasattr(selected_persona.character, 'knowledge_domain'):
+        cats = selected_persona.character.knowledge_domain.get('rag_categories')
+        # Validate rag_categories must be a list
+        if isinstance(cats, list) and cats:
+            persona_categories = cats
+        elif cats:
+            logger.warning(f"Invalid rag_categories type: {type(cats)}. Expected list.")
         rag_content = rag.get_context(message_content, categories=persona_categories)
         rag_context_str = rag_content
 

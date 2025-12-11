@@ -8,7 +8,6 @@ import random
 import re
 import json
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
 
 from config import Config
 
@@ -406,7 +405,7 @@ JSON only:"""
         # 5. Behavior Engine (replaced decision_engine)
         if not should_respond and hasattr(self.cog, 'behavior_engine') and self.cog.behavior_engine:
             try:
-                decision_context = {
+                {
                     "channel_id": message.channel.id,
                     "user_id": message.author.id,
                     "mentioned": self.cog.bot.user in message.mentions,

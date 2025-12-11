@@ -4,7 +4,6 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 import wave
-import io
 from services.interfaces import STTInterface
 
 logger = logging.getLogger(__name__)
@@ -73,7 +72,7 @@ class WhisperSTTService(STTInterface):
                 device=self.device,
                 compute_type=compute_type
             )
-            logger.info(f"faster-whisper model loaded successfully")
+            logger.info("faster-whisper model loaded successfully")
         except Exception as e:
             logger.error(f"Failed to load faster-whisper model: {e}")
             self.model = None

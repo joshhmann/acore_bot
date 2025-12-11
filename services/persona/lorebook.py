@@ -3,9 +3,8 @@
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-import re
 
 logger = logging.getLogger(__name__)
 

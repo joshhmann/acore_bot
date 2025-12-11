@@ -1,14 +1,13 @@
 """Context manager for token-aware prompt construction."""
 
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional
 from datetime import datetime
 import tiktoken
 
 from config import Config
 from services.persona.system import CompiledPersona
 from services.persona.lorebook import LoreEntry
-from services.memory.rag import RAGService
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +38,9 @@ class ContextManager:
             self._encoders[model_name] = encoding
             return encoding
         except Exception as e:
-            logger.warning(f"Could not get specific encoder for {model_name}, using default: {e}")
+            logger.warning(
+                f"Could not get specific encoder for {model_name}, using default: {e}"
+            )
             return tiktoken.get_encoding("cl100k_base")
 
     def count_tokens(self, text: str, model_name: str = "gpt-3.5-turbo") -> int:
@@ -49,7 +50,9 @@ class ContextManager:
         encoder = self._get_encoder(model_name)
         return len(encoder.encode(text))
 
-    def count_message_tokens(self, messages: List[Dict[str, str]], model_name: str = "gpt-3.5-turbo") -> int:
+    def count_message_tokens(
+        self, messages: List[Dict[str, str]], model_name: str = "gpt-3.5-turbo"
+    ) -> int:
         """Count tokens in a list of messages."""
         count = 0
         encoder = self._get_encoder(model_name)
@@ -69,11 +72,11 @@ class ContextManager:
         persona: CompiledPersona,
         history: List[Dict[str, str]],
         model_name: str,
-        lore_entries: List[LoreEntry] = None,
-        rag_content: str = None,
-        user_context: str = None,
+        lore_entries: Optional[List[LoreEntry]] = None,
+        rag_content: Optional[str] = None,
+        user_context: Optional[str] = None,
         max_tokens: Optional[int] = None,
-        llm_service=None  # NEW: pass LLM service to get context_length
+        llm_service=None,  # NEW: pass LLM service to get context_length
     ) -> List[Dict[str, str]]:
         """
         Build the final list of messages for the LLM, respecting the token limit.
@@ -99,13 +102,13 @@ class ContextManager:
         """
         # Determine Token Limit
         limit = max_tokens
-        
+
         # Try LLM service's fetched context_length first
-        if not limit and llm_service and hasattr(llm_service, 'context_length'):
+        if not limit and llm_service and hasattr(llm_service, "context_length"):
             limit = llm_service.context_length
             if limit:
                 logger.debug(f"Using LLM service context limit: {limit}")
-        
+
         if not limit:
             # Check model specific limit from config
             limit = Config.MODEL_CONTEXT_LIMITS.get(model_name)
@@ -131,11 +134,60 @@ class ContextManager:
 
         # Inject Lore Entries
         if lore_entries:
-            lore_text = "\n[WORLD INFO]\n" + "\n".join([e.content for e in lore_entries])
+            lore_text = "\n[WORLD INFO]\n" + "\n".join(
+                [e.content for e in lore_entries]
+            )
             context_additions.append(lore_text)
 
         # Combine all system-level content
         full_system_content = system_content + "\n".join(context_additions)
+
+        # T13: Add Character Evolution modifier
+        try:
+            from services.persona.evolution import PersonaEvolutionTracker
+
+            # Try to get evolution tracker from global state (set by BehaviorEngine)
+            # For now, we'll create a temporary instance to check evolution state
+            evolution_tracker = PersonaEvolutionTracker()
+            evolution_modifier = evolution_tracker.get_evolution_prompt_modifier(
+                persona.persona_id
+            )
+            if evolution_modifier:
+                full_system_content += f"\n{evolution_modifier}"
+                logger.debug(f"Applied evolution modifier for {persona.persona_id}")
+        except Exception as e:
+            logger.debug(f"Evolution modifier not applied: {e}")
+
+        # T15: Add Conflict modifiers for persona interactions
+        try:
+            # Check if we have PersonaRelationships available
+            # This would typically be passed through the LLM service or context
+            # For now, check if available on bot instance
+            if llm_service and hasattr(llm_service, "bot"):
+                persona_relationships = getattr(
+                    llm_service.bot, "persona_relationships", None
+                )
+                if persona_relationships:
+                    # Check recent history for other persona messages
+                    for msg in reversed(history[-5:]):  # Check last 5 messages
+                        msg_username = msg.get("username") or msg.get("name", "")
+                        if (
+                            msg_username
+                            and msg_username != persona.character.display_name
+                        ):
+                            # Found another persona in history - check for conflict
+                            conflict_mod = persona_relationships.get_conflict_modifier(
+                                persona.character.display_name, msg_username
+                            )
+                            if conflict_mod["in_conflict"]:
+                                full_system_content += conflict_mod["prompt_modifier"]
+                                logger.debug(
+                                    f"Applied conflict modifier: {persona.character.display_name} vs {msg_username} "
+                                    f"(severity: {conflict_mod['severity']:.2f})"
+                                )
+                                break  # Only apply one conflict modifier
+        except Exception as e:
+            logger.debug(f"Conflict modifier not applied: {e}")
 
         # MULTI-PERSONA STABILITY FIX
         # Explicitly instruct the model to ignore identity bleeding from previous turns
@@ -150,16 +202,16 @@ class ContextManager:
         )
 
         # Initial messages list
-        final_messages = [
-            {"role": "system", "content": full_system_content}
-        ]
+        final_messages = [{"role": "system", "content": full_system_content}]
 
         # Check budget usage so far
         current_tokens = self.count_message_tokens(final_messages, model_name)
         remaining_tokens = max_input_tokens - current_tokens
 
         if remaining_tokens <= 0:
-            logger.warning("System prompt exceeds token limit! Truncating not implemented yet.")
+            logger.warning(
+                "System prompt exceeds token limit! Truncating not implemented yet."
+            )
             return final_messages
 
         # 2. Add Chat History (Newest first, then reverse)
@@ -177,9 +229,9 @@ class ContextManager:
                 # Format message for LLM
                 clean_msg = {
                     "role": msg.get("role", "user"),
-                    "content": msg.get("content", "")
+                    "content": msg.get("content", ""),
                 }
-                
+
                 # Add name info if available
                 username = msg.get("username") or msg.get("name")
                 if username:
@@ -187,12 +239,14 @@ class ContextManager:
                     # Prepend name to content for stronger identity awareness
                     # (Helpful for models that ignore 'name' field)
                     if clean_msg["role"] == "user":
-                         clean_msg["content"] = f"{username}: {clean_msg['content']}"
+                        clean_msg["content"] = f"{username}: {clean_msg['content']}"
 
                 history_to_include.append(clean_msg)
                 remaining_tokens -= msg_tokens
             else:
-                logger.info(f"Context limit reached. Dropping {len(history) - len(history_to_include)} older messages.")
+                logger.info(
+                    f"Context limit reached. Dropping {len(history) - len(history_to_include)} older messages."
+                )
                 break
 
         # Re-reverse to get chronological order

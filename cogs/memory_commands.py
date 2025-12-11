@@ -6,7 +6,6 @@ import logging
 import json
 import aiofiles
 from datetime import datetime
-from pathlib import Path
 
 from config import Config
 from utils.helpers import format_error, format_success

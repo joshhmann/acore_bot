@@ -4,7 +4,6 @@ from discord import app_commands
 from discord.ext import commands
 import logging
 
-from utils.helpers import format_error
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Dict
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -122,7 +122,7 @@ class Config:
 
     # Specific weights for persona selection (optional)
     # Default is equal 1/N chance for each active persona
-    PERSONA_WEIGHTS = {}
+    PERSONA_WEIGHTS: Dict[str, float] = {}
 
     # System Prompt / Personality
     SYSTEM_PROMPT_FILE: str = os.getenv("SYSTEM_PROMPT_FILE", "./prompts/default.txt")
@@ -354,16 +354,42 @@ class Config:
         os.getenv("NATURAL_TIMING_MAX_DELAY", "2.0")
     )  # Maximum delay in seconds
 
-    # Mood System Settings
-    MOOD_SYSTEM_ENABLED: bool = (
-        os.getenv("MOOD_SYSTEM_ENABLED", "true").lower() == "true"
-    )
+    # --- Persona & Behavior Enhancement Features ---
+
+    # T1-T2: Dynamic Mood System Settings
+    # Note: MOOD_SYSTEM_ENABLED is already defined above at line 329
     MOOD_UPDATE_FROM_INTERACTIONS: bool = (
         os.getenv("MOOD_UPDATE_FROM_INTERACTIONS", "true").lower() == "true"
     )  # Auto-update mood from user interactions
     MOOD_TIME_BASED: bool = (
         os.getenv("MOOD_TIME_BASED", "true").lower() == "true"
     )  # Use time of day for mood
+    MOOD_DECAY_MINUTES: int = int(os.getenv("MOOD_DECAY_MINUTES", "30"))  # Minutes before mood decays to neutral
+    MOOD_MAX_INTENSITY_SHIFT: float = float(os.getenv("MOOD_MAX_INTENSITY_SHIFT", "0.1"))  # Max mood change per message
+
+    # T7-T8: Curiosity-Driven Follow-Up Questions
+    CURIOSITY_ENABLED: bool = os.getenv("CURIOSITY_ENABLED", "true").lower() == "true"
+    CURIOSITY_INDIVIDUAL_COOLDOWN_SECONDS: int = int(os.getenv("CURIOSITY_INDIVIDUAL_COOLDOWN_SECONDS", "300"))
+    CURIOSITY_WINDOW_LIMIT_SECONDS: int = int(os.getenv("CURIOSITY_WINDOW_LIMIT_SECONDS", "900"))
+    CURIOSITY_TOPIC_MEMORY_SIZE: int = int(os.getenv("CURIOSITY_TOPIC_MEMORY_SIZE", "20"))
+
+    # T11-T12: Adaptive Ambient Timing
+    ADAPTIVE_TIMING_ENABLED: bool = os.getenv("ADAPTIVE_TIMING_ENABLED", "true").lower() == "true"
+    ADAPTIVE_TIMING_LEARNING_WINDOW_DAYS: int = int(os.getenv("ADAPTIVE_TIMING_LEARNING_WINDOW_DAYS", "7"))
+    CHANNEL_ACTIVITY_PROFILE_PATH: Path = Path(os.getenv("CHANNEL_ACTIVITY_PROFILE_PATH", "./data/channel_activity_profiles.json"))
+
+    # T13-T14: Character Evolution System
+    PERSONA_EVOLUTION_ENABLED: bool = os.getenv("PERSONA_EVOLUTION_ENABLED", "true").lower() == "true"
+    PERSONA_EVOLUTION_PATH: Path = Path(os.getenv("PERSONA_EVOLUTION_PATH", "./data/persona_evolution"))
+
+    # T15-T16: Persona Conflict System  
+    PERSONA_CONFLICTS_ENABLED: bool = os.getenv("PERSONA_CONFLICTS_ENABLED", "true").lower() == "true"
+    CONFLICT_DECAY_RATE: float = float(os.getenv("CONFLICT_DECAY_RATE", "0.1"))
+    CONFLICT_ESCALATION_AMOUNT: float = float(os.getenv("CONFLICT_ESCALATION_AMOUNT", "0.2"))
+
+    # T17-T18: Activity-Based Persona Switching
+    ACTIVITY_ROUTING_ENABLED: bool = os.getenv("ACTIVITY_ROUTING_ENABLED", "true").lower() == "true"
+    ACTIVITY_ROUTING_PRIORITY: int = int(os.getenv("ACTIVITY_ROUTING_PRIORITY", "100"))
 
     # Self-Awareness Settings
     SELF_AWARENESS_ENABLED: bool = (
@@ -505,7 +531,7 @@ class Config:
 
         if cls.NATURAL_TIMING_MAX_DELAY < cls.NATURAL_TIMING_MIN_DELAY:
             raise ValueError(
-                f"NATURAL_TIMING_MAX_DELAY must be >= NATURAL_TIMING_MIN_DELAY"
+                "NATURAL_TIMING_MAX_DELAY must be >= NATURAL_TIMING_MIN_DELAY"
             )
 
         # Validate probability values

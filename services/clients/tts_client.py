@@ -1,6 +1,5 @@
 """Kokoro API client for using Kokoro-FastAPI backend."""
 import logging
-import asyncio
 from pathlib import Path
 from typing import Optional
 import aiohttp

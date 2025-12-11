@@ -3,7 +3,6 @@
 import logging
 from typing import List, Dict, Optional, Tuple
 import aiohttp
-from urllib.parse import quote_plus
 import asyncio
 import time
 from ddgs import DDGS

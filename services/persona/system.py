@@ -1,4 +1,5 @@
 """AI-First Persona System - Framework + Character loader and compiler."""
+
 import json
 import logging
 import base64
@@ -6,7 +7,6 @@ from pathlib import Path
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field
 from PIL import Image
-import io
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Framework:
     """Behavioral framework definition."""
+
     framework_id: str
     name: str
     purpose: str
@@ -29,6 +30,7 @@ class Framework:
 @dataclass
 class Character:
     """Character identity definition."""
+
     character_id: str
     display_name: str
     identity: Dict[str, Any]
@@ -49,11 +51,19 @@ class Character:
     creator: str = ""
     character_version: str = ""
     system_prompt_override: str = ""  # For cards that embed system prompt
+    # T9: Topic Interest Filtering
+    topic_interests: List[str] = field(default_factory=list)
+    topic_avoidances: List[str] = field(default_factory=list)
+    # T13: Character Evolution System
+    evolution_stages: List[Dict[str, Any]] = field(default_factory=list)
+    # T17: Activity-Based Persona Switching
+    activity_preferences: Dict[str, List[str]] = field(default_factory=dict)
 
 
 @dataclass
 class CompiledPersona:
     """Complete AI personality = Framework + Character."""
+
     persona_id: str
     character: Character
     framework: Framework
@@ -65,7 +75,7 @@ class CompiledPersona:
 class PersonaSystem:
     """Manages loading, compiling, and switching between AI personas."""
 
-    def __init__(self, base_path: Path = None):
+    def __init__(self, base_path: Optional[Path] = None):
         """
         Initialize persona system.
 
@@ -89,6 +99,42 @@ class PersonaSystem:
 
         logger.info("Persona system initialized")
 
+    def clear_cache(self):
+        """Clear all cached characters, frameworks, and compiled personas."""
+        self.characters.clear()
+        self.frameworks.clear()
+        self.compiled_personas.clear()
+        logger.info("PersonaSystem cache cleared")
+
+    def reload_character(self, character_id: str) -> Optional[Character]:
+        """Force reload specific character from disk, invalidating cache."""
+        if character_id in self.characters:
+            del self.characters[character_id]
+        # Use exact matching with framework separator to avoid invalidating "toadette" when reloading "toad"
+        to_remove = [
+            k
+            for k in self.compiled_personas
+            if k == character_id or k.startswith(character_id + "_")
+        ]
+        for k in to_remove:
+            del self.compiled_personas[k]
+        logger.info(f"Invalidated cache for character: {character_id}")
+        return self.load_character(character_id)
+
+    def reload_all(self) -> List[str]:
+        """Reload all characters from disk."""
+        self.clear_cache()
+        char_files = list(self.characters_dir.glob("*.json")) + list(
+            self.characters_dir.glob("*.png")
+        )
+        loaded = []
+        for f in char_files:
+            char_id = f.stem
+            if self.load_character(char_id):
+                loaded.append(char_id)
+        logger.info(f"Reloaded {len(loaded)} characters from disk")
+        return loaded
+
     def load_framework(self, framework_id: str) -> Optional[Framework]:
         """
         Load a behavioral framework.
@@ -111,7 +157,7 @@ class PersonaSystem:
             return None
 
         try:
-            with open(framework_file, 'r') as f:
+            with open(framework_file, "r") as f:
                 data = json.load(f)
 
             framework = Framework(
@@ -124,7 +170,7 @@ class PersonaSystem:
                 context_requirements=data["context_requirements"],
                 interaction_style=data["interaction_style"],
                 anti_hallucination=data["anti_hallucination"],
-                prompt_template=data["prompt_template"]
+                prompt_template=data["prompt_template"],
             )
 
             # Cache it
@@ -163,13 +209,13 @@ class PersonaSystem:
             return None
 
         try:
-            if character_file.suffix == '.png':
+            if character_file.suffix == ".png":
                 return self._load_v2_character_card(character_file, character_id)
             else:
                 # Inspect JSON to see if it's V2 or Legacy
-                with open(character_file, 'r') as f:
+                with open(character_file, "r") as f:
                     data = json.load(f)
-                
+
                 # Check for V2 spec signatures
                 if "spec" in data and "data" in data:
                     # It's a V2 card in JSON format
@@ -178,14 +224,14 @@ class PersonaSystem:
                     logger.info(f"Loaded V2 character (JSON): {character_id}")
                     return character
                 else:
-                    logger.error(f"Legacy character format not supported for {character_id}. Please migrate to V2.")
+                    logger.error(
+                        f"Legacy character format not supported for {character_id}. Please migrate to V2."
+                    )
                     return None
 
         except Exception as e:
             logger.error(f"Error loading character {character_id}: {e}")
             return None
-
-
 
     def _load_v2_character_card(self, filepath: Path, character_id: str) -> Character:
         """Load character from V2 PNG Character Card."""
@@ -193,12 +239,12 @@ class PersonaSystem:
             with Image.open(filepath) as img:
                 metadata = img.info
                 # V2 spec stores JSON in 'chara' chunk decoded from base64
-                if 'chara' in metadata:
-                    raw_data = base64.b64decode(metadata['chara']).decode('utf-8')
+                if "chara" in metadata:
+                    raw_data = base64.b64decode(metadata["chara"]).decode("utf-8")
                     card_data = json.loads(raw_data)
-                elif 'ccv3' in metadata:
+                elif "ccv3" in metadata:
                     # Handle V3 spec if encountered (similar structure usually)
-                    raw_data = base64.b64decode(metadata['ccv3']).decode('utf-8')
+                    raw_data = base64.b64decode(metadata["ccv3"]).decode("utf-8")
                     card_data = json.loads(raw_data)
                 else:
                     # Fallback for some cards that might store raw text in 'Description' or similar (less common for V2)
@@ -218,51 +264,106 @@ class PersonaSystem:
     def _parse_v2_data(self, card_data: Dict[str, Any], character_id: str) -> Character:
         """Parse V2 character card data into Character object."""
         # Map V2 spec fields to our Character class
-        data = card_data.get('data', card_data) # Sometimes wrapped in 'data'
+        data = card_data.get("data", card_data)  # Sometimes wrapped in 'data'
 
-        name = data.get('name', character_id)
-        description = data.get('description', '')
-        personality = data.get('personality', '')
-        scenario = data.get('scenario', '')
-        first_message = data.get('first_mes', '')
-        mes_example = data.get('mes_example', '')
+        name = data.get("name", character_id)
+        description = data.get("description", "")
+        personality = data.get("personality", "")
+        scenario = data.get("scenario", "")
+        first_message = data.get("first_mes", "")
+        mes_example = data.get("mes_example", "")
 
         # Construct identity dict from flat V2 data
         identity = {
             "who": name,
-            "core_traits": [t.strip() for t in data.get('tags', [])],
+            "core_traits": [t.strip() for t in data.get("tags", [])],
             "description": description,
-            "personality": personality
+            "personality": personality,
         }
+
+        # Extract extensions (knowledge_domain, etc.)
+        extensions = data.get("extensions", {})
+        knowledge_domain = extensions.get("knowledge_domain", {})
+
+        # T9: Extract topic interests and avoidances
+        topic_interests = extensions.get("topic_interests", [])
+        topic_avoidances = extensions.get("topic_avoidances", [])
+
+        # T13: Extract evolution stages
+        evolution_stages = extensions.get("evolution_stages", [])
+
+        # T17: Extract activity preferences
+        activity_preferences = extensions.get("activity_preferences", {})
+
+        # Validate rag_categories format
+        if "rag_categories" in knowledge_domain:
+            cats = knowledge_domain["rag_categories"]
+            if not isinstance(cats, list):
+                logger.warning(
+                    f"Character {name}: rag_categories must be a list, got {type(cats)}. Ignoring."
+                )
+                knowledge_domain["rag_categories"] = []
+            else:
+                # Validate each category: lowercase alphanumeric + underscore only
+                validated_cats = []
+                for cat in cats:
+                    if not isinstance(cat, str):
+                        logger.warning(
+                            f"Character {name}: Invalid category type {type(cat)}, expected str. Skipping."
+                        )
+                        continue
+                    # Normalize to lowercase and validate format
+                    cat_normalized = cat.lower().strip()
+                    if not cat_normalized:
+                        logger.warning(
+                            f"Character {name}: Empty category string. Skipping."
+                        )
+                        continue
+                    if not all(c.isalnum() or c == "_" for c in cat_normalized):
+                        logger.warning(
+                            f"Character {name}: Invalid category '{cat}'. Only alphanumeric and underscore allowed. Skipping."
+                        )
+                        continue
+                    validated_cats.append(cat_normalized)
+                knowledge_domain["rag_categories"] = validated_cats
+                if validated_cats:
+                    logger.info(f"Character {name}: RAG categories: {validated_cats}")
 
         character = Character(
             character_id=character_id,
             display_name=name,
             identity=identity,
-            knowledge_domain={}, # V2 cards don't structure this explicitly
-            opinions={}, # V2 cards don't structure this explicitly
-            voice_and_tone={}, # V2 cards don't structure this explicitly
+            knowledge_domain=knowledge_domain,
+            opinions={},  # V2 cards don't structure this explicitly
+            voice_and_tone={},  # V2 cards don't structure this explicitly
             quirks={},
             # V2 Specifics
             description=description,
             scenario=scenario,
             first_message=first_message,
             mes_example=mes_example,
-            alternate_greetings=data.get('alternate_greetings', []),
-            creator_notes=data.get('creator_notes', ''),
-            tags=data.get('tags', []),
-            creator=data.get('creator', ''),
-            character_version=data.get('character_version', ''),
-            system_prompt_override=data.get('system_prompt', ''),
-            avatar_url=data.get('avatar_url')
+            alternate_greetings=data.get("alternate_greetings", []),
+            creator_notes=data.get("creator_notes", ""),
+            tags=data.get("tags", []),
+            creator=data.get("creator", ""),
+            character_version=data.get("character_version", ""),
+            system_prompt_override=data.get("system_prompt", ""),
+            avatar_url=data.get("avatar_url"),
+            # T9: Topic Interest Filtering
+            topic_interests=topic_interests,
+            topic_avoidances=topic_avoidances,
+            # T13: Character Evolution System
+            evolution_stages=evolution_stages,
+            # T17: Activity-Based Persona Switching
+            activity_preferences=activity_preferences,
         )
         return character
 
     def compile_persona(
         self,
         character_id: str,
-        framework_id: str = None,
-        force_recompile: bool = False
+        framework_id: Optional[str] = None,
+        force_recompile: bool = False,
     ) -> Optional[CompiledPersona]:
         """
         Compile character (+ optional framework) into complete persona.
@@ -292,11 +393,13 @@ class PersonaSystem:
         if framework_id:
             framework = self.load_framework(framework_id)
             if not framework:
-                logger.warning(f"Framework {framework_id} not found, using character card only")
+                logger.warning(
+                    f"Framework {framework_id} not found, using character card only"
+                )
 
         # Create a minimal framework wrapper if none provided (or if ignoring)
         if not framework:
-             framework = Framework(
+            framework = Framework(
                 framework_id="none",
                 name="No Framework",
                 purpose="Pure Character Card",
@@ -306,7 +409,7 @@ class PersonaSystem:
                 context_requirements={},
                 interaction_style={},
                 anti_hallucination={},
-                prompt_template=""
+                prompt_template="",
             )
 
         try:
@@ -332,14 +435,12 @@ class PersonaSystem:
                 else:
                     # Build from V2 card fields
                     system_prompt = self._build_v2_system_prompt(character)
-                
+
                 tools_required = []
                 config = {
                     "character": character.character_id,
                     "framework": None,
                 }
-
-
 
             # Compile persona
             persona = CompiledPersona(
@@ -348,13 +449,15 @@ class PersonaSystem:
                 framework=framework,
                 system_prompt=system_prompt,
                 tools_required=tools_required,
-                config=config
+                config=config,
             )
 
             # Cache it
             self.compiled_personas[persona_id] = persona
 
-            logger.info(f"Compiled persona: {persona_id} (framework: {framework_id or 'none'})")
+            logger.info(
+                f"Compiled persona: {persona_id} (framework: {framework_id or 'none'})"
+            )
 
             # Save compiled version
             self._save_compiled_persona(persona)
@@ -378,7 +481,7 @@ class PersonaSystem:
         """
         # Check if character has a system prompt override (common in V2 cards)
         if character.system_prompt_override:
-             return f"""
+            return f"""
 {character.system_prompt_override}
 
 === SCENARIO ===
@@ -388,14 +491,12 @@ class PersonaSystem:
 {framework.prompt_template}
 """
 
-
-
         # V2 Card Prompt Construction (Standard SillyTavern style)
         prompt = f"""You are {character.display_name}.
 {character.description}
 
 === PERSONALITY ===
-{character.identity.get('personality', '')}
+{character.identity.get("personality", "")}
 
 === SCENARIO ===
 {character.scenario}
@@ -408,8 +509,6 @@ class PersonaSystem:
 """
         return prompt
 
-
-
     def _build_v2_system_prompt(self, character: Character) -> str:
         """Build system prompt from V2 character card fields (SillyTavern style)."""
         prompt = f"""You are {character.display_name}.
@@ -418,7 +517,7 @@ class PersonaSystem:
 {character.description}
 
 === PERSONALITY ===
-{character.identity.get('personality', '')}
+{character.identity.get("personality", "")}
 
 === SCENARIO ===
 {character.scenario}
@@ -429,17 +528,15 @@ class PersonaSystem:
 === EXAMPLE DIALOGUE ===
 {character.mes_example}
 """
-        
+
         # Add response_style if in legacy character
-        if character.voice_and_tone.get('response_style'):
+        if character.voice_and_tone.get("response_style"):
             prompt += f"""
 === RESPONSE STYLE ===
-{character.voice_and_tone['response_style']}
+{character.voice_and_tone["response_style"]}
 """
-        
+
         return prompt
-
-
 
     def _save_compiled_persona(self, persona: CompiledPersona):
         """Save compiled persona to disk for reference."""
@@ -455,10 +552,10 @@ class PersonaSystem:
                 "system_prompt": persona.system_prompt,
                 "tools_required": persona.tools_required,
                 "config": persona.config,
-                "compiled_at": str(Path(__file__).stat().st_mtime)
+                "compiled_at": str(Path(__file__).stat().st_mtime),
             }
 
-            with open(output_file, 'w') as f:
+            with open(output_file, "w") as f:
                 json.dump(data, f, indent=2)
 
             logger.debug(f"Saved compiled persona to {output_file}")
@@ -472,13 +569,15 @@ class PersonaSystem:
 
         for file in self.frameworks_dir.glob("*.json"):
             try:
-                with open(file, 'r') as f:
+                with open(file, "r") as f:
                     data = json.load(f)
-                    frameworks.append({
-                        "id": data["framework_id"],
-                        "name": data["name"],
-                        "purpose": data["purpose"]
-                    })
+                    frameworks.append(
+                        {
+                            "id": data["framework_id"],
+                            "name": data["name"],
+                            "purpose": data["purpose"],
+                        }
+                    )
             except Exception as e:
                 logger.warning(f"Could not read framework {file}: {e}")
 
@@ -490,19 +589,21 @@ class PersonaSystem:
 
         for file in self.characters_dir.glob("*.json"):
             try:
-                with open(file, 'r') as f:
+                with open(file, "r") as f:
                     data = json.load(f)
-                    
+
                     if "spec" in data and "data" in data:
                         # V2 Character
                         v2_data = data["data"]
-                        characters.append({
-                            "id": file.stem,
-                            "name": v2_data.get("name", file.stem),
-                            "from": "V2 Card"
-                        })
+                        characters.append(
+                            {
+                                "id": file.stem,
+                                "name": v2_data.get("name", file.stem),
+                                "from": "V2 Card",
+                            }
+                        )
                     else:
-                        pass # Skip legacy files
+                        pass  # Skip legacy files
             except Exception as e:
                 logger.warning(f"Could not read character {file}: {e}")
 

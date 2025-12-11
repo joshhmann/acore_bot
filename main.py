@@ -11,15 +11,18 @@ A simple, clean Discord bot that:
 - Supports voice activity detection (Whisper STT)
 - Streams responses in real-time
 """
+
 import discord
 from discord.ext import commands
 import logging
 import sys
 import asyncio
 from pathlib import Path
+from typing import cast
 
 from config import Config
 from services.core.factory import ServiceFactory
+from services.interfaces.llm_interface import LLMInterface
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
 from cogs.music import MusicCog
@@ -40,7 +43,7 @@ if Config.LOG_TO_FILE:
     file_handler = RotatingFileHandler(
         Config.LOG_FILE_PATH,
         maxBytes=Config.LOG_MAX_BYTES,
-        backupCount=Config.LOG_BACKUP_COUNT
+        backupCount=Config.LOG_BACKUP_COUNT,
     )
     handlers.append(file_handler)
 
@@ -63,7 +66,9 @@ if Config.LOG_LEVEL != "DEBUG":
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # Log the logging configuration
-logger.info(f"Logging configured: Level={Config.LOG_LEVEL}, File={Config.LOG_TO_FILE}, Path={Config.LOG_FILE_PATH}")
+logger.info(
+    f"Logging configured: Level={Config.LOG_LEVEL}, File={Config.LOG_TO_FILE}, Path={Config.LOG_FILE_PATH}"
+)
 
 
 class OllamaBot(commands.Bot):
@@ -91,23 +96,23 @@ class OllamaBot(commands.Bot):
         self.services = factory.create_services()
 
         # Expose key services as attributes for Cogs
-        self.ollama = self.services.get('ollama')
-        self.tts = self.services.get('tts')
-        self.rvc = self.services.get('rvc')
-        self.metrics = self.services.get('metrics')
+        self.ollama = self.services.get("ollama")
+        self.tts = self.services.get("tts")
+        self.rvc = self.services.get("rvc")
+        self.metrics = self.services.get("metrics")
 
     async def setup_hook(self):
         """Setup hook called when bot is starting."""
         logger.info("Setting up bot...")
 
         # Initialize Web Search if enabled
-        if self.services.get('web_search'):
-            await self.services['web_search'].initialize()
+        if self.services.get("web_search"):
+            await self.services["web_search"].initialize()
             logger.info("Web search initialized")
 
         # Initialize RAG if enabled
-        if self.services.get('rag'):
-            await self.services['rag'].initialize()
+        if self.services.get("rag"):
+            await self.services["rag"].initialize()
             logger.info("RAG service initialized")
 
         # Initialize LLM Service
@@ -116,23 +121,25 @@ class OllamaBot(commands.Bot):
             if not await self.ollama.check_health():
                 logger.warning("LLM Provider check failed - check config/internet.")
             else:
-                logger.info(f"Connected to LLM Provider")
+                logger.info("Connected to LLM Provider")
 
         # Load ChatCog (Dependencies injected)
+        from typing import cast
+
         await self.add_cog(
             ChatCog(
                 self,
-                ollama=self.ollama,
-                history_manager=self.services['history'],
-                user_profiles=self.services.get('profiles'),
-                summarizer=self.services.get('summarizer'),
-                web_search=self.services.get('web_search'),
-                rag=self.services.get('rag'),
-                conversation_manager=self.services.get('conversation_manager'),
-                persona_system=self.services.get('persona_system'),
-                compiled_persona=self.services.get('compiled_persona'),
-                llm_fallback=self.services.get('llm_fallback'),
-                persona_relationships=self.services.get('persona_relationships'),
+                ollama=cast("LLMInterface", self.ollama),
+                history_manager=self.services["history"],
+                user_profiles=self.services.get("profiles"),
+                summarizer=self.services.get("summarizer"),
+                web_search=self.services.get("web_search"),
+                rag=self.services.get("rag"),
+                conversation_manager=self.services.get("conversation_manager"),
+                persona_system=self.services.get("persona_system"),
+                compiled_persona=self.services.get("compiled_persona"),
+                llm_fallback=self.services.get("llm_fallback"),
+                persona_relationships=self.services.get("persona_relationships"),
             )
         )
         logger.info("Loaded ChatCog")
@@ -143,8 +150,8 @@ class OllamaBot(commands.Bot):
                 self,
                 tts=self.tts,
                 rvc=self.rvc,
-                voice_activity_detector=self.services.get('voice_activity_detector'),
-                enhanced_voice_listener=self.services.get('enhanced_voice_listener'),
+                voice_activity_detector=self.services.get("voice_activity_detector"),
+                enhanced_voice_listener=self.services.get("enhanced_voice_listener"),
             )
         )
         logger.info("Loaded VoiceCog")
@@ -154,11 +161,11 @@ class OllamaBot(commands.Bot):
         logger.info("Loaded MusicCog")
 
         # Load Feature Cogs
-        if self.services.get('reminders'):
-            await self.add_cog(RemindersCog(self, self.services['reminders']))
+        if self.services.get("reminders"):
+            await self.add_cog(RemindersCog(self, self.services["reminders"]))
 
-        if self.services.get('notes'):
-            await self.add_cog(NotesCog(self, self.services['notes']))
+        if self.services.get("notes"):
+            await self.add_cog(NotesCog(self, self.services["notes"]))
 
         # Load Modular Extensions
         extensions = [
@@ -175,11 +182,18 @@ class OllamaBot(commands.Bot):
 
         # Load Event Listeners
         from cogs.event_listeners import EventListenersCog
+
         await self.add_cog(EventListenersCog(self))
 
-        # Sync commands
-        await self.tree.sync()
-        logger.info("Synced command tree")
+        # Sync commands (only if connected)
+        try:
+            await self.tree.sync()
+            logger.info("Synced command tree")
+        except discord.errors.MissingApplicationID:
+            # Bot not connected yet, will sync in on_ready
+            logger.info("Commands will sync after Discord connection")
+        except Exception as e:
+            logger.error(f"Failed to sync commands: {e}")
 
         # Start Background Tasks
         self._start_background_services()
@@ -187,9 +201,9 @@ class OllamaBot(commands.Bot):
     def _start_background_services(self):
         """Start background maintenance tasks."""
         # Memory Cleanup
-        if self.services.get('memory_manager'):
+        if self.services.get("memory_manager"):
             task = asyncio.create_task(
-                self.services['memory_manager'].start_background_cleanup(
+                self.services["memory_manager"].start_background_cleanup(
                     interval_hours=Config.MEMORY_CLEANUP_INTERVAL_HOURS
                 )
             )
@@ -197,14 +211,14 @@ class OllamaBot(commands.Bot):
             task.add_done_callback(self.background_tasks.discard)
 
         # Profile Saver
-        if self.services.get('profiles'):
+        if self.services.get("profiles"):
             # Note: start_background_saver is async but usually creates its own task loop or returns a coroutine
             # Assuming it needs to be awaited if it's async
-            asyncio.create_task(self.services['profiles'].start_background_saver())
+            asyncio.create_task(self.services["profiles"].start_background_saver())
 
         # Reminders
-        if self.services.get('reminders'):
-            asyncio.create_task(self.services['reminders'].start())
+        if self.services.get("reminders"):
+            asyncio.create_task(self.services["reminders"].start())
 
     async def on_ready(self):
         """Called when bot is ready."""
@@ -225,14 +239,20 @@ class OllamaBot(commands.Bot):
                 # In DEBUG mode, save more frequently (every 10 minutes) for easier analysis
                 if Config.LOG_LEVEL == "DEBUG":
                     interval_minutes = 10
-                    logger.info("DEBUG mode detected: Metrics will save every 10 minutes for detailed analysis")
+                    logger.info(
+                        "DEBUG mode detected: Metrics will save every 10 minutes for detailed analysis"
+                    )
                 else:
                     interval_minutes = Config.METRICS_SAVE_INTERVAL_MINUTES
 
                 interval_hours = interval_minutes / 60.0
-                metrics_task = self.metrics.start_auto_save(interval_hours=interval_hours)
+                metrics_task = self.metrics.start_auto_save(
+                    interval_hours=interval_hours
+                )
                 self.background_tasks.add(metrics_task)
-                logger.info(f"Metrics auto-save started (every {interval_minutes} minutes)")
+                logger.info(
+                    f"Metrics auto-save started (every {interval_minutes} minutes)"
+                )
 
                 # Start hourly reset to prevent memory leak from unbounded active user/channel sets
                 reset_task = self.metrics.start_hourly_reset()
@@ -254,9 +274,9 @@ class OllamaBot(commands.Bot):
         if chat_cog:
             await chat_cog.check_and_handle_message(message)
 
-
-
-    async def on_command_error(self, ctx: commands.Context, error: commands.CommandError):
+    async def on_command_error(
+        self, ctx: commands.Context, error: commands.CommandError
+    ):
         """Handle command errors."""
         if isinstance(error, commands.CommandNotFound):
             return  # Ignore unknown commands
@@ -286,15 +306,15 @@ class OllamaBot(commands.Bot):
 
         # Cleanup cog background tasks
         chat_cog = self.get_cog("ChatCog")
-        if chat_cog and hasattr(chat_cog, 'cleanup_tasks'):
+        if chat_cog and hasattr(chat_cog, "cleanup_tasks"):
             await chat_cog.cleanup_tasks()
 
         # Cleanup services
-        if self.services.get('profiles'):
-            await self.services['profiles'].stop_background_saver()
+        if self.services.get("profiles"):
+            await self.services["profiles"].stop_background_saver()
 
-        if self.services.get('reminders'):
-            await self.services['reminders'].stop()
+        if self.services.get("reminders"):
+            await self.services["reminders"].stop()
 
         if self.ollama:
             await self.ollama.close()

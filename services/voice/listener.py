@@ -2,14 +2,10 @@
 import logging
 import asyncio
 from pathlib import Path
-from datetime import datetime
 from typing import Optional, Callable
 import wave
-import io
 import time
-import struct
 
-import discord
 from discord.ext import voice_recv
 # Transcription fixer removed - Parakeet is accurate enough
 # Sound effects service removed - was never fully integrated

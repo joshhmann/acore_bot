@@ -22,18 +22,13 @@ import discord
 import logging
 import asyncio
 import time
-import json
-import re
-import random
 from typing import Optional
-from datetime import datetime
 
 from config import Config
 from utils.response_validator import ResponseValidator
 from utils.helpers import (
     chunk_message,
     format_error,
-    format_success,
     download_attachment,
     image_to_base64,
     is_image_attachment,
@@ -64,7 +59,6 @@ async def _handle_chat_response(
         suggested_style: Suggested response style from decision engine
     """
     # Start response time tracking
-    import time
 
     start_time = time.time()
 
@@ -195,9 +189,7 @@ async def _handle_chat_response(
     )
 
     # Also check if the current message HAS an image (implicit reference)
-    has_attachment = False
     if original_message and (original_message.attachments or original_message.embeds):
-        has_attachment = True
         is_referencing_image = True  # Treat as referencing the attached image
 
     recent_image_url = None
@@ -316,8 +308,11 @@ async def _handle_chat_response(
         # Use the working version from main.py instead
         # For now, construct minimal messages
         context_injected_prompt = [
-            {"role": "system", "content": self.system_prompt or "You are a helpful assistant."},
-            *history
+            {
+                "role": "system",
+                "content": self.system_prompt or "You are a helpful assistant.",
+            },
+            *history,
         ]
 
         # Log action for self-awareness
@@ -435,8 +430,10 @@ async def _handle_chat_response(
                             if interaction:
                                 # Apply mention conversion for Discord display
                                 display_text = (
-                                    self.helpers.restore_mentions(response, guild)
-                                    if guild
+                                    self.helpers.restore_mentions(
+                                        response, channel.guild
+                                    )
+                                    if channel.guild
                                     else response
                                 )
                                 if not response_message:
@@ -459,8 +456,8 @@ async def _handle_chat_response(
                 if interaction and response_message:
                     # Apply mention conversion for final Discord display
                     display_text = (
-                        self.helpers.restore_mentions(response, guild)
-                        if guild
+                        self.helpers.restore_mentions(response, channel.guild)
+                        if channel.guild
                         else response
                     )
                     try:
@@ -470,8 +467,8 @@ async def _handle_chat_response(
                 elif interaction:
                     # Apply mention conversion for final Discord display
                     display_text = (
-                        self.helpers.restore_mentions(response, guild)
-                        if guild
+                        self.helpers.restore_mentions(response, channel.guild)
+                        if channel.guild
                         else response
                     )
                     await interaction.followup.send(display_text[:2000])

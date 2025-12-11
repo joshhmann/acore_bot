@@ -506,11 +506,12 @@ class RAGService:
    - Preserves context across chunks
    - Metadata tracking per chunk
 
-3. **Keyword Fallback** (Lines 355-429)
+3. **Keyword Fallback** (Lines 399-520)
    - Stop word filtering
    - Fuzzy matching (plural handling)
    - Exact phrase boosting (2x)
    - Category boosting (5x)
+   - **NEW:** Category list filtering (persona-specific)
 
 4. **Document Management** (Lines 106-157, 483-515)
    - Async file loading
@@ -523,10 +524,31 @@ class RAGService:
    - 500-entry LRU limit
    - Prevents redundant encoding
 
+6. **Persona-Specific Filtering** (Lines 287-292, 506-514) - **NEW 2025-12-10**
+   - Characters can specify `rag_categories` to restrict document access
+   - Prevents cross-contamination (e.g., Jesus accessing Dagoth's gaming docs)
+   - Supports multiple categories with OR logic
+   - Debug logging for filtering operations
+   - Case-insensitive category matching
+
 **Search Methods**:
-- `search(query, top_k, category, boost_category)` - Main search interface
-- `get_context(query, max_length, category)` - Context extraction for prompts
+- `search(query, top_k, category, categories, boost_category)` - Main search interface
+  - **NEW:** `categories` parameter for list-based filtering
+  - Debug logging when filtering is applied
+- `get_context(query, max_length, category, categories, boost_category)` - Context extraction for prompts
 - Relevance threshold (0.5) to prevent low-quality results
+
+**Category Filtering Logic**:
+```python
+# Vector search uses ChromaDB where clause
+where_filter = {"category": {"$in": categories}}
+
+# Keyword search filters in-memory
+if categories:
+    categories_lower = [c.lower() for c in categories]
+    if doc["category"] not in categories_lower:
+        continue  # Skip documents outside allowed categories
+```
 
 **Statistics** (Lines 552-575):
 - Total documents and chunks

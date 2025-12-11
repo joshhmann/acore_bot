@@ -5,7 +5,7 @@ import logging
 import json
 import asyncio
 import hashlib
-from typing import List, Dict, Optional, AsyncGenerator
+from typing import List, Dict, Optional, AsyncGenerator, Any, cast
 
 from config import Config
 from services.llm.cache import LLMCache
@@ -53,6 +53,16 @@ class RequestDeduplicator:
         )
 
         return hashlib.sha256(request_str.encode()).hexdigest()
+
+    def create_request_key(
+        self,
+        messages: List[Dict],
+        model: str,
+        temperature: float,
+        system_prompt: Optional[str] = None,
+    ) -> str:
+        """Create a request key for deduplication."""
+        return self._hash_request(messages, model, temperature, system_prompt)
 
     async def deduplicate(self, key: str, coro):
         """Deduplicate a request by key.
@@ -203,6 +213,8 @@ class OllamaService(LLMInterface):
         messages: List[Dict[str, str]],
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
     ) -> str:
         """Send a chat request to Ollama.
 
@@ -274,6 +286,7 @@ class OllamaService(LLMInterface):
             try:
                 async with self.rate_limiter.acquire():
                     url = f"{self.host}/api/chat"
+                    assert self.session is not None  # For mypy
                     async with self.session.post(
                         url, json=payload, timeout=aiohttp.ClientTimeout(total=60)
                     ) as resp:
@@ -312,7 +325,9 @@ class OllamaService(LLMInterface):
         messages: List[Dict[str, str]],
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
-    ) -> AsyncGenerator[str, None]:
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ):
         """Stream chat responses from Ollama token by token.
 
         Args:
@@ -382,7 +397,13 @@ class OllamaService(LLMInterface):
             logger.error(f"Ollama streaming request failed: {e}")
             raise Exception(f"Failed to connect to Ollama: {e}")
 
-    async def generate(self, prompt: str, system_prompt: Optional[str] = None) -> str:
+    async def generate(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        max_tokens: Optional[int] = None,
+        **kwargs: Any,
+    ) -> str:
         """Generate a response from a single prompt.
 
         Args:
@@ -399,8 +420,9 @@ class OllamaService(LLMInterface):
         self,
         prompt: str,
         images: List[str],
-        model: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        model: Optional[str] = None,
+        **kwargs: Any,
     ) -> str:
         """Send a chat request with images to a vision model.
 
@@ -424,7 +446,9 @@ class OllamaService(LLMInterface):
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
 
-        messages.append({"role": "user", "content": prompt, "images": images})
+        messages.append(
+            {"role": "user", "content": prompt}
+        )  # Images handled separately in payload
 
         # Use vision model
         vision_model = model or Config.VISION_MODEL
@@ -432,6 +456,7 @@ class OllamaService(LLMInterface):
         payload = {
             "model": vision_model,
             "messages": messages,
+            "images": images,  # Add images separately for Ollama
             "stream": False,
             "options": {
                 "temperature": self.temperature,

@@ -1,11 +1,12 @@
 """Music cog for Discord bot with YouTube playback support."""
+
 import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
 from typing import Optional
+import asyncio
 
-from config import Config
 from services.discord.music import MusicPlayer
 from utils.helpers import format_error
 
@@ -25,7 +26,9 @@ class MusicCog(commands.Cog):
         self.music_player = MusicPlayer(bot)
         logger.info("Music cog initialized")
 
-    async def _get_voice_client(self, interaction: discord.Interaction) -> Optional[discord.VoiceClient]:
+    async def _get_voice_client(
+        self, interaction: discord.Interaction
+    ) -> Optional[discord.VoiceClient]:
         """Get voice client for the guild, connecting if needed.
 
         Args:
@@ -37,7 +40,7 @@ class MusicCog(commands.Cog):
         if not interaction.user.voice:
             await interaction.followup.send(
                 "❌ You need to be in a voice channel to use music commands!",
-                ephemeral=True
+                ephemeral=True,
             )
             return None
 
@@ -49,8 +52,7 @@ class MusicCog(commands.Cog):
                 voice_client = await interaction.user.voice.channel.connect()
             except Exception as e:
                 await interaction.followup.send(
-                    f"❌ Failed to connect to voice channel: {e}",
-                    ephemeral=True
+                    f"❌ Failed to connect to voice channel: {e}", ephemeral=True
                 )
                 return None
 
@@ -73,17 +75,18 @@ class MusicCog(commands.Cog):
 
         try:
             # Check if it's a playlist
-            is_playlist = 'list=' in query and 'youtube.com' in query
+            is_playlist = "list=" in query and "youtube.com" in query
 
             if is_playlist:
                 # Handle playlist
                 songs = await self.music_player.search_playlist(
-                    query,
-                    requester=interaction.user.display_name
+                    query, requester=interaction.user.display_name
                 )
 
                 if not songs:
-                    await interaction.followup.send("❌ Could not find playlist or it's empty.")
+                    await interaction.followup.send(
+                        "❌ Could not find playlist or it's empty."
+                    )
                     return
 
                 # Add all songs to queue
@@ -97,13 +100,14 @@ class MusicCog(commands.Cog):
                 # Start playing if not already
                 state = self.music_player.get_state(interaction.guild.id)
                 if not state.is_playing:
-                    await self.music_player.play_next(interaction.guild.id, voice_client)
+                    await self.music_player.play_next(
+                        interaction.guild.id, voice_client
+                    )
 
             else:
                 # Single song
                 song = await self.music_player.search_song(
-                    query,
-                    requester=interaction.user.display_name
+                    query, requester=interaction.user.display_name
                 )
 
                 if not song:
@@ -111,13 +115,15 @@ class MusicCog(commands.Cog):
                     return
 
                 # Add to queue
-                position = await self.music_player.add_to_queue(interaction.guild.id, song)
+                position = await self.music_player.add_to_queue(
+                    interaction.guild.id, song
+                )
 
                 # Create embed
                 embed = discord.Embed(
                     title="🎵 Added to Queue",
                     description=f"[{song.title}]({song.url})",
-                    color=discord.Color.green()
+                    color=discord.Color.green(),
                 )
                 embed.add_field(name="Duration", value=song.duration_str, inline=True)
                 embed.add_field(name="Position", value=str(position), inline=True)
@@ -131,7 +137,9 @@ class MusicCog(commands.Cog):
                 # Start playing if not already
                 state = self.music_player.get_state(interaction.guild.id)
                 if not state.is_playing:
-                    await self.music_player.play_next(interaction.guild.id, voice_client)
+                    await self.music_player.play_next(
+                        interaction.guild.id, voice_client
+                    )
 
         except Exception as e:
             logger.error(f"Play command failed: {e}")
@@ -148,8 +156,7 @@ class MusicCog(commands.Cog):
 
         if not voice_client or not voice_client.is_playing():
             await interaction.response.send_message(
-                "❌ Nothing is playing right now.",
-                ephemeral=True
+                "❌ Nothing is playing right now.", ephemeral=True
             )
             return
 
@@ -171,8 +178,7 @@ class MusicCog(commands.Cog):
 
         if not voice_client:
             await interaction.response.send_message(
-                "❌ Not connected to a voice channel.",
-                ephemeral=True
+                "❌ Not connected to a voice channel.", ephemeral=True
             )
             return
 
@@ -190,8 +196,7 @@ class MusicCog(commands.Cog):
 
         if not voice_client:
             await interaction.response.send_message(
-                "❌ Not connected to a voice channel.",
-                ephemeral=True
+                "❌ Not connected to a voice channel.", ephemeral=True
             )
             return
 
@@ -199,8 +204,7 @@ class MusicCog(commands.Cog):
             await interaction.response.send_message("⏸️ Paused playback.")
         else:
             await interaction.response.send_message(
-                "❌ Nothing is playing right now.",
-                ephemeral=True
+                "❌ Nothing is playing right now.", ephemeral=True
             )
 
     @app_commands.command(name="resume", description="Resume playback")
@@ -214,8 +218,7 @@ class MusicCog(commands.Cog):
 
         if not voice_client:
             await interaction.response.send_message(
-                "❌ Not connected to a voice channel.",
-                ephemeral=True
+                "❌ Not connected to a voice channel.", ephemeral=True
             )
             return
 
@@ -223,11 +226,12 @@ class MusicCog(commands.Cog):
             await interaction.response.send_message("▶️ Resumed playback.")
         else:
             await interaction.response.send_message(
-                "❌ Nothing is paused right now.",
-                ephemeral=True
+                "❌ Nothing is paused right now.", ephemeral=True
             )
 
-    @app_commands.command(name="nowplaying", description="Show the currently playing song")
+    @app_commands.command(
+        name="nowplaying", description="Show the currently playing song"
+    )
     async def nowplaying(self, interaction: discord.Interaction):
         """Show current song info.
 
@@ -238,8 +242,7 @@ class MusicCog(commands.Cog):
 
         if not current:
             await interaction.response.send_message(
-                "❌ Nothing is playing right now.",
-                ephemeral=True
+                "❌ Nothing is playing right now.", ephemeral=True
             )
             return
 
@@ -248,14 +251,18 @@ class MusicCog(commands.Cog):
         embed = discord.Embed(
             title="🎵 Now Playing",
             description=f"[{current.title}]({current.url})",
-            color=discord.Color.blue()
+            color=discord.Color.blue(),
         )
         embed.add_field(name="Duration", value=current.duration_str, inline=True)
-        embed.add_field(name="Requested by", value=current.requester or "Unknown", inline=True)
+        embed.add_field(
+            name="Requested by", value=current.requester or "Unknown", inline=True
+        )
         embed.add_field(
             name="Loop",
-            value="🔂 Song" if state.loop else ("🔁 Queue" if state.loop_queue else "Off"),
-            inline=True
+            value="🔂 Song"
+            if state.loop
+            else ("🔁 Queue" if state.loop_queue else "Off"),
+            inline=True,
         )
 
         if current.thumbnail:
@@ -273,29 +280,30 @@ class MusicCog(commands.Cog):
         state = self.music_player.get_state(interaction.guild.id)
         queue = self.music_player.get_queue(interaction.guild.id)
 
-        embed = discord.Embed(
-            title="🎶 Music Queue",
-            color=discord.Color.purple()
-        )
+        embed = discord.Embed(title="🎶 Music Queue", color=discord.Color.purple())
 
         # Current song
         if state.current:
             embed.add_field(
                 name="Now Playing",
                 value=f"🎵 [{state.current.title}]({state.current.url}) - {state.current.duration_str}",
-                inline=False
+                inline=False,
             )
 
         # Queue
         if queue:
             queue_text = ""
             for i, song in enumerate(queue[:10], 1):
-                queue_text += f"`{i}.` [{song.title}]({song.url}) - {song.duration_str}\n"
+                queue_text += (
+                    f"`{i}.` [{song.title}]({song.url}) - {song.duration_str}\n"
+                )
 
             if len(queue) > 10:
                 queue_text += f"\n*...and {len(queue) - 10} more songs*"
 
-            embed.add_field(name=f"Up Next ({len(queue)} songs)", value=queue_text, inline=False)
+            embed.add_field(
+                name=f"Up Next ({len(queue)} songs)", value=queue_text, inline=False
+            )
 
             # Total duration
             total_duration = sum(s.duration for s in queue)
@@ -323,14 +331,15 @@ class MusicCog(commands.Cog):
 
         if not voice_client:
             await interaction.response.send_message(
-                "❌ Not connected to a voice channel.",
-                ephemeral=True
+                "❌ Not connected to a voice channel.", ephemeral=True
             )
             return
 
         # Convert 0-100 to 0.0-1.0
         volume = level / 100.0
-        new_volume = self.music_player.set_volume(interaction.guild.id, volume, voice_client)
+        new_volume = self.music_player.set_volume(
+            interaction.guild.id, volume, voice_client
+        )
 
         await interaction.response.send_message(
             f"🔊 Volume set to **{int(new_volume * 100)}%**"
@@ -346,11 +355,12 @@ class MusicCog(commands.Cog):
         count = self.music_player.shuffle_queue(interaction.guild.id)
 
         if count > 0:
-            await interaction.response.send_message(f"🔀 Shuffled **{count}** songs in the queue!")
+            await interaction.response.send_message(
+                f"🔀 Shuffled **{count}** songs in the queue!"
+            )
         else:
             await interaction.response.send_message(
-                "❌ Not enough songs in queue to shuffle.",
-                ephemeral=True
+                "❌ Not enough songs in queue to shuffle.", ephemeral=True
             )
 
     @app_commands.command(name="clear_queue", description="Clear the music queue")
@@ -363,20 +373,23 @@ class MusicCog(commands.Cog):
         count = self.music_player.clear_queue(interaction.guild.id)
 
         if count > 0:
-            await interaction.response.send_message(f"🗑️ Cleared **{count}** songs from the queue.")
+            await interaction.response.send_message(
+                f"🗑️ Cleared **{count}** songs from the queue."
+            )
         else:
             await interaction.response.send_message(
-                "❌ Queue is already empty.",
-                ephemeral=True
+                "❌ Queue is already empty.", ephemeral=True
             )
 
     @app_commands.command(name="loop", description="Toggle loop mode")
     @app_commands.describe(mode="Loop mode: song, queue, or off")
-    @app_commands.choices(mode=[
-        app_commands.Choice(name="Song (repeat current)", value="song"),
-        app_commands.Choice(name="Queue (repeat all)", value="queue"),
-        app_commands.Choice(name="Off", value="off"),
-    ])
+    @app_commands.choices(
+        mode=[
+            app_commands.Choice(name="Song (repeat current)", value="song"),
+            app_commands.Choice(name="Queue (repeat all)", value="queue"),
+            app_commands.Choice(name="Off", value="off"),
+        ]
+    )
     async def loop(self, interaction: discord.Interaction, mode: str):
         """Toggle loop mode.
 
@@ -413,8 +426,7 @@ class MusicCog(commands.Cog):
 
         if position < 1 or position > len(queue):
             await interaction.response.send_message(
-                f"❌ Invalid position. Queue has {len(queue)} songs.",
-                ephemeral=True
+                f"❌ Invalid position. Queue has {len(queue)} songs.", ephemeral=True
             )
             return
 
@@ -426,7 +438,9 @@ class MusicCog(commands.Cog):
             f"🗑️ Removed **{removed.title}** from the queue."
         )
 
-    @app_commands.command(name="disconnect", description="Disconnect bot from voice channel")
+    @app_commands.command(
+        name="disconnect", description="Disconnect bot from voice channel"
+    )
     async def disconnect(self, interaction: discord.Interaction):
         """Disconnect from voice channel.
 
@@ -437,8 +451,7 @@ class MusicCog(commands.Cog):
 
         if not voice_client:
             await interaction.response.send_message(
-                "❌ Not connected to a voice channel.",
-                ephemeral=True
+                "❌ Not connected to a voice channel.", ephemeral=True
             )
             return
 
@@ -453,7 +466,7 @@ class MusicCog(commands.Cog):
         self,
         member: discord.Member,
         before: discord.VoiceState,
-        after: discord.VoiceState
+        after: discord.VoiceState,
     ):
         """Handle voice state updates (e.g., bot left alone).
 
@@ -482,11 +495,9 @@ class MusicCog(commands.Cog):
                     if len(members) == 0:
                         self.music_player.cleanup(member.guild.id)
                         await voice_client.disconnect()
-                        logger.info(f"Auto-disconnected from {member.guild.name} (empty channel)")
-
-
-# Need asyncio for the listener
-import asyncio
+                        logger.info(
+                            f"Auto-disconnected from {member.guild.name} (empty channel)"
+                        )
 
 
 async def setup(bot: commands.Bot):

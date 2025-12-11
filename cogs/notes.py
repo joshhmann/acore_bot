@@ -3,7 +3,6 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
-from datetime import datetime
 
 from services.discord.notes import NotesService
 from utils.helpers import format_error, format_success

@@ -1,6 +1,6 @@
 """LLM Model Fallback System - like LiteLLM routing."""
 import logging
-from typing import List, Dict, Optional, Any, Callable
+from typing import List, Dict, Optional, Any
 from dataclasses import dataclass
 import time
 

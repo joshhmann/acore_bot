@@ -2,8 +2,8 @@
 
 import discord
 import logging
-from typing import Dict, List, Optional, Tuple
-from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+from datetime import datetime
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)

@@ -1,9 +1,7 @@
 """Voice cog for TTS and RVC features."""
 
 import discord
-from discord import app_commands
 from discord.ext import commands
-from discord.ext import voice_recv
 import logging
 from pathlib import Path
 from typing import Optional
@@ -15,11 +13,23 @@ from services.voice.tts import TTSService
 from services.voice.rvc import UnifiedRVCService
 from services.voice.listener import EnhancedVoiceListener
 from services.voice.commands import VoiceCommandParser, CommandType
-from utils.helpers import format_error, format_success, format_info
+from utils.helpers import format_error, format_success
 from .manager import VoiceManager
 from .commands import VoiceCommands
 
 logger = logging.getLogger(__name__)
+
+
+# TODO: Implement sound effects service
+async def get_sound_effects_service():
+    """Placeholder function for sound effects service."""
+
+    class MockSoundEffects:
+        effects = []
+        enabled = False
+        global_volume = 0.5
+
+    return MockSoundEffects()
 
 
 class VoiceCog(commands.Cog):

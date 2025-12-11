@@ -2,8 +2,7 @@
 import logging
 import asyncio
 import discord
-from typing import Optional, Dict, List, Any
-from pathlib import Path
+from typing import Optional, Dict, List
 from dataclasses import dataclass, field
 from collections import deque
 import concurrent.futures

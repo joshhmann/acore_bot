@@ -4,13 +4,9 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
-from typing import Optional, Dict
+from typing import Optional
 from pathlib import Path
-from datetime import datetime, timedelta
-import uuid
 import time
-import json
-import re
 import asyncio
 
 from config import Config
@@ -23,19 +19,15 @@ from utils.helpers import (
     ChatHistoryManager,
     chunk_message,
     format_error,
-    format_success,
-    download_attachment,
-    image_to_base64,
     is_image_attachment,
 )
-from utils.persona_loader import PersonaLoader
-from utils.system_context import SystemContextProvider
 from utils.response_validator import ResponseValidator
 
 # Import modularized components
 from .helpers import ChatHelpers
 from .session_manager import SessionManager
 from .voice_integration import VoiceIntegration
+
 # response_handler deprecated - using _handle_chat_response method directly
 from .message_handler import MessageHandler
 from .commands import ChatCommandHandler
@@ -69,26 +61,29 @@ class ChatCog(commands.Cog):
         """Initialize chat cog."""
         self.bot = bot
         # Core services
-        self.session_manager = SessionManager() # Moved up from below
+        self.session_manager = SessionManager()  # Moved up from below
         self.history = history_manager
         # self.context_router = context_router # This is passed in now
         self.user_profiles = user_profiles
         self.llm_fallback = llm_fallback
-        self.ollama = ollama # Kept for direct access
+        self.ollama = ollama  # Kept for direct access
         self.summarizer = summarizer
         self.web_search = web_search
         self.rag = rag
         self.conversation_manager = conversation_manager
-        self.compiled_persona = compiled_persona # For compiled/default persona logic
-        self.persona_relationships = persona_relationships  # Persona-to-persona affinity
+        self.compiled_persona = compiled_persona  # For compiled/default persona logic
+        self.persona_relationships = (
+            persona_relationships  # Persona-to-persona affinity
+        )
 
         # Behavior Engine (Unified AI Brain)
         # self.behavior_engine = behavior_engine # This is passed in now
 
         # Persona Router (Multi-Character System)
         from services.persona.router import PersonaRouter
+
         self.persona_router = PersonaRouter(Config.CHARACTERS_DIR)
-        
+
         # Load active personas
         # Note: We need to await this, but __init__ is sync.
         # We'll do it in cog_load or create a task.
@@ -97,25 +92,28 @@ class ChatCog(commands.Cog):
         # Compile system prompt (legacy support, will be overridden by Router)
         self.system_prompt = self._load_system_prompt()
         self.system_prompt_last_loaded = time.time()
-        self.current_persona = None # Default value until _async_init completes
-        
+        self.current_persona = None  # Default value until _async_init completes
+
     async def _async_init(self):
         """Asynchronous initialization."""
         # 0. Core properties
         self._background_tasks: set = set()
-        
+
         # 1. Initialize Helpers & Managers
         self.helpers = ChatHelpers()
         self.session_manager = SessionManager()
-        self.voice_integration = VoiceIntegration(self.bot, self.helpers.analyze_sentiment)
+        self.voice_integration = VoiceIntegration(
+            self.bot, self.helpers.analyze_sentiment
+        )
         self.message_handler = MessageHandler(self)
         self.command_handler = ChatCommandHandler(self)
-        
+
         # 2. Initialize Logic Services
         self.context_manager = ContextManager()
         self.lorebook_service = LorebookService()
-        
+
         from services.memory.context_router import ContextRouter
+
         self.context_router = ContextRouter(self.history, self.summarizer)
 
         # 3. Initialize Behavior Engine (Needs ContextManager)
@@ -125,11 +123,11 @@ class ChatCog(commands.Cog):
 
         # 4. Initialize Persona Router (Loads Characters)
         await self.persona_router.initialize()
-        
+
         # 4b. Initialize Persona Relationships (Affinity between characters)
         if self.persona_relationships:
             await self.persona_relationships.initialize()
-        
+
         # 5. Set Initial Persona (Sync Legacy & Router)
         # Try to set Dagoth Ur as default, or first available
         default_p = self.persona_router.get_persona_by_name("Dagoth Ur")
@@ -137,12 +135,14 @@ class ChatCog(commands.Cog):
             all_p = self.persona_router.get_all_personas()
             if all_p:
                 default_p = all_p[0]
-        
+
         if default_p:
             self.behavior_engine.set_persona(default_p)
-            self.current_persona = default_p.character # Legacy support for MessageHandler
-            # Compatibility shim: MessageHandler expects .name on character object? 
-            # Character dataclass has .display_name. 
+            self.current_persona = (
+                default_p.character
+            )  # Legacy support for MessageHandler
+            # Compatibility shim: MessageHandler expects .name on character object?
+            # Character dataclass has .display_name.
             # If MessageHandler accesses .name, we might need a wrapper or ignore if it fails.
             # Character dataclass DOES NOT have .name. It has .display_name.
             # MessageHandler lines 270 check .name. This might be another bug.
@@ -160,7 +160,7 @@ class ChatCog(commands.Cog):
         self.intent_handler = None
         self.message_batcher = None
         self.agentic_tools = None
-        
+
         logger.info("ChatCog initialization complete.")
 
     async def _llm_chat(
@@ -198,29 +198,29 @@ class ChatCog(commands.Cog):
 
     def _prepare_response_content(self, response: str, channel) -> tuple[str, str]:
         """Prepare response content for Discord display and TTS.
-        
+
         Args:
             response: Raw LLM response text
             channel: Discord channel context
-            
+
         Returns:
             Tuple of (discord_response, tts_response)
         """
         # 1. Basic Cleaning
         cleaned = ChatHelpers.clean_response(response)
-        
+
         # 2. Get Guild Context
         guild = getattr(channel, "guild", None)
-        
+
         # 3. Restore Mentions (Discord)
         if guild:
             discord_response = self.helpers.restore_mentions(cleaned, guild)
         else:
             discord_response = cleaned
-            
+
         # 4. Clean for TTS
         tts_response = ChatHelpers.clean_for_tts(discord_response, guild)
-        
+
         return discord_response, tts_response
 
     async def _stream_to_discord(self, content_iterator, interaction, guild):
@@ -228,62 +228,84 @@ class ChatCog(commands.Cog):
         response = ""
         last_update = time.time()
         response_message = None
-        
+
         async for chunk in content_iterator:
             response += chunk
             current_time = time.time()
             if current_time - last_update >= Config.STREAM_UPDATE_INTERVAL:
                 # Prepare display text
-                display_text = self.helpers.restore_mentions(response, guild) if guild else response
-                
+                display_text = (
+                    self.helpers.restore_mentions(response, guild)
+                    if guild
+                    else response
+                )
+
                 if interaction:
                     if not response_message:
-                        response_message = await interaction.followup.send(display_text[:2000])
+                        response_message = await interaction.followup.send(
+                            display_text[:2000]
+                        )
                     else:
                         try:
                             await response_message.edit(content=display_text[:2000])
                         except discord.HTTPException:
                             pass
                 last_update = current_time
-                
+
         # Final update handled by caller or ensures last state
         if interaction and response_message:
-             display_text = self.helpers.restore_mentions(response, guild) if guild else response
-             try:
-                 await response_message.edit(content=display_text[:2000])
-             except: pass
+            display_text = (
+                self.helpers.restore_mentions(response, guild) if guild else response
+            )
+            try:
+                await response_message.edit(content=display_text[:2000])
+            except (discord.NotFound, discord.Forbidden):
+                pass
         elif interaction:
-             # If we never sent a message (short response), send now
-             display_text = self.helpers.restore_mentions(response, guild) if guild else response
-             await interaction.followup.send(display_text[:2000])
-             
+            # If we never sent a message (short response), send now
+            display_text = (
+                self.helpers.restore_mentions(response, guild) if guild else response
+            )
+            await interaction.followup.send(display_text[:2000])
+
         return response
 
-    async def _generate_response(self, final_messages, channel, interaction, optimal_max_tokens, recent_image_url):
+    async def _generate_response(
+        self, final_messages, channel, interaction, optimal_max_tokens, recent_image_url
+    ):
         """Generate response using available strategies (Vision, Agentic, Streaming, Standard)."""
         response = ""
         guild = getattr(channel, "guild", None)
-        
+
         # 1. Vision Processing
         if recent_image_url and Config.VISION_ENABLED:
             try:
                 # Add explicit instruction about the image
-                final_messages[-1]["content"] += "\n\n[Note: User is referencing the attached image]"
-                response = await self.ollama.chat(final_messages, temperature=self.ollama.temperature)
+                final_messages[-1]["content"] += (
+                    "\n\n[Note: User is referencing the attached image]"
+                )
+                response = await self.ollama.chat(
+                    final_messages, temperature=self.ollama.temperature
+                )
                 logger.info("Successfully processed recent image with vision")
                 return response
             except Exception as e:
                 logger.error(f"Vision processing failed: {e}")
                 # Fallback continues below
-        
+
         # 2. Agentic Tools (ReAct)
         if self.agentic_tools:
+
             async def llm_generate(conv):
                 return await self._llm_chat(conv, system_prompt=None)
-            
+
             user_msg_content = final_messages[-1]["content"]
-            system_prompt = final_messages[0]["content"] if final_messages and final_messages[0]["role"] == "system" else ""
-            
+            system_prompt = (
+                final_messages[0]["content"]
+                if final_messages and final_messages[0]["role"] == "system"
+                else ""
+            )
+
             response = await self.agentic_tools.process_with_tools(
                 llm_generate_func=llm_generate,
                 user_message=user_msg_content,
@@ -302,46 +324,70 @@ class ChatCog(commands.Cog):
                 and voice_client.is_connected()
                 and not voice_client.is_playing()
             )
-            
+
             if use_streaming_tts:
-                 voice_cog = self.bot.get_cog("VoiceCog")
-                 if voice_cog:
-                     # Sentinel for imports
-                     from utils.stream_multiplexer import StreamMultiplexer 
-                     from services.voice.streaming_tts import StreamingTTSProcessor # Try import
-                     
-                     streaming_tts = StreamingTTSProcessor(
-                         voice_cog.tts,
-                         voice_cog.rvc if hasattr(voice_cog, "rvc") else None,
-                     )
-                     
-                     # Sentiment
-                     sentiment = self.helpers.analyze_sentiment(final_messages[-1]["content"])
-                     kokoro_speed = 1.1 if sentiment == "positive" else 0.9 if sentiment == "negative" else 1.0
-                     edge_rate = "+10%" if sentiment == "positive" else "-10%" if sentiment == "negative" else "+0%"
-                     
-                     llm_stream = self.ollama.chat_stream(
-                         final_messages, system_prompt=None, max_tokens=optimal_max_tokens
-                     )
-                     multiplexer = StreamMultiplexer(llm_stream)
-                     text_stream = multiplexer.create_consumer()
-                     tts_stream = multiplexer.create_consumer()
-                     
-                     # Parallel Execution
-                     results = await asyncio.gather(
-                         self._stream_to_discord(text_stream, interaction, guild),
-                         streaming_tts.process_stream(tts_stream, voice_client, speed=kokoro_speed, rate=edge_rate)
-                     )
-                     response = results[0] # The text response
-                     return response
-                     
+                voice_cog = self.bot.get_cog("VoiceCog")
+                if voice_cog:
+                    # Sentinel for imports
+                    from utils.stream_multiplexer import StreamMultiplexer
+                    from services.voice.streaming_tts import (
+                        StreamingTTSProcessor,
+                    )  # Try import
+
+                    streaming_tts = StreamingTTSProcessor(
+                        voice_cog.tts,
+                        voice_cog.rvc if hasattr(voice_cog, "rvc") else None,
+                    )
+
+                    # Sentiment
+                    sentiment = self.helpers.analyze_sentiment(
+                        final_messages[-1]["content"]
+                    )
+                    kokoro_speed = (
+                        1.1
+                        if sentiment == "positive"
+                        else 0.9
+                        if sentiment == "negative"
+                        else 1.0
+                    )
+                    edge_rate = (
+                        "+10%"
+                        if sentiment == "positive"
+                        else "-10%"
+                        if sentiment == "negative"
+                        else "+0%"
+                    )
+
+                    llm_stream = self.ollama.chat_stream(
+                        final_messages,
+                        system_prompt=None,
+                        max_tokens=optimal_max_tokens,
+                    )
+                    multiplexer = StreamMultiplexer(llm_stream)
+                    text_stream = multiplexer.create_consumer()
+                    tts_stream = multiplexer.create_consumer()
+
+                    # Parallel Execution
+                    results = await asyncio.gather(
+                        self._stream_to_discord(text_stream, interaction, guild),
+                        streaming_tts.process_stream(
+                            tts_stream, voice_client, speed=kokoro_speed, rate=edge_rate
+                        ),
+                    )
+                    response = results[0]  # The text response
+                    return response
+
             # Standard Text Streaming
-            stream = self.ollama.chat_stream(final_messages, system_prompt=None, max_tokens=optimal_max_tokens)
+            stream = self.ollama.chat_stream(
+                final_messages, system_prompt=None, max_tokens=optimal_max_tokens
+            )
             response = await self._stream_to_discord(stream, interaction, guild)
             return response
 
         # 4. Standard Non-Streaming
-        response = await self.ollama.chat(final_messages, system_prompt=None, max_tokens=optimal_max_tokens)
+        response = await self.ollama.chat(
+            final_messages, system_prompt=None, max_tokens=optimal_max_tokens
+        )
         return response
 
     def _create_background_task(self, coro):
@@ -404,19 +450,20 @@ class ChatCog(commands.Cog):
         )
         return self.helpers.load_system_prompt(prompt_file, default_prompt)
 
-    async def _prepare_final_messages(self, channel, user, message_content, selected_persona):
+    async def _prepare_final_messages(
+        self, channel, user, message_content, selected_persona
+    ):
         """Prepare context and build final messages for LLM.
-        
+
         Args:
             channel: Discord channel
             user: Discord user
             message_content: Message text
             selected_persona: Selected persona object
-            
+
         Returns:
             List of message dicts (final_messages)
         """
-        channel_id = channel.id
         user_id = user.id
 
         # 1. Load History
@@ -428,7 +475,7 @@ class ChatCog(commands.Cog):
             )
             history = context_result.history
             context_summary = context_result.summary
-            
+
             logger.debug(
                 f"Context: {len(history)} msgs, "
                 f"summary: {len(context_summary) if context_summary else 0} chars, "
@@ -436,11 +483,9 @@ class ChatCog(commands.Cog):
             )
 
         # 2. Add current message
-        history.append({
-            "role": "user", 
-            "content": message_content,
-            "username": user.display_name
-        })
+        history.append(
+            {"role": "user", "content": message_content, "username": user.display_name}
+        )
 
         # 3. Build Context Strings
         user_context_str = ""
@@ -448,46 +493,69 @@ class ChatCog(commands.Cog):
 
         # User Profile
         if self.user_profiles and Config.USER_CONTEXT_IN_CHAT:
-             user_context = await self.user_profiles.get_user_context(user_id)
-             if user_context and user_context != "New user - no profile information yet.":
-                 user_context_str += f"User Profile: {user_context}\n"
-                 
-                 # Special Instructions
-                 profile = await self.user_profiles.load_profile(user.id)
-                 special_instructions = []
-                 for fact_entry in profile.get("facts", []):
-                    fact_text = fact_entry.get("fact", "") if isinstance(fact_entry, dict) else str(fact_entry)
-                    fact_lower = fact_text.lower()
-                    if any(k in fact_lower for k in ["when you see", "always say", "greet with", "call them", "respond with", "call me"]):
-                        special_instructions.append(fact_text)
-                 if special_instructions:
-                    user_context_str += "\nInstructions:\n" + "\n".join(f"- {inst}" for inst in special_instructions)
+            user_context = await self.user_profiles.get_user_context(user_id)
+            if (
+                user_context
+                and user_context != "New user - no profile information yet."
+            ):
+                user_context_str += f"User Profile: {user_context}\n"
 
-             # Affection
-             if Config.USER_AFFECTION_ENABLED:
+                # Special Instructions
+                profile = await self.user_profiles.load_profile(user.id)
+                special_instructions = []
+                for fact_entry in profile.get("facts", []):
+                    fact_text = (
+                        fact_entry.get("fact", "")
+                        if isinstance(fact_entry, dict)
+                        else str(fact_entry)
+                    )
+                    fact_lower = fact_text.lower()
+                    if any(
+                        k in fact_lower
+                        for k in [
+                            "when you see",
+                            "always say",
+                            "greet with",
+                            "call them",
+                            "respond with",
+                            "call me",
+                        ]
+                    ):
+                        special_instructions.append(fact_text)
+                if special_instructions:
+                    user_context_str += "\nInstructions:\n" + "\n".join(
+                        f"- {inst}" for inst in special_instructions
+                    )
+
+            # Affection
+            if Config.USER_AFFECTION_ENABLED:
                 affection = self.user_profiles.get_affection_context(user_id)
                 if affection:
                     user_context_str += f"\nRelationship: {affection}"
-        
+
         # Summarizer Context
         if self.summarizer:
             memory = await self.summarizer.build_memory_context(message_content)
             if memory:
                 user_context_str += f"\n\nMemories:\n{memory}"
-        
+
         # Conversation Summary
         if context_summary:
-            user_context_str += f"\n\n[Earlier Conversation Summary]:\n{context_summary}"
-            
+            user_context_str += (
+                f"\n\n[Earlier Conversation Summary]:\n{context_summary}"
+            )
+
         # RAG Context
         use_rag = True
         if use_rag and self.rag and Config.RAG_IN_CHAT and self.rag.is_enabled():
             persona_boost = None
             persona_categories = None
-            
+
             # Use selected_persona for RAG filtering
             if selected_persona:
-                persona_boost = getattr(selected_persona.character, "display_name", None)
+                persona_boost = getattr(
+                    selected_persona.character, "display_name", None
+                )
                 if hasattr(selected_persona.character, "knowledge_domain"):
                     kd = selected_persona.character.knowledge_domain
                     cats = kd.get("rag_categories")
@@ -495,12 +563,12 @@ class ChatCog(commands.Cog):
                         persona_categories = cats
                     elif isinstance(cats, str):
                         persona_categories = [cats]
-            
+
             rag_content = self.rag.get_context(
-                message_content, 
-                max_length=1500, 
-                categories=persona_categories, 
-                boost_category=persona_boost
+                message_content,
+                max_length=1500,
+                categories=persona_categories,
+                boost_category=persona_boost,
             )
             if rag_content:
                 rag_context_str = rag_content
@@ -508,7 +576,9 @@ class ChatCog(commands.Cog):
         # Web Search
         if self.web_search and await self.web_search.should_search(message_content):
             try:
-                search_res = await self.web_search.get_context(message_content, max_length=1000)
+                search_res = await self.web_search.get_context(
+                    message_content, max_length=1000
+                )
                 if search_res:
                     rag_context_str += f"\n\n[WEB SEARCH RESULTS]\n{search_res}"
             except Exception as e:
@@ -517,28 +587,36 @@ class ChatCog(commands.Cog):
         # Lorebook
         lore_entries = []
         if self.lorebook_service:
-            scan_text = message_content + "\n" + "\n".join([m["content"] for m in history[-5:]])
+            scan_text = (
+                message_content + "\n" + "\n".join([m["content"] for m in history[-5:]])
+            )
             lore_entries = self.lorebook_service.scan_for_triggers(
                 scan_text, self.lorebook_service.get_available_lorebooks()
             )
 
         # 4. Determine Model & Persona
         current_model = self.ollama.get_model_name() or "gpt-3.5-turbo"
-        
+
         if selected_persona:
             persona_to_use = selected_persona
         elif self.compiled_persona:
             persona_to_use = self.compiled_persona
         else:
-             # Legacy Fallback
-             from services.persona.system import CompiledPersona, Character, Framework
-             dummy_char = Character("legacy", "Assistant", {}, {}, {}, {}, {})
-             dummy_fw = Framework("legacy", "Legacy", "Helpful", {}, {}, {}, {}, {}, {}, "")
-             persona_to_use = CompiledPersona(
-                "legacy", dummy_char, dummy_fw, 
-                system_prompt=self.system_prompt, 
-                tools_required=[], config={}
-             )
+            # Legacy Fallback
+            from services.persona.system import CompiledPersona, Character, Framework
+
+            dummy_char = Character("legacy", "Assistant", {}, {}, {}, {}, {})
+            dummy_fw = Framework(
+                "legacy", "Legacy", "Helpful", {}, {}, {}, {}, {}, {}, ""
+            )
+            persona_to_use = CompiledPersona(
+                "legacy",
+                dummy_char,
+                dummy_fw,
+                system_prompt=self.system_prompt,
+                tools_required=[],
+                config={},
+            )
 
         # 5. Build Final Messages
         final_messages = await self.context_manager.build_context(
@@ -548,20 +626,26 @@ class ChatCog(commands.Cog):
             lore_entries=lore_entries,
             rag_content=rag_context_str,
             user_context=user_context_str,
-            llm_service=self.ollama
+            llm_service=self.ollama,
         )
-        
+
         return final_messages
 
-    def _select_persona(self, message_content: str, channel_id: int, original_message: Optional[discord.Message], response_reason: Optional[str]):
+    def _select_persona(
+        self,
+        message_content: str,
+        channel_id: int,
+        original_message: Optional[discord.Message],
+        response_reason: Optional[str],
+    ):
         """Select the appropriate persona for the response.
-        
+
         Args:
             message_content: The message content
             channel_id: The channel ID
             original_message: The original message object (optional)
             response_reason: The reason for responding (optional)
-            
+
         Returns:
             Selected persona object or None
         """
@@ -570,26 +654,34 @@ class ChatCog(commands.Cog):
             speaker_name = original_message.author.display_name.lower()
             all_personas = self.persona_router.get_all_personas()
             # Filter out the speaker
-            other_personas = [p for p in all_personas 
-                             if p.character.display_name.lower() != speaker_name]
+            other_personas = [
+                p
+                for p in all_personas
+                if p.character.display_name.lower() != speaker_name
+            ]
             if other_personas:
                 # Pick random other persona (could also weight by affinity)
                 # Ensure random is imported or use extracted import
                 import random
+
                 selected_persona = random.choice(other_personas)
-                logger.info(f"Banter: {selected_persona.character.display_name} jumping in on {speaker_name}'s message")
+                logger.info(
+                    f"Banter: {selected_persona.character.display_name} jumping in on {speaker_name}'s message"
+                )
                 return selected_persona
-        
+
         # Default selection
-        selected_persona = self.persona_router.select_persona(message_content, channel_id=channel_id)
-        
+        selected_persona = self.persona_router.select_persona(
+            message_content, channel_id=channel_id
+        )
+
         # Fallback
         if not selected_persona:
             if self.behavior_engine.current_persona:
                 selected_persona = self.behavior_engine.current_persona
             else:
                 selected_persona = self.persona_router.get_persona_by_name("Dagoth Ur")
-                
+
         return selected_persona
 
     async def check_and_handle_message(self, message: discord.Message) -> bool:
@@ -623,7 +715,6 @@ class ChatCog(commands.Cog):
         start_time = time.time()
 
         # Track if streaming TTS was used (defined here for scope)
-        use_streaming_tts = False
 
         # Helper for sending messages (handling interaction vs channel)
         async def send_response(content, ephemeral=False):
@@ -659,23 +750,31 @@ class ChatCog(commands.Cog):
             )
 
         # Check for multi-turn conversation steps (only for actual messages)
-        channel_id = channel.id if hasattr(channel, 'id') else None
-        selected_persona = self._select_persona(message_content, channel_id, original_message, response_reason)
+        channel_id = channel.id if hasattr(channel, "id") else None
+        selected_persona = self._select_persona(
+            message_content, channel_id, original_message, response_reason
+        )
 
         if not selected_persona:
-             logger.error("No persona available for response!")
-             return
+            logger.error("No persona available for response!")
+            return
 
         # SELF-REPLY PREVENTION:
         # If the selected persona matches the message author (Webhook), ABORT.
         if selected_persona and original_message:
-             persona_name = getattr(selected_persona.character, "display_name", "")
-             author_name = original_message.author.display_name
-             
-             # Case-insensitive check
-             if persona_name and author_name and persona_name.lower().strip() == author_name.lower().strip():
-                 logger.info(f"Self-Reply Prevention: {persona_name} selected to reply to {author_name}. Aborting.")
-                 return
+            persona_name = getattr(selected_persona.character, "display_name", "")
+            author_name = original_message.author.display_name
+
+            # Case-insensitive check
+            if (
+                persona_name
+                and author_name
+                and persona_name.lower().strip() == author_name.lower().strip()
+            ):
+                logger.info(
+                    f"Self-Reply Prevention: {persona_name} selected to reply to {author_name}. Aborting."
+                )
+                return
 
         # Update BehaviorEngine context
         self.behavior_engine.set_persona(selected_persona)
@@ -781,11 +880,9 @@ class ChatCog(commands.Cog):
         )
 
         # Also check if the current message HAS an image (implicit reference)
-        has_attachment = False
         if original_message and (
             original_message.attachments or original_message.embeds
         ):
-            has_attachment = True
             is_referencing_image = True  # Treat as referencing the attached image
 
         recent_image_url = None
@@ -870,7 +967,9 @@ class ChatCog(commands.Cog):
             user_id = user.id
 
             # --- CONTEXT BUILDING ---
-            final_messages = await self._prepare_final_messages(channel, user, message_content, selected_persona)
+            final_messages = await self._prepare_final_messages(
+                channel, user, message_content, selected_persona
+            )
 
             # Log action for self-awareness
             # Logging handled by BehaviorEngine
@@ -882,7 +981,13 @@ class ChatCog(commands.Cog):
             )
 
             # 4. Generate Response
-            response = await self._generate_response(final_messages, channel, interaction, optimal_max_tokens, recent_image_url)
+            response = await self._generate_response(
+                final_messages,
+                channel,
+                interaction,
+                optimal_max_tokens,
+                recent_image_url,
+            )
 
             # Validate and clean response (remove thinking tags, fix hallucinations)
             response = ResponseValidator.validate_response(response)
@@ -923,8 +1028,10 @@ class ChatCog(commands.Cog):
 
             # Update user profile - increment interaction count and learn from conversation
             # OPTIMIZATION: Skip learning for persona/webhook messages to reduce LLM calls
-            is_webhook_message = original_message and original_message.webhook_id is not None
-            
+            is_webhook_message = (
+                original_message and original_message.webhook_id is not None
+            )
+
             if self.user_profiles and not is_webhook_message:
                 profile = await self.user_profiles.load_profile(user_id)
                 profile["interaction_count"] += 1
@@ -956,24 +1063,20 @@ class ChatCog(commands.Cog):
                     )
             # 1. Start Timing & Setup
             start_time = time.time()
-            
+
             # 2. Persona Selection (Moved to top)
             # selected_persona already set above
-            
-            system_prompt = selected_persona.system_prompt
+
             display_name = selected_persona.character.display_name
             avatar_url = selected_persona.character.avatar_url
-            
+
             # 3. Context Management
             # Build conversation context (history + summary + RAG)
             # Build conversation context (history + summary + RAG)
             context_result = await self.context_router.get_context(
-                 channel=channel, 
-                 user=user,
-                 message_content=message_content
+                channel=channel, user=user, message_content=message_content
             )
             history = context_result.history
-            summary = context_result.summary
 
             # Use Context Manager to build optimized LLM input
             # We construct a dummy/wrapped persona object if needed, or use the selected one
@@ -981,16 +1084,16 @@ class ChatCog(commands.Cog):
                 persona=selected_persona,
                 history=history,
                 model_name=self.ollama.get_model_name(),
-                lore_entries=[], # TODO: scan lore if needed
-                rag_content="", # TODO: fetch RAG if needed
-                user_context="", # TODO: fetch user profile if needed
-                llm_service=self.ollama
+                lore_entries=[],  # TODO: scan lore if needed
+                rag_content="",  # TODO: fetch RAG if needed
+                user_context="",  # TODO: fetch user profile if needed
+                llm_service=self.ollama,
             )
-            
+
             # Add user message to context if not already there (ContextManager typically handles history+current)
             # But ContextManager.build_context expects 'history' which includes previous messages.
             # We need to append the current message OR rely on `build_context` taking `user_message`.
-            # The signature of `build_context` above only took `history`. 
+            # The signature of `build_context` above only took `history`.
             # Let's check `services/core/context.py` if needed.
             # For robustness, let's manually ensure current message is at end of `context` list if missing.
             if not context or context[-1]["role"] != "user":
@@ -999,29 +1102,33 @@ class ChatCog(commands.Cog):
             # 4. Generate Response
             response = await self._llm_chat(
                 messages=context,
-                system_prompt=None, # System prompt is inside context[0]
+                system_prompt=None,  # System prompt is inside context[0]
             )
-            
+
             # 5. Post-Processing & Sending
             # 5. Post-Processing & Sending
-            discord_response, tts_response = self._prepare_response_content(response, channel)
-            
+            discord_response, tts_response = self._prepare_response_content(
+                response, channel
+            )
+
             # Send via Webhook (Spoofing) or Fallback
             sent_via_webhook = False
             if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
                 try:
                     webhooks = await channel.webhooks()
-                    webhook = next((w for w in webhooks if w.name == "PersonaBot_Proxy"), None)
+                    webhook = next(
+                        (w for w in webhooks if w.name == "PersonaBot_Proxy"), None
+                    )
                     if not webhook:
                         webhook = await channel.create_webhook(name="PersonaBot_Proxy")
-                    
+
                     chunks = await chunk_message(discord_response)
                     for chunk in chunks:
                         await webhook.send(
-                            content=chunk, 
-                            username=display_name, 
+                            content=chunk,
+                            username=display_name,
                             avatar_url=avatar_url,
-                            wait=True
+                            wait=True,
                         )
                     sent_via_webhook = True
                 except Exception as e:
@@ -1035,7 +1142,13 @@ class ChatCog(commands.Cog):
 
             # 6. Record Interaction Details (Metrics & Learning)
             await self._record_interaction(
-                user, channel, message_content, response, start_time, original_message, selected_persona
+                user,
+                channel,
+                message_content,
+                response,
+                start_time,
+                original_message,
+                selected_persona,
             )
 
         except Exception as e:
@@ -1086,51 +1199,61 @@ class ChatCog(commands.Cog):
         if hasattr(self.bot, "web_dashboard"):
             self.bot.web_dashboard.set_status("Idle")
 
-
-
-
-
-    async def _record_interaction(self, user, channel, message_content, response, start_time, original_message, selected_persona):
+    async def _record_interaction(
+        self,
+        user,
+        channel,
+        message_content,
+        response,
+        start_time,
+        original_message,
+        selected_persona,
+    ):
         """Record metrics, learning, affection, and other interaction details."""
         channel_id = channel.id
         user_id = user.id
-        
+
         # 1. Sticky Persona Tracking
         if self.persona_router and selected_persona:
             self.persona_router.record_response(channel_id, selected_persona)
 
         # 2. Persona Relationships (Banter Affinity)
         # Only record if original message was from a persona (webhook)
-        if original_message and original_message.webhook_id and self.persona_relationships and selected_persona:
+        if (
+            original_message
+            and original_message.webhook_id
+            and self.persona_relationships
+            and selected_persona
+        ):
             speaker_name = original_message.author.display_name
             responder_name = selected_persona.character.display_name
-            
+
             # Record interaction (increases affinity by 2)
             self._create_background_task(
                 self.persona_relationships.record_interaction(
                     speaker=speaker_name,
                     responder=responder_name,
                     affinity_change=2,
-                    memory=None  # Could extract memorable moment with LLM later
+                    memory=None,  # Could extract memorable moment with LLM later
                 )
             )
             # Save relationships in background
             self._create_background_task(self.persona_relationships.save())
-            
+
         # 3. Voice Reply (Environmental)
         # We need the tts_response. Re-clean it or pass it?
-        # Clean response for TTS again (fast enough) or re-calc. 
+        # Clean response for TTS again (fast enough) or re-calc.
         # Ideally we should pass tts_response, but let's re-clean for now to keep signature simple or pass it in.
         # Actually, let's just re-clean it.
         guild = getattr(channel, "guild", None)
         tts_response = ChatHelpers.clean_for_tts(response, guild) if guild else response
-        
+
         if Config.AUTO_REPLY_WITH_VOICE:
-             voice_client = guild.voice_client if guild else None
-             if voice_client and voice_client.is_connected():
-                 await self.voice_integration.speak_response_in_voice(
-                     guild, tts_response
-                 )
+            voice_client = guild.voice_client if guild else None
+            if voice_client and voice_client.is_connected():
+                await self.voice_integration.speak_response_in_voice(
+                    guild, tts_response
+                )
 
         # 4. Metrics
         if hasattr(self.bot, "metrics"):
@@ -1138,29 +1261,33 @@ class ChatCog(commands.Cog):
             self.bot.metrics.record_response_time(duration_ms)
             self.bot.metrics.record_message(user_id, channel_id)
 
-    async def _safe_learn_from_conversation(self, user_id: int, username: str, user_message: str, bot_response: str):
+    async def _safe_learn_from_conversation(
+        self, user_id: int, username: str, user_message: str, bot_response: str
+    ):
         """Wrapper to safely call user profile learning."""
-        if not self.user_profiles: return
-        
+        if not self.user_profiles:
+            return
+
         try:
             await self.user_profiles.learn_from_conversation(
                 user_id=user_id,
                 username=username,
                 user_message=user_message,
-                bot_response=bot_response
+                bot_response=bot_response,
             )
         except Exception as e:
             logger.warning(f"Failed to learn from conversation: {e}")
 
-    async def _safe_update_affection(self, user_id: int, message: str, bot_response: str):
+    async def _safe_update_affection(
+        self, user_id: int, message: str, bot_response: str
+    ):
         """Wrapper to safely call affection update."""
-        if not self.user_profiles: return
-        
+        if not self.user_profiles:
+            return
+
         try:
             await self.user_profiles.update_affection(
-                user_id=user_id,
-                message=message,
-                bot_response=bot_response
+                user_id=user_id, message=message, bot_response=bot_response
             )
         except Exception as e:
             logger.warning(f"Failed to update affection: {e}")

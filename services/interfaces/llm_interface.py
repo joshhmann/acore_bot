@@ -18,7 +18,7 @@ class LLMInterface(ABC):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> str:
         """Send a chat request to the LLM.
 
@@ -51,7 +51,7 @@ class LLMInterface(ABC):
         system_prompt: Optional[str] = None,
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> AsyncGenerator[str, None]:
         """Stream chat responses token by token.
 
@@ -76,7 +76,7 @@ class LLMInterface(ABC):
         prompt: str,
         system_prompt: Optional[str] = None,
         max_tokens: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> str:
         """Generate a response from a single prompt (simpler interface).
 
@@ -99,7 +99,7 @@ class LLMInterface(ABC):
         prompt: str,
         images: List[str],
         system_prompt: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> str:
         """Generate response from prompt + images (for vision models).
 
@@ -149,6 +149,14 @@ class LLMInterface(ABC):
             Default implementation does nothing. Override if needed.
         """
         pass
+
+    async def check_health(self) -> bool:
+        """Check if the LLM service is healthy and accessible.
+
+        Returns:
+            True if service is operational, False otherwise
+        """
+        return True
 
     def get_model_name(self) -> str:
         """Get the current model name/identifier.

@@ -1,8 +1,8 @@
 """System context provider for real-time information."""
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import platform
 import psutil
-from typing import Dict, Any, Optional
+from typing import Optional
 
 try:
     from zoneinfo import ZoneInfo

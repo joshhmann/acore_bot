@@ -56,28 +56,30 @@ Characters define **WHO** the bot is (personality, backstory, opinions, voice).
 ```python
 @dataclass
 class Character:
-    character_id: str                   # Filename stem
-    display_name: str                   # "Dagoth Ur", "Scav", etc.
+    character_id: str
+    display_name: str
+    identity: Dict[str, Any]          # Who they are, core traits
+    knowledge_domain: Dict[str, Any]  # What they know (includes rag_categories)
+    opinions: Dict[str, Any]          # What they believe
+    voice_and_tone: Dict[str, Any]    # How they speak
+    quirks: Dict[str, Any]            # Unique behaviors
+    avatar_url: Optional[str]
+    # V2 Card fields
+    description: str
+    scenario: str
+    first_message: str
+    mes_example: str
+    alternate_greetings: List[str]
+    ...
+```
 
-    # Legacy structured fields (custom format)
-    identity: Dict[str, Any]            # Who, core traits, description
-    knowledge_domain: Dict[str, Any]    # Expertise areas
-    opinions: Dict[str, Any]            # Loves, hates, hot takes
-    voice_and_tone: Dict[str, Any]      # Speaking style
-    quirks: Dict[str, Any]              # Catchphrases, habits
-
-    # V2 Character Card fields (SillyTavern standard)
-    description: str                    # Character description
-    scenario: str                       # Current situation
-    first_message: str                  # Greeting
-    mes_example: str                    # Example dialogue
-    alternate_greetings: List[str]      # Alternative greetings
-    creator_notes: str                  # Author notes
-    tags: List[str]                     # Categorization
-    system_prompt_override: str         # Embedded system prompt
-
-    # Visuals
-    avatar_url: Optional[str]           # Profile picture URL
+**Knowledge Domain Fields** - **UPDATED 2025-12-10**:
+```python
+knowledge_domain = {
+    "rag_categories": ["dagoth", "gaming"],  # RAG document filtering (NEW)
+    "expertise_areas": [...],                 # Topics character knows well
+    "reference_style": "casual"               # How they cite knowledge
+}
 ```
 
 **Example Character - Dagoth Ur** (`/root/acore_bot/prompts/characters/dagoth_ur.json`):
@@ -139,23 +141,61 @@ All character files are stored in `/root/acore_bot/prompts/characters/`.
 class PersonaSystem:
     def load_framework(framework_id: str) -> Optional[Framework]
     def load_character(character_id: str) -> Optional[Character]
-    def compile_persona(character_id: str, framework_id: str = None) -> Optional[CompiledPersona]
+    def compile_persona(character_id: str, framework_id: str = None, force_recompile: bool = False) -> Optional[CompiledPersona]
     def _build_system_prompt(character: Character, framework: Framework) -> str
+    
+    # Cache Management (NEW - 2025-12-10)
+    def clear_cache() -> None
+        """Clear all cached characters, frameworks, and compiled personas."""
+    
+    def reload_character(character_id: str) -> Optional[Character]
+        """Force reload specific character from disk, invalidating cache."""
+    
+    def reload_all() -> List[str]
+        """Reload all characters from disk. Returns list of loaded character IDs."""
 ```
+
+**Cache Management Methods**:
+
+The PersonaSystem includes comprehensive cache management for hot-reload capabilities:
+
+- **`clear_cache()`** - Clears all in-memory caches (`_character_cache`, `_framework_cache`, `_compiled_cache`)
+- **`reload_character(character_id)`** - Forces disk reload of specific character, bypassing cache
+- **`reload_all()`** - Mass reload of all characters, returns list of successfully loaded IDs
+- **`force_recompile` parameter** - When `True`, bypasses compiled cache and rebuilds from source
+
+**Cache Invalidation Strategy**:
+1. Import operations trigger targeted cache invalidation
+2. Hot-reload commands perform full cache clearing
+3. File modification detection (future enhancement)
+4. Manual cache clearing via Discord commands
+
+**Performance Considerations**:
+- Cache hits avoid expensive file I/O and JSON parsing
+- Compiled personas cached to avoid prompt rebuilding
+- Memory usage scales with number of active personas
+- Cache warming on startup for faster initial responses
 
 **Compilation Process** (`system.py:261-366`):
 
 1. Load character from `characters/` directory
 2. Load framework (optional - can use character card alone)
-3. Build system prompt by combining:
+3. **Validate `rag_categories`** (`system.py:246-278`) - **NEW 2025-12-10**
+   - Extract from `extensions.knowledge_domain.rag_categories`
+   - Validate must be a list
+   - Normalize to lowercase
+   - Filter invalid entries (only alphanumeric + underscore allowed)
+   - Log warnings for invalid categories
+   - Log info for successful loading
+4. Build system prompt by combining:
    - Character description
    - Personality traits
    - Scenario context
    - Example dialogue
    - Framework behavioral instructions
-4. Extract tool requirements from framework
-5. Create `CompiledPersona` object
-6. Cache in memory and save to `/root/acore_bot/prompts/compiled/`
+5. Extract tool requirements from framework
+6. Create `CompiledPersona` object
+7. Cache in memory and save to `/root/acore_bot/prompts/compiled/`
 
 **Compiled Persona Structure** (`system.py:54-63`):
 ```python
@@ -205,7 +245,8 @@ Priority Order:
 ```python
 class PersonaRouter:
     def __init__(self, profiles_dir: str)
-    async def initialize()  # Load all ACTIVE_PERSONAS
+    async def initialize(force_reload: bool = False)  # Load all ACTIVE_PERSONAS
+        # force_reload: If True, clear cache and reload all personas from disk (NEW - 2025-12-10)
 
     def select_persona(message_content: str, channel_id: int) -> Optional[CompiledPersona]
         # Phase 1: Full name match (sorted by length to prefer "Dagoth Ur" over "Dagoth")
@@ -225,6 +266,44 @@ class PersonaRouter:
 - 5-minute timeout window
 - Prevents persona-hopping mid-conversation
 - Resets after silence
+
+### Hot-Reload System (NEW - 2025-12-10)
+
+The persona system includes comprehensive hot-reload capabilities that allow adding, updating, or removing characters without bot restart.
+
+**Hot-Reload Workflow**:
+```
+1. Import/Modify Character Files
+   ↓
+2. Trigger Reload (!reload_characters or automatic)
+   ↓
+3. Clear PersonaSystem Cache
+   ↓
+4. Re-initialize PersonaRouter with force_reload=True
+   ↓
+5. Compare Before/After State
+   ↓
+6. Report Changes (new/removed characters)
+   ↓
+7. Characters Immediately Active
+```
+
+**Force Reload Parameter**:
+- `force_reload=True` bypasses all caches
+- Forces fresh disk read of all character files
+- Re-compiles all personas with latest data
+- Updates PersonaRouter's active persona list
+
+**Cache Management**:
+- `PersonaSystem.clear_cache()` - Clears all in-memory caches
+- `PersonaSystem.reload_character(char_id)` - Reloads specific character
+- `PersonaSystem.reload_all()` - Reloads all characters from disk
+
+**Security Improvements**:
+- Path validation prevents directory traversal
+- File type checking (PNG/JSON only)
+- Content sanitization for RAG categories
+- Automatic backup creation during migrations
 
 ### 3. BehaviorEngine - Unified AI Brain
 
@@ -445,6 +524,322 @@ def scan_for_triggers(text: str, lorebook_names: List[str]) -> List[LoreEntry]
 - Base64-encoded JSON
 - Automatically decoded by PersonaSystem
 - Example: `joseph_stalin.png` (1.4MB character card)
+
+## Character Import & Normalization System (NEW - 2025-12-10)
+
+### CharacterCardImporter - Import SillyTavern Cards
+
+**Location**: `/root/acore_bot/services/persona/character_importer.py`
+
+**Purpose**: Import character cards from SillyTavern (PNG or JSON) and automatically normalize to V2 format.
+
+**Key Features**:
+- **Format Detection**: Automatically detects V1, V2, or malformed character cards
+- **V2 Normalization**: Always outputs standardized V2 schema with `extensions.knowledge_domain`
+- **RAG Category Validation**: Normalizes `rag_categories` to lowercase, validates alphanumeric+underscore only
+- **Auto-Compilation**: Optionally compiles character to `prompts/compiled/` after import
+- **Multi-Format Support**: Handles both PNG (embedded metadata) and JSON files
+
+**Methods**:
+
+```python
+class CharacterCardImporter:
+    def extract_png_metadata(png_path: Path) -> Optional[Dict]
+        """Extract character JSON from PNG tEXt/iTXt chunks."""
+    
+    def convert_to_internal_format(card_data: Dict, png_path: Path) -> Dict
+        """Convert any format to standardized V2 with validated rag_categories."""
+    
+    def import_card(png_path: Path, copy_avatar: bool = True, auto_compile: bool = True) -> Tuple[Path, Optional[Path], str]
+        """Import character card. Returns (json_path, compiled_path, char_id)."""
+    
+    def import_from_directory(source_dir: Path, auto_compile: bool = True) -> List[Tuple]
+        """Batch import all PNG/JSON cards from directory."""
+```
+
+**Normalization Process** (`character_importer.py:104-195`):
+
+1. **Detect Format Variant**:
+   - Check for `spec` and `data` keys (V2 wrapped)
+   - Handle unwrapped V2 (`data` key only)
+   - Handle V1 (flat structure)
+
+2. **Normalize to V2 Structure**:
+   ```python
+   {
+     "spec": "chara_card_v2",
+     "spec_version": "2.0",
+     "data": {
+       "name": "Character Name",
+       "extensions": {
+         "knowledge_domain": {
+           "rag_categories": ["validated", "normalized"]
+         }
+       }
+     }
+   }
+   ```
+
+3. **Validate `rag_categories`**:
+   - Must be a list of strings
+   - Normalize to lowercase
+   - Strip whitespace
+   - Validate alphanumeric + underscore only
+   - Log warnings for invalid entries
+   - Filter out invalid entries
+
+4. **Auto-Compile** (if enabled):
+   - Call `PersonaSystem.compile_persona(char_id, force_recompile=True)`
+   - Save to `prompts/compiled/{char_id}.json`
+   - Return compiled path in result tuple
+
+**CLI Usage**:
+
+```bash
+# Import single card
+python services/persona/character_importer.py character.png --compile
+
+# Import directory
+python services/persona/character_importer.py /path/to/cards/ --compile --verbose
+```
+
+### Hot-Reload Commands
+
+**!reload_characters** - Reload all characters without restart
+
+```python
+# Compares before/after state, shows added/removed characters
+!reload_characters
+# Output:
+# ✅ Reload complete!
+# **Before:** 9 characters
+# **After:** 10 characters
+# **New:** New Character
+# **Active:** Dagoth Ur, Scav, ...
+```
+
+**/import_character** - Import card via Discord slash command
+
+```python
+# Upload PNG/JSON file as attachment
+/import_character file:character.png
+# Automatically:
+# 1. Downloads file
+# 2. Normalizes to V2 format
+# 3. Auto-compiles character
+# 4. Hot-reloads PersonaRouter
+# 5. Character immediately active (no restart needed)
+```
+
+**!import_folder** - Batch import from `data/import_cards/`
+
+```bash
+# Place cards in data/import_cards/, then:
+!import_folder
+# Imports all PNG/JSON files with auto-compilation
+```
+
+### Migration Script - Normalize Existing Characters
+
+**Location**: `/root/acore_bot/scripts/normalize_character_formats.py`
+
+**Purpose**: Scan and normalize existing character files to V2 standard.
+
+**Features**:
+- **Dry-Run Mode**: Preview changes before applying
+- **Automatic Backups**: Saves originals to `prompts/characters/backups/`
+- **Format Detection**: Identifies V1, V2, and malformed cards
+- **Batch Processing**: Normalizes entire directory
+
+**Usage**:
+
+```bash
+# Dry-run (preview only)
+python scripts/normalize_character_formats.py
+
+# Apply fixes
+python scripts/normalize_character_formats.py --apply
+
+# Custom directory
+python scripts/normalize_character_formats.py --dir /custom/path --apply --verbose
+```
+
+**Example Output**:
+
+```
+⚠ dagoth_ur.json: 2 issues detected
+  - rag_categories[0] not normalized: 'Dagoth' should be 'dagoth'
+  - rag_categories[1] has invalid chars: 'Elder Scrolls!'
+  → 2 fixes available
+    • Normalized category: 'Dagoth' -> 'dagoth'
+    • Removed invalid category: 'Elder Scrolls!'
+
+SCAN SUMMARY
+===========
+Total files scanned: 12
+Already valid V2: 10
+Need updates: 2
+Errors: 0
+
+💡 Run with --apply to make changes
+```
+
+### Import System Architecture
+
+**Component Overview**:
+```
+Discord Commands (/import_character, !import_folder, !reload_characters)
+    ↓
+CharacterCardImporter (services/persona/character_importer.py)
+    ↓
+Format Detection → V2 Normalization → Validation → Auto-Compilation
+    ↓
+PersonaSystem (services/persona/system.py)
+    ↓
+Cache Management → PersonaRouter Hot-Reload
+    ↓
+Active Character Roster Updated
+```
+
+**Security Considerations**:
+- **Path Validation**: Restricts file operations to safe directories
+- **File Type Checking**: Only processes PNG and JSON files
+- **Content Sanitization**: Validates RAG categories (alphanumeric + underscore only)
+- **Size Limits**: Rejects excessively large files
+- **Backup Creation**: Automatic backups during migration operations
+
+**Error Handling**:
+- Graceful degradation for malformed cards
+- Detailed logging for troubleshooting
+- Rollback capability for failed imports
+- Validation warnings without blocking imports
+
+**Normalization Process** (`character_importer.py:104-195`):
+
+1. **Detect Format Variant**:
+   - Check for `spec` and `data` keys (V2 wrapped)
+   - Handle unwrapped V2 (`data` key only)
+   - Handle V1 (flat structure)
+
+2. **Normalize to V2 Structure**:
+   ```python
+   {
+     "spec": "chara_card_v2",
+     "spec_version": "2.0",
+     "data": {
+       "name": "Character Name",
+       "extensions": {
+         "knowledge_domain": {
+           "rag_categories": ["validated", "normalized"]
+         }
+       }
+     }
+   }
+   ```
+
+3. **Validate `rag_categories`**:
+   - Must be a list of strings
+   - Normalize to lowercase
+   - Strip whitespace
+   - Validate alphanumeric + underscore only
+   - Log warnings for invalid entries
+   - Filter out invalid entries
+
+4. **Auto-Compile** (if enabled):
+   - Call `PersonaSystem.compile_persona(char_id, force_recompile=True)`
+   - Save to `prompts/compiled/{char_id}.json`
+   - Return compiled path in result tuple
+
+**CLI Usage**:
+
+```bash
+# Import single card
+python services/persona/character_importer.py character.png --compile
+
+# Import directory
+python services/persona/character_importer.py /path/to/cards/ --compile --verbose
+```
+
+### Hot-Reload Commands
+
+**!reload_characters** - Reload all characters without restart
+
+```python
+# Compares before/after state, shows added/removed characters
+!reload_characters
+# Output:
+# ✅ Reload complete!
+# **Before:** 9 characters
+# **After:** 10 characters
+# **New:** New Character
+# **Active:** Dagoth Ur, Scav, ...
+```
+
+**/import_character** - Import card via Discord slash command
+
+```python
+# Upload PNG/JSON file as attachment
+/import_character file:character.png
+# Automatically:
+# 1. Downloads file
+# 2. Normalizes to V2 format
+# 3. Auto-compiles character
+# 4. Hot-reloads PersonaRouter
+# 5. Character immediately active (no restart needed)
+```
+
+**!import_folder** - Batch import from `data/import_cards/`
+
+```bash
+# Place cards in data/import_cards/, then:
+!import_folder
+# Imports all PNG/JSON files with auto-compilation
+```
+
+### Migration Script - Normalize Existing Characters
+
+**Location**: `/root/acore_bot/scripts/normalize_character_formats.py`
+
+**Purpose**: Scan and normalize existing character files to V2 standard.
+
+**Features**:
+- **Dry-Run Mode**: Preview changes before applying
+- **Automatic Backups**: Saves originals to `prompts/characters/backups/`
+- **Format Detection**: Identifies V1, V2, and malformed cards
+- **Batch Processing**: Normalizes entire directory
+
+**Usage**:
+
+```bash
+# Dry-run (preview only)
+python scripts/normalize_character_formats.py
+
+# Apply fixes
+python scripts/normalize_character_formats.py --apply
+
+# Custom directory
+python scripts/normalize_character_formats.py --dir /custom/path --apply --verbose
+```
+
+**Example Output**:
+
+```
+⚠ dagoth_ur.json: 2 issues detected
+  - rag_categories[0] not normalized: 'Dagoth' should be 'dagoth'
+  - rag_categories[1] has invalid chars: 'Elder Scrolls!'
+  → 2 fixes available
+    • Normalized category: 'Dagoth' -> 'dagoth'
+    • Removed invalid category: 'Elder Scrolls!'
+
+SCAN SUMMARY
+============
+Total files scanned: 12
+Already valid V2: 10
+Need updates: 2
+Errors: 0
+
+💡 Run with --apply to make changes
+```
 
 ## Example: Creating a New Character
 

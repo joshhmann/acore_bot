@@ -1,7 +1,7 @@
 """AI-First Decision Engine - Makes decisions based on framework rules."""
 import logging
 import random
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from datetime import datetime
 from services.persona.system import CompiledPersona
 from services.llm.tools import EnhancedToolSystem

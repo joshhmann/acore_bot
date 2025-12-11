@@ -1,11 +1,12 @@
 """Memory management service for cleaning up old data and optimizing storage."""
+
 import logging
 import asyncio
+import aiofiles
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Dict
 import json
-import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -129,15 +130,17 @@ class MemoryManager:
 
                         # Save to archive
                         async with aiofiles.open(archive_path, "w") as f:
-                            await f.write(json.dumps(
-                                {
-                                    "channel_id": history_file.stem,
-                                    "archived_at": datetime.now().isoformat(),
-                                    "original_modified": mtime.isoformat(),
-                                    "messages": history_data,
-                                },
-                                indent=2
-                            ))
+                            await f.write(
+                                json.dumps(
+                                    {
+                                        "channel_id": history_file.stem,
+                                        "archived_at": datetime.now().isoformat(),
+                                        "original_modified": mtime.isoformat(),
+                                        "messages": history_data,
+                                    },
+                                    indent=2,
+                                )
+                            )
 
                         original_size = history_file.stat().st_size
                         history_file.unlink()
@@ -155,9 +158,7 @@ class MemoryManager:
             stats["errors"] += 1
 
         if stats["conversations_archived"] > 0:
-            logger.info(
-                f"Archived {stats['conversations_archived']} old conversations"
-            )
+            logger.info(f"Archived {stats['conversations_archived']} old conversations")
 
         # Trim old archives if needed
         await self._trim_old_archives()
@@ -201,26 +202,25 @@ class MemoryManager:
             if self.temp_dir.exists():
                 temp_files = list(self.temp_dir.glob("*"))
                 stats["temp_files"] = len(temp_files)
-                stats["temp_size_mb"] = (
-                    sum(f.stat().st_size for f in temp_files if f.is_file())
-                    / (1024 * 1024)
-                )
+                stats["temp_size_mb"] = sum(
+                    f.stat().st_size for f in temp_files if f.is_file()
+                ) / (1024 * 1024)
 
             # History files
             if self.chat_history_dir.exists():
                 history_files = list(self.chat_history_dir.glob("*.json"))
                 stats["history_files"] = len(history_files)
-                stats["history_size_mb"] = (
-                    sum(f.stat().st_size for f in history_files) / (1024 * 1024)
-                )
+                stats["history_size_mb"] = sum(
+                    f.stat().st_size for f in history_files
+                ) / (1024 * 1024)
 
             # Archived files
             if self.archive_dir.exists():
                 archived_files = list(self.archive_dir.glob("*.json"))
                 stats["archived_files"] = len(archived_files)
-                stats["archived_size_mb"] = (
-                    sum(f.stat().st_size for f in archived_files) / (1024 * 1024)
-                )
+                stats["archived_size_mb"] = sum(
+                    f.stat().st_size for f in archived_files
+                ) / (1024 * 1024)
 
         except Exception as e:
             logger.error(f"Error getting memory stats: {e}")

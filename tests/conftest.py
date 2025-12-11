@@ -3,9 +3,8 @@
 import pytest
 import asyncio
 from pathlib import Path
-from unittest.mock import Mock, AsyncMock, MagicMock
+from unittest.mock import Mock, AsyncMock
 import discord
-from config import Config
 
 
 # ============================================================================

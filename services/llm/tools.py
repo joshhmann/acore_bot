@@ -1,9 +1,8 @@
 """Enhanced tool system with anti-hallucination measures."""
 import logging
-import math
 import random
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 import re
 from zoneinfo import ZoneInfo
 
@@ -168,7 +167,7 @@ User: "What's the weather like?"
             tz = ZoneInfo(timezone)
             now = datetime.now(tz)
             return f"{now.strftime('%I:%M %p').lstrip('0')} {timezone}"
-        except Exception as e:
+        except Exception:
             return f"Error: Invalid timezone '{timezone}'. Use format like 'America/New_York'"
 
     def _calculate_time_offset(
@@ -352,7 +351,7 @@ User: "What's the weather like?"
             to_u = to_unit.lower()
 
             if from_u not in to_meters or to_u not in to_meters:
-                return f"Error: Invalid unit. Use: mi, km, m, ft, in"
+                return "Error: Invalid unit. Use: mi, km, m, ft, in"
 
             # Convert to meters, then to target unit
             meters = value * to_meters[from_u]
@@ -376,7 +375,7 @@ User: "What's the weather like?"
             to_u = to_unit.lower()
 
             if from_u not in to_kg or to_u not in to_kg:
-                return f"Error: Invalid unit. Use: kg, lbs, oz, g"
+                return "Error: Invalid unit. Use: kg, lbs, oz, g"
 
             kg = value * to_kg[from_u]
             result = kg / to_kg[to_u]
@@ -404,7 +403,7 @@ User: "What's the weather like?"
         try:
             match = re.match(r"(\d+)d(\d+)([+-]\d+)?", dice.lower())
             if not match:
-                return f"Error: Invalid dice notation. Use format: '2d6' or '1d20+5'"
+                return "Error: Invalid dice notation. Use format: '2d6' or '1d20+5'"
 
             num_dice = int(match.group(1))
             num_sides = int(match.group(2))

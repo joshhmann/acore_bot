@@ -1,7 +1,6 @@
 """Multi-turn conversation manager for complex tasks."""
-import asyncio
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Optional, Callable, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -277,7 +276,7 @@ class MultiTurnConversationManager:
                 del self.active_conversations[channel_id]
                 return {
                     'type': 'failed',
-                    'message': f"Too many invalid attempts. Conversation cancelled. You can start over anytime!"
+                    'message': "Too many invalid attempts. Conversation cancelled. You can start over anytime!"
                 }
 
             return {
