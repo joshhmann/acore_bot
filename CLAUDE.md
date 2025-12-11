@@ -62,12 +62,69 @@ uv sync
 # Run project locally
 uv run python main.py
 
-# Run tests  
-uv run pytest
+# Run tests
+uv run pytest                    # Run all tests
+uv run pytest tests/unit/        # Run unit tests only
+uv run pytest -k test_name        # Run specific test
+uv run pytest -v                  # Verbose output
+uv run pytest --cov=             # Run with coverage
+
+# Performance testing
+./scripts/run_all_tests.sh        # Interactive test menu
+uv run python scripts/test_optimizations.py  # Quick validation (no API)
+uv run python scripts/test_pipeline_timing.py  # Pipeline timing (API calls)
 
 # Deploy locally (Systemd)
 sudo ./install_service.sh
-CRITICAL REMINDER
+```
+
+## Code Style Guidelines
+
+### Imports & Formatting
+- Use `uv run python -m ruff check .` for linting (if ruff is added)
+- Standard library imports first, then third-party, then local imports
+- Use `from typing import Optional, Dict, List` for type hints
+- Maximum line length: 100 characters
+
+### Naming Conventions
+- Classes: `PascalCase` (e.g., `ChatHistoryManager`)
+- Functions/variables: `snake_case` (e.g., `get_history_file`)
+- Constants: `UPPER_SNAKE_CASE` (e.g., `DISCORD_TOKEN`)
+- Private methods: prefix with `_` (e.g., `_cache_cleanup`)
+
+### Error Handling
+- Use specific exception types (`ValueError`, `KeyError`, etc.)
+- Log errors with `logger.error()` before raising
+- Use `try/except` blocks for external API calls
+- Return `Optional[T]` for functions that may not return a value
+
+### Async/Await
+- All Discord interactions and external API calls must be async
+- Use `async def` for coroutine functions
+- Use `await` for async operations
+- Use `asyncio.gather()` for concurrent operations
+
+### Documentation
+- Module docstrings at top of every file
+- Class docstrings explaining purpose and usage
+- Method docstrings with Args/Returns sections
+- Use `"""Triple quotes"""` for docstrings
+
+## Documentation Strategy
+
+**CRITICAL RULE: STOP CREATING NEW DOC FILES.**
+We avoid clutter ("a ton of docs laying around") by updating central, living documentation.
+
+1.  **Do NOT create new implementation summary files** (e.g., `T05_Implementation_Summary.md`) for every small task.
+2.  **Update Existing Docs**:
+    *   **Features**: Update files in `docs/features/` with new details.
+    *   **Status**: Update `docs/STATUS.md` to reflect progress.
+    *   **Reports**: Only use `docs/reports/` for immutable snapshots (reviews, major checkpoints).
+3.  **Temporary Files**: If you create a plan (`.agent/plan.md`), **DELETE IT** when the task is done.
+4.  **Code is Documentation**: Prioritize excellent docstrings and type hints over external markdown files.
+
+
+# CRITICAL REMINDER
 You CANNOT proceed without adopting a persona. Each persona has:
 
 Specific workflows and rules

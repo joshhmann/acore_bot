@@ -618,6 +618,19 @@ class ChatCog(commands.Cog):
                 config={},
             )
 
+        # 4.5. Multi-Persona Interaction Instructions
+        # If this is a multi-persona trigger, inject instructions to mention the other persona
+        if selected_persona and selected_persona in self.message_handler._persona_other_personas:
+            other_personas = self.message_handler._persona_other_personas[selected_persona]
+            other_names = [p.character.display_name for p in other_personas]
+            multi_persona_instruction = (
+                f"\n\n[IMPORTANT INSTRUCTION]: The user asked you to discuss this with {', '.join(other_names)}. "
+                f"Make sure to ADDRESS or MENTION {other_names[0]} in your response so they can respond. "
+                f"Keep it natural and conversational."
+            )
+            user_context_str += multi_persona_instruction
+            logger.info(f"Injected multi-persona instruction to mention: {other_names}")
+
         # 5. Build Final Messages
         final_messages = await self.context_manager.build_context(
             persona=persona_to_use,
@@ -649,6 +662,19 @@ class ChatCog(commands.Cog):
         Returns:
             Selected persona object or None
         """
+        # For MULTI-PERSONA triggers, pick the first mentioned and instruct to mention others
+        if response_reason == "multi_persona_trigger" and original_message:
+            if original_message.id in self.message_handler._multiagent_personas:
+                mentioned_personas = self.message_handler._multiagent_personas[original_message.id]
+                # First persona responds
+                selected_persona = mentioned_personas[0]
+                # Store others for mention injection (store in message_handler dict)
+                self.message_handler._persona_other_personas[selected_persona] = mentioned_personas[1:]
+                logger.info(
+                    f"Multi-Persona: {selected_persona.character.display_name} will respond and mention {[p.character.display_name for p in mentioned_personas[1:]]}"
+                )
+                return selected_persona
+        
         # For BANTER responses, pick a DIFFERENT persona (not the one who just spoke)
         if response_reason == "persona_banter" and original_message:
             speaker_name = original_message.author.display_name.lower()

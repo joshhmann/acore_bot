@@ -19,6 +19,8 @@ class ContextManager:
         """Initialize context manager."""
         # Cache encoders to avoid re-initialization
         self._encoders = {}
+        # T19: Framework Blending (Lazy loaded)
+        self.framework_blender = None
 
     def _get_encoder(self, model_name: str):
         """Get tiktoken encoder for a model."""
@@ -66,6 +68,41 @@ class ContextManager:
                 count += len(encoder.encode(msg["name"]))
 
         return count
+
+    def _get_contagion_prompt_modifier(self, modifier: str, intensity: float) -> str:
+        """Generate emotional contagion prompt modifier based on user sentiment.
+        
+        T21-T22: Emotional Contagion System
+        
+        Args:
+            modifier: Type of contagion (empathetic, enthusiastic, balanced)
+            intensity: Strength of contagion effect (0.0-1.0)
+            
+        Returns:
+            Prompt text to inject into system prompt
+        """
+        if modifier == "empathetic":
+            # User is consistently sad/frustrated - be more supportive
+            base_text = "\n\n[EMOTIONAL GUIDANCE]\nThe user has been expressing sadness or frustration recently. "
+            if intensity > 0.7:
+                return base_text + "Be especially gentle, supportive, and understanding in your responses. Offer empathy and encouragement."
+            elif intensity > 0.5:
+                return base_text + "Be more compassionate and supportive in your responses. Show understanding of their situation."
+            else:
+                return base_text + "Be somewhat more gentle and understanding in your responses."
+                
+        elif modifier == "enthusiastic":
+            # User is consistently happy/excited - match their energy
+            base_text = "\n\n[EMOTIONAL GUIDANCE]\nThe user has been expressing happiness and energy recently. "
+            if intensity > 0.7:
+                return base_text + "Match their enthusiasm with energetic, positive, and engaging responses. Share their excitement!"
+            elif intensity > 0.5:
+                return base_text + "Be more upbeat and energetic in your responses. Share in their positive mood."
+            else:
+                return base_text + "Be slightly more cheerful and positive in your responses."
+                
+        else:  # balanced
+            return ""  # No modifier needed for balanced state
 
     async def build_context(
         self,
@@ -142,6 +179,50 @@ class ContextManager:
         # Combine all system-level content
         full_system_content = system_content + "\n".join(context_additions)
 
+        # T19: Framework Blending - Apply dynamic behavioral adaptations
+        if persona.blend_data:
+            try:
+                # Lazy load blender
+                if not self.framework_blender:
+                    from services.persona.framework_blender import FrameworkBlender
+                    self.framework_blender = FrameworkBlender()
+                
+                # Check context via last user message
+                last_user_msg = None
+                # Use history to find last user message (skip recent system messages)
+                for m in reversed(history):
+                    if m.get("role") == "user":
+                        last_user_msg = m.get("content", "")
+                        break
+                
+                if last_user_msg:
+                    context = self.framework_blender.detect_context(last_user_msg)
+                    if context:
+                        # Check rules for this context
+                        rules = persona.blend_data.get("rules", [])
+                        cached_prompts = persona.blend_data.get("cached_prompts", {})
+                        
+                        for rule in rules:
+                            if rule.get("context") == context:
+                                target_fw_id = rule.get("framework")
+                                target_prompt = cached_prompts.get(target_fw_id)
+                                
+                                if target_prompt:
+                                    weight = rule.get("weight", 1.0)
+                                    full_system_content = self.framework_blender.blend_framework(
+                                        full_system_content,
+                                        target_prompt,
+                                        context,
+                                        weight
+                                    )
+                                    logger.debug(
+                                        f"Framework Blending: Applied {target_fw_id} for context {context} "
+                                        f"(weight: {weight})"
+                                    )
+                                    break # Only apply one blend rule priority
+            except Exception as e:
+                logger.error(f"Error applying framework blending: {e}")
+
         # T13: Add Character Evolution modifier
         try:
             from services.persona.evolution import PersonaEvolutionTracker
@@ -188,6 +269,35 @@ class ContextManager:
                                 break  # Only apply one conflict modifier
         except Exception as e:
             logger.debug(f"Conflict modifier not applied: {e}")
+
+        # T21-T22: Add Emotional Contagion modifier
+        # This adjusts the bot's emotional tone based on user sentiment trends
+        try:
+            # Access behavior state if available through llm_service
+            if llm_service and hasattr(llm_service, "bot"):
+                chat_cog = llm_service.bot.get_cog("ChatCog")
+                if chat_cog and hasattr(chat_cog, "behavior_engine"):
+                    behavior_engine = chat_cog.behavior_engine
+                    # Get behavior state from most recent message in history
+                    # (assumes behavior_engine tracks state per channel)
+                    if history:
+                        # Try to infer channel_id from context (not ideal, but works)
+                        # Better: pass channel_id explicitly to build_context
+                        for channel_id, state in behavior_engine.states.items():
+                            if state.contagion_active:
+                                contagion_text = self._get_contagion_prompt_modifier(
+                                    state.contagion_modifier,
+                                    state.contagion_intensity
+                                )
+                                if contagion_text:
+                                    full_system_content += contagion_text
+                                    logger.debug(
+                                        f"Applied emotional contagion: {state.contagion_modifier} "
+                                        f"(intensity: {state.contagion_intensity:.2f})"
+                                    )
+                                break  # Only apply once
+        except Exception as e:
+            logger.debug(f"Emotional contagion modifier not applied: {e}")
 
         # MULTI-PERSONA STABILITY FIX
         # Explicitly instruct the model to ignore identity bleeding from previous turns

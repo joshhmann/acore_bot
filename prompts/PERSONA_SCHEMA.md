@@ -1388,3 +1388,75 @@ If `rag_categories` is omitted or empty, the character will access ALL RAG docum
 
 **See Also:** `docs/RAG_PERSONA_FILTERING.md` for complete guide.
 
+
+---
+
+### 13. Framework Blending (T19-T20)
+
+```json
+"extensions": {
+  "framework_blending": {
+    "enabled": true,
+    "blend_rules": [
+      {
+        "context": "emotional_support",
+        "framework": "caring_assistant",
+        "weight": 0.8
+      },
+      {
+        "context": "creative_task",
+        "framework": "creative_writer",
+        "weight": 0.6
+      }
+    ]
+  }
+}
+```
+
+**What this does:**
+- Dynamically blends behavioral frameworks based on conversation context
+- Allows a persona to adopt traits from other frameworks temporarily
+
+**Fields:**
+- `enabled`: Toggle blending on/off
+- `blend_rules`: List of rules mapping context to frameworks
+  - `context`: Trigger context ("emotional_support", "creative_task", etc.)
+  - `framework`: ID of the framework to blend in (must exist in `prompts/frameworks/`)
+  - `weight`: Strength of the blend (0.0 - 1.0)
+    - `0.8+`: High priority override
+    - `0.5+`: Medium integration
+    - `<0.5`: Subtle influence
+
+**Supported Contexts:**
+- `emotional_support`: User is sad, venting, or asking for help
+- `creative_task`: Brainstorming, writing, drawing ideas
+- `analytical_task`: Coding, math, logic puzzles
+- `playful_chat`: Jokes, memes, fun banter
+- `debate`: Arguments, disagreements, persuasive discussions
+
+---
+
+### 14. Emotional Contagion (T21-T22)
+
+**Note**: This system is enabled by default in `BehaviorEngine` but can be configured here.
+
+```json
+"extensions": {
+  "emotional_contagion": {
+    "enabled": true,
+    "sensitivity": 0.5,
+    "history_length": 10
+  }
+}
+```
+
+**What this does:**
+- Tracks user sentiment trends (last 10 messages)
+- Adapts bot's emotional tone to match or support user state
+- **Sad User** → Empathetic, gentle response
+- **Happy User** → Enthusiastic, energetic response
+
+**Fields (Optional - Defaults apply if omitted):**
+- `enabled`: Toggle contagion
+- `sensitivity`: How easily contagion triggers (0.0-1.0)
+- `history_length`: Number of user messages to track for sentiment trends

@@ -17,6 +17,8 @@ class MessageHandler:
     def __init__(self, cog: commands.Cog):
         self.cog = cog
         self._processed_messages = {}
+        self._multiagent_personas = {}  # message_id -> list of mentioned personas
+        self._persona_other_personas = {}  # selected_persona -> list of other personas to mention
 
     async def _track_interesting_topic(
         self, message: discord.Message, bot_response: str, conversation_history: list
@@ -287,10 +289,10 @@ JSON only:"""
             except Exception as e:
                 logger.warning(f"Unexpected error fetching referenced message: {e}")
 
-        # 3. Name trigger (ALWAYS respond)
-        # Initialize bot_names for debug logging even if we skip this block
-        bot_names = [self.cog.bot.user.name.lower(), "bot", "computer", "assistant"]
+        # 3. Name trigger (ALWAYS respond) - WORKS FOR ALL USERS NOW
         if not should_respond:
+            # Build list of all recognizable names
+            bot_names = [self.cog.bot.user.name.lower(), "bot", "computer", "assistant"]
 
             # Add first name
             if " " in self.cog.bot.user.name:
@@ -301,14 +303,18 @@ JSON only:"""
                 if message.guild.me.nick:
                     bot_names.append(message.guild.me.nick.lower())
 
-            # Add known persona names (from router) - INTERACTION LOGIC
+            # Build persona name mapping (name -> persona object)
+            persona_name_map = {}
             if hasattr(self.cog, "persona_router"):
                  for p in self.cog.persona_router.get_all_personas():
                       p_name = p.character.display_name
                       if p_name:
                            bot_names.append(p_name.lower())
+                           persona_name_map[p_name.lower()] = p
                            if " " in p_name:
-                               bot_names.append(p_name.split(" ")[0].lower())
+                               first_name = p_name.split(" ")[0].lower()
+                               bot_names.append(first_name)
+                               persona_name_map[first_name] = p
             
             # Fallback to current
             if self.cog.current_persona:
@@ -322,13 +328,43 @@ JSON only:"""
                          if p_name.split(" ")[0].lower() not in bot_names:
                              bot_names.append(p_name.split(" ")[0].lower())
 
-        content_lower = message.content.lower()
-        
-        # DEBUG: Trace Persona Detection
-        logger.debug(f"Handling msg from {message.author.display_name}. IsPersona: {is_persona_message}. Known: {bot_names}")
+            content_lower = message.content.lower()
+            
+            # DEBUG: Trace Persona Detection
+            logger.debug(f"Handling msg from {message.author.display_name}. IsPersona: {is_persona_message}. Known names: {bot_names}")
+            
+            # Detect ALL mentioned personas (for multi-persona interactions)
+            mentioned_personas = []
+            for name in bot_names:
+                if name in content_lower and name in persona_name_map:
+                    persona = persona_name_map[name]
+                    # Avoid duplicates
+                    if persona not in mentioned_personas:
+                        mentioned_personas.append(persona)
+            
+            # Check if any character name is mentioned in message
+            if any(name in content_lower for name in bot_names):
+                should_respond = True
+                response_reason = "name_trigger"
+                suggested_style = "direct"
+                
+                # If multiple personas mentioned, set up multi-persona interaction
+                if len(mentioned_personas) > 1:
+                    response_reason = "multi_persona_trigger"
+                    # Store metadata for persona selection
+                    self._multiagent_personas[message.id] = mentioned_personas  # Store for later
+                    logger.info(
+                        f"Multi-persona trigger detected: {[p.character.display_name for p in mentioned_personas]} in '{message.content[:50]}...'"
+                    )
+                else:
+                    logger.info(
+                        f"Name trigger detected: '{message.content[:50]}...' mentioned a character name"
+                    )
         
         # LOOP PREVENTION: If this is a persona message, apply strict chance decay
-        if is_persona_message:
+        # This runs AFTER name detection so personas can still respond to callouts
+        # but prevents infinite back-and-forth
+        if is_persona_message and should_respond:
             # Prevent self-response (Persona responding to its own Webhook)
             curr_p = self.cog.current_persona
             current_name = ""
@@ -338,31 +374,21 @@ JSON only:"""
                  current_name = getattr(curr_p, "display_name", "")
             
             if current_name and message.author.display_name == current_name:
+                logger.debug(f"Loop Prevention: {current_name} won't respond to self")
                 return False
             
             # Base chance of replying to another persona is 50% even if mentioned
             # This breaks infinite "reply-chains" eventually
             if random.random() > 0.5:
                 # Force ignore (simulated "busy" or "ignored")
-                # SAFELY access display_name
                 curr_p = self.cog.current_persona
                 if hasattr(curr_p, "character"):
                     p_name = curr_p.character.display_name
                 else:
                     p_name = getattr(curr_p, "display_name", "Bot")
                 
-                logger.info(f"Loop Prevention: {p_name} ignored {message.author.display_name}")
+                logger.info(f"Loop Prevention: {p_name} ignored {message.author.display_name} (50% decay)")
                 return False
-
-            content_lower = message.content.lower()
-            # Check if name is in message
-            if any(name in content_lower for name in bot_names):
-                should_respond = True
-                response_reason = "name_trigger"
-                suggested_style = "direct"
-                logger.info(
-                    f"Message triggered by name mention: {message.content[:20]}..."
-                )
 
         # 4. Image reference / Question about attachment (ALWAYS respond)
         if not should_respond:

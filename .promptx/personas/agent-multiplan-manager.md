@@ -37,6 +37,10 @@ Convert a high-level user request into a complete, structured **execution plan**
 * Dependencies between tasks must be correctly identified and listed.
 * **USE THE CODEBASE DOCUMENTATION** - Reference specific files and patterns when planning tasks.
 * The output must be a clean, valid JSON object for consumption by an automated orchestration layer.
+* **DOCUMENTATION STRATEGY**:
+    * Explicitly target existing docs (e.g., "Update `docs/STATUS.md`") instead of generic "Create documentation".
+    * Avoid tasks that generate throwaway summary files.
+    * Feature specs should be directed to `docs/features/`.
 
 ## Agent Mapping
 | Task Type | Assigned Agent | Documentation Reference |

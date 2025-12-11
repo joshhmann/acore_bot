@@ -110,6 +110,20 @@ sudo ./install_service.sh
 - Method docstrings with Args/Returns sections
 - Use `"""Triple quotes"""` for docstrings
 
+## Documentation Strategy
+
+**CRITICAL RULE: STOP CREATING NEW DOC FILES.**
+We avoid clutter ("a ton of docs laying around") by updating central, living documentation.
+
+1.  **Do NOT create new implementation summary files** (e.g., `T05_Implementation_Summary.md`) for every small task.
+2.  **Update Existing Docs**:
+    *   **Features**: Update files in `docs/features/` with new details.
+    *   **Status**: Update `docs/STATUS.md` to reflect progress.
+    *   **Reports**: Only use `docs/reports/` for immutable snapshots (reviews, major checkpoints).
+3.  **Temporary Files**: If you create a plan (`.agent/plan.md`), **DELETE IT** when the task is done.
+4.  **Code is Documentation**: Prioritize excellent docstrings and type hints over external markdown files.
+
+
 # CRITICAL REMINDER
 You CANNOT proceed without adopting a persona. Each persona has:
 

@@ -58,6 +58,8 @@ class Character:
     evolution_stages: List[Dict[str, Any]] = field(default_factory=list)
     # T17: Activity-Based Persona Switching
     activity_preferences: Dict[str, List[str]] = field(default_factory=dict)
+    # T19: Framework Blending - Rules for dynamic persona adaptation
+    framework_blending: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -70,6 +72,8 @@ class CompiledPersona:
     system_prompt: str
     tools_required: List[str]
     config: Dict[str, Any]
+    # T19: Framework Blending
+    blend_data: Optional[Dict[str, Any]] = None  # Stores rules and cached framework prompts
 
 
 class PersonaSystem:
@@ -295,6 +299,9 @@ class PersonaSystem:
         # T17: Extract activity preferences
         activity_preferences = extensions.get("activity_preferences", {})
 
+        # T19: Framework Blending
+        framework_blending = extensions.get("framework_blending", {})
+
         # Validate rag_categories format
         if "rag_categories" in knowledge_domain:
             cats = knowledge_domain["rag_categories"]
@@ -356,6 +363,8 @@ class PersonaSystem:
             evolution_stages=evolution_stages,
             # T17: Activity-Based Persona Switching
             activity_preferences=activity_preferences,
+            # T19: Framework Blending
+            framework_blending=framework_blending,
         )
         return character
 
@@ -442,6 +451,34 @@ class PersonaSystem:
                     "framework": None,
                 }
 
+            # T19: Process Framework Blending
+            blend_data = None
+            if character.framework_blending and character.framework_blending.get("enabled"):
+                try:
+                    rules = character.framework_blending.get("blend_rules", [])
+                    cached_frameworks = {}
+                    
+                    for rule in rules:
+                        target_fw_id = rule.get("framework")
+                        if target_fw_id and target_fw_id not in cached_frameworks:
+                            # Load target framework prompt
+                            fw = self.load_framework(target_fw_id)
+                            if fw:
+                                cached_frameworks[target_fw_id] = fw.prompt_template
+                            else:
+                                logger.warning(f"Blend target framework not found: {target_fw_id}")
+                    
+                    if cached_frameworks:
+                        blend_data = {
+                            "base_framework_id": framework.framework_id if framework else "none",
+                            "rules": rules,
+                            "cached_prompts": cached_frameworks
+                        }
+                        logger.info(f"Enabled framework blending for {character_id} with {len(cached_frameworks)} frameworks")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing framework blending: {e}")
+
             # Compile persona
             persona = CompiledPersona(
                 persona_id=persona_id,
@@ -450,6 +487,7 @@ class PersonaSystem:
                 system_prompt=system_prompt,
                 tools_required=tools_required,
                 config=config,
+                blend_data=blend_data,
             )
 
             # Cache it

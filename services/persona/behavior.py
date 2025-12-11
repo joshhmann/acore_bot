@@ -61,6 +61,14 @@ class BehaviorState:
         default_factory=lambda: deque(maxlen=20)
     )  # Track asked topics to avoid repetition
 
+    # T21-T22: Emotional Contagion System
+    sentiment_history: deque = field(
+        default_factory=lambda: deque(maxlen=10)
+    )  # Track last 10 user sentiment scores (-1.0 to 1.0)
+    contagion_active: bool = False  # Whether emotional contagion is currently active
+    contagion_modifier: str = "balanced"  # empathetic, enthusiastic, balanced
+    contagion_intensity: float = 0.0  # 0.0-1.0, strength of contagion effect
+
 
 class BehaviorEngine:
     """
@@ -533,6 +541,58 @@ Topics:"""
             state.mood_intensity = max(0.0, min(1.0, state.mood_intensity))
 
         state.last_mood_update = now
+
+        # T21-T22: Track user sentiment for emotional contagion
+        # Only track sentiment from actual users (not bots/webhooks)
+        if not message.author.bot and not message.webhook_id:
+            state.sentiment_history.append(sentiment_score)
+            
+            # Update emotional contagion if we have enough history
+            if len(state.sentiment_history) >= 5:
+                self._update_emotional_contagion(state)
+
+    def _update_emotional_contagion(self, state: BehaviorState):
+        """Calculate and update emotional contagion based on user sentiment trends.
+        
+        T21-T22: Emotional Contagion System
+        This makes the bot more emotionally intelligent by detecting prolonged
+        user emotional states and adapting its tone accordingly.
+        
+        - Consistently sad user → Bot becomes more empathetic and supportive
+        - Consistently happy user → Bot becomes more energetic and enthusiastic
+        - Neutral/mixed → Bot maintains balanced tone
+        
+        Performance: <0.1ms (simple average calculation)
+        """
+        # Calculate average sentiment over recent messages
+        avg_sentiment = sum(state.sentiment_history) / len(state.sentiment_history)
+        
+        # Determine contagion state based on average sentiment
+        old_modifier = state.contagion_modifier
+        
+        if avg_sentiment < -0.3:  # Consistently negative (sad, frustrated)
+            state.contagion_active = True
+            state.contagion_modifier = "empathetic"
+            state.contagion_intensity = min(1.0, abs(avg_sentiment))
+            
+        elif avg_sentiment > 0.3:  # Consistently positive (happy, excited)
+            state.contagion_active = True
+            state.contagion_modifier = "enthusiastic"
+            state.contagion_intensity = min(1.0, avg_sentiment)
+            
+        else:  # Neutral or mixed sentiments
+            state.contagion_active = False
+            state.contagion_modifier = "balanced"
+            state.contagion_intensity = 0.0
+        
+        # Log contagion changes
+        if old_modifier != state.contagion_modifier and state.contagion_active:
+            logger.debug(
+                f"Emotional contagion activated: {state.contagion_modifier} "
+                f"(intensity: {state.contagion_intensity:.2f}, avg_sentiment: {avg_sentiment:.2f})"
+            )
+        elif not state.contagion_active and old_modifier != "balanced":
+            logger.debug("Emotional contagion deactivated (sentiment neutral)")
 
     async def _tick_loop(self):
         """Periodic loop to check for ambient opportunities."""
