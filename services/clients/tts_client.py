@@ -1,4 +1,5 @@
 """Kokoro API client for using Kokoro-FastAPI backend."""
+
 import logging
 from pathlib import Path
 from typing import Optional
@@ -38,6 +39,8 @@ class KokoroAPIClient:
         """Close the aiohttp session."""
         if self.session and not self.session.closed:
             await self.session.close()
+            self.session = None
+
 
     def is_available(self) -> bool:
         """Check if Kokoro API is available.
@@ -52,7 +55,9 @@ class KokoroAPIClient:
             async def check():
                 session = await self._get_session()
                 try:
-                    async with session.get(f"{self.api_url}/health", timeout=aiohttp.ClientTimeout(total=2)) as resp:
+                    async with session.get(
+                        f"{self.api_url}/health", timeout=aiohttp.ClientTimeout(total=2)
+                    ) as resp:
                         return resp.status == 200
                 except (aiohttp.ClientError, asyncio.TimeoutError) as e:
                     logger.debug(f"Health check failed: {e}")
@@ -74,9 +79,17 @@ class KokoroAPIClient:
         """
         # Return known Kokoro voices
         return [
-            "af_bella", "af_sarah", "af_nicole", "af_sky",
-            "am_adam", "am_michael", "bm_george", "bm_lewis",
-            "bf_emma", "bf_isabella", "am_onyx",
+            "af_bella",
+            "af_sarah",
+            "af_nicole",
+            "af_sky",
+            "am_adam",
+            "am_michael",
+            "bm_george",
+            "bm_lewis",
+            "bf_emma",
+            "bf_isabella",
+            "am_onyx",
         ]
 
     async def generate(
@@ -118,7 +131,7 @@ class KokoroAPIClient:
             async with session.post(
                 f"{self.api_url}/v1/audio/speech",
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=30)
+                timeout=aiohttp.ClientTimeout(total=30),
             ) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()

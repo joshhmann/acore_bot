@@ -4,13 +4,13 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
-from typing import Optional
+from typing import Optional, Any, AsyncGenerator
 from pathlib import Path
 import time
 import asyncio
 
 from config import Config
-from services.llm.ollama import OllamaService
+from services.interfaces.llm_interface import LLMInterface
 
 # Intent system removed - now AI-first with LLM tool calling
 # from services.intent_recognition import IntentRecognitionService, ConversationalResponder
@@ -46,18 +46,18 @@ class ChatCog(commands.Cog):
     def __init__(
         self,
         bot: commands.Bot,
-        ollama: OllamaService,
+        ollama: LLMInterface,
         history_manager: ChatHistoryManager,
-        user_profiles=None,
-        summarizer=None,
-        web_search=None,
-        rag=None,
-        conversation_manager=None,
-        persona_system=None,
-        compiled_persona=None,
-        llm_fallback=None,
-        persona_relationships=None,
-    ):
+        user_profiles: Optional[Any] = None,
+        summarizer: Optional[Any] = None,
+        web_search: Optional[Any] = None,
+        rag: Optional[Any] = None,
+        conversation_manager: Optional[Any] = None,
+        persona_system: Optional[Any] = None,
+        compiled_persona: Optional[Any] = None,
+        llm_fallback: Optional[Any] = None,
+        persona_relationships: Optional[Any] = None,
+    ) -> None:
         """Initialize chat cog."""
         self.bot = bot
         # Core services
@@ -76,8 +76,8 @@ class ChatCog(commands.Cog):
             persona_relationships  # Persona-to-persona affinity
         )
 
-        # Behavior Engine (Unified AI Brain)
-        # self.behavior_engine = behavior_engine # This is passed in now
+        # Behavior Engine (Unified AI Brain) - Will be initialized in _async_init
+        self.behavior_engine = None
 
         # Persona Router (Multi-Character System)
         from services.persona.router import PersonaRouter
@@ -110,7 +110,11 @@ class ChatCog(commands.Cog):
 
         # 2. Initialize Logic Services
         self.context_manager = ContextManager()
-        self.lorebook_service = LorebookService()
+        self.lorebook_service = LorebookService(
+            semantic_threshold=Config.SEMANTIC_LOREBOOK_THRESHOLD,
+            enable_semantic=Config.SEMANTIC_LOREBOOK_ENABLED,
+            max_cache_size=Config.SEMANTIC_LOREBOOK_CACHE_SIZE,
+        )
 
         from services.memory.context_router import ContextRouter
 
@@ -620,8 +624,13 @@ class ChatCog(commands.Cog):
 
         # 4.5. Multi-Persona Interaction Instructions
         # If this is a multi-persona trigger, inject instructions to mention the other persona
-        if selected_persona and selected_persona in self.message_handler._persona_other_personas:
-            other_personas = self.message_handler._persona_other_personas[selected_persona]
+        if (
+            selected_persona
+            and selected_persona in self.message_handler._persona_other_personas
+        ):
+            other_personas = self.message_handler._persona_other_personas[
+                selected_persona.persona_id
+            ]
             other_names = [p.character.display_name for p in other_personas]
             multi_persona_instruction = (
                 f"\n\n[IMPORTANT INSTRUCTION]: The user asked you to discuss this with {', '.join(other_names)}. "
@@ -665,16 +674,21 @@ class ChatCog(commands.Cog):
         # For MULTI-PERSONA triggers, pick the first mentioned and instruct to mention others
         if response_reason == "multi_persona_trigger" and original_message:
             if original_message.id in self.message_handler._multiagent_personas:
-                mentioned_personas = self.message_handler._multiagent_personas[original_message.id]
+                mentioned_personas = self.message_handler._multiagent_personas[
+                    original_message.id
+                ]
                 # First persona responds
                 selected_persona = mentioned_personas[0]
                 # Store others for mention injection (store in message_handler dict)
-                self.message_handler._persona_other_personas[selected_persona] = mentioned_personas[1:]
+                # Use persona_id as key since CompiledPersona objects are not hashable
+                self.message_handler._persona_other_personas[
+                    selected_persona.persona_id
+                ] = mentioned_personas[1:]
                 logger.info(
                     f"Multi-Persona: {selected_persona.character.display_name} will respond and mention {[p.character.display_name for p in mentioned_personas[1:]]}"
                 )
                 return selected_persona
-        
+
         # For BANTER responses, pick a DIFFERENT persona (not the one who just spoke)
         if response_reason == "persona_banter" and original_message:
             speaker_name = original_message.author.display_name.lower()

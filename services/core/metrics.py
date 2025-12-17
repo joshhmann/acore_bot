@@ -4,7 +4,7 @@ import time
 import logging
 from collections import defaultdict, deque
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, TypedDict, Any
+from typing import Dict, List, Optional, Any
 import asyncio
 import json
 from pathlib import Path
@@ -53,10 +53,14 @@ class MetricsService:
         }
 
         # Error tracking
+        from config import Config
+
         self.error_counts = {
             "total_errors": 0,
             "by_type": defaultdict(int),
             "recent_errors": deque(maxlen=20),  # Last 20 errors with timestamps
+            "error_spike_threshold": 10,  # Errors per minute to consider spike
+            "error_spike_window": Config.ERROR_SPIKE_WINDOW_SECONDS,
         }
 
         # Active tracking (reset hourly to prevent unbounded growth)
@@ -227,6 +231,76 @@ class MetricsService:
         if total_messages == 0:
             return 0.0
         return (self.error_counts["total_errors"] / total_messages) * 100
+
+    def check_error_spike(self) -> Optional[Dict[str, Any]]:
+        """Check if there's an error spike in the recent window.
+
+        Returns:
+            Dict with spike info if spike detected, None otherwise
+        """
+        now = datetime.now()
+        spike_threshold = self.error_counts["error_spike_threshold"]
+        spike_window = self.error_counts["error_spike_window"]
+
+        # Count errors in the window
+        recent_errors = 0
+        for error in self.error_counts["recent_errors"]:
+            error_time = datetime.fromisoformat(error["timestamp"])
+            if (now - error_time).total_seconds() <= spike_window:
+                recent_errors += 1
+
+        if recent_errors >= spike_threshold:
+            return {
+                "timestamp": now.isoformat(),
+                "error_count": recent_errors,
+                "window_seconds": spike_window,
+                "threshold": spike_threshold,
+                "error_types": self._get_error_type_breakdown(spike_window),
+            }
+
+        return None
+
+    def _get_error_type_breakdown(self, window_seconds: int) -> Dict[str, int]:
+        """Get breakdown of error types in recent window.
+
+        Args:
+            window_seconds: Time window in seconds
+
+        Returns:
+            Dict of error type counts
+        """
+        now = datetime.now()
+        type_counts = defaultdict(int)
+
+        for error in self.error_counts["recent_errors"]:
+            error_time = datetime.fromisoformat(error["timestamp"])
+            if (now - error_time).total_seconds() <= window_seconds:
+                type_counts[error["type"]] += 1
+
+        return dict(type_counts)
+
+    def get_error_health_score(self) -> float:
+        """Calculate overall error health score (0-100).
+
+        Returns:
+            Health score where 100 = perfect, 0 = critical
+        """
+        if self.error_counts["total_errors"] == 0:
+            return 100.0
+
+        # Base score from error rate
+        error_rate = self._calculate_error_rate()
+        base_score = max(0, 100 - (error_rate * 2))  # 5% error rate = 90 score
+
+        # Penalty for recent spikes
+        spike_penalty = 0
+        spike = self.check_error_spike()
+        if spike:
+            # Penalty based on how much we exceeded threshold
+            excess = spike["error_count"] - spike["threshold"]
+            spike_penalty = min(30, excess * 3)  # Max 30 point penalty
+
+        return max(0, base_score - spike_penalty)
 
     # Active stats tracking
     def record_message(self, user_id: int, channel_id: int):
@@ -675,6 +749,39 @@ class MetricsService:
             "batch_task_running": self._batch_task is not None
             and not self._batch_task.done(),
         }
+
+    async def shutdown(self):
+        """Graceful shutdown of metrics service.
+
+        Saves all pending data and stops background tasks.
+        """
+        logger.info("Shutting down metrics service...")
+
+        # Stop background tasks
+        if self._reset_task and not self._reset_task.done():
+            self._reset_task.cancel()
+            try:
+                await self._reset_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Stopped hourly reset task")
+
+        if self._batch_task and not self._batch_task.done():
+            await self.stop_batch_flush_task()
+
+        # Flush any remaining events
+        if self.pending_events:
+            logger.info(f"Flushing {len(self.pending_events)} pending events...")
+            await self._flush_events()
+
+        # Save final metrics snapshot
+        try:
+            self.save_metrics_to_file("shutdown_metrics.json")
+            logger.info("✓ Final metrics snapshot saved")
+        except Exception as e:
+            logger.error(f"Failed to save final metrics: {e}")
+
+        logger.info("Metrics service shutdown complete")
 
     def load_metrics_from_file(self, filename: str) -> Optional[Dict]:
         """Load metrics from a file.

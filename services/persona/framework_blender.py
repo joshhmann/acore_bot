@@ -7,7 +7,7 @@ when the user is sad, or 'Chaotic' traits during creative tasks.
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 

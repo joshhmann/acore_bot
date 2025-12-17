@@ -546,45 +546,45 @@ Topics:"""
         # Only track sentiment from actual users (not bots/webhooks)
         if not message.author.bot and not message.webhook_id:
             state.sentiment_history.append(sentiment_score)
-            
+
             # Update emotional contagion if we have enough history
             if len(state.sentiment_history) >= 5:
                 self._update_emotional_contagion(state)
 
     def _update_emotional_contagion(self, state: BehaviorState):
         """Calculate and update emotional contagion based on user sentiment trends.
-        
+
         T21-T22: Emotional Contagion System
         This makes the bot more emotionally intelligent by detecting prolonged
         user emotional states and adapting its tone accordingly.
-        
+
         - Consistently sad user → Bot becomes more empathetic and supportive
         - Consistently happy user → Bot becomes more energetic and enthusiastic
         - Neutral/mixed → Bot maintains balanced tone
-        
+
         Performance: <0.1ms (simple average calculation)
         """
         # Calculate average sentiment over recent messages
         avg_sentiment = sum(state.sentiment_history) / len(state.sentiment_history)
-        
+
         # Determine contagion state based on average sentiment
         old_modifier = state.contagion_modifier
-        
+
         if avg_sentiment < -0.3:  # Consistently negative (sad, frustrated)
             state.contagion_active = True
             state.contagion_modifier = "empathetic"
             state.contagion_intensity = min(1.0, abs(avg_sentiment))
-            
+
         elif avg_sentiment > 0.3:  # Consistently positive (happy, excited)
             state.contagion_active = True
             state.contagion_modifier = "enthusiastic"
             state.contagion_intensity = min(1.0, avg_sentiment)
-            
+
         else:  # Neutral or mixed sentiments
             state.contagion_active = False
             state.contagion_modifier = "balanced"
             state.contagion_intensity = 0.0
-        
+
         # Log contagion changes
         if old_modifier != state.contagion_modifier and state.contagion_active:
             logger.debug(
@@ -1008,9 +1008,13 @@ Reply naturally as {self.current_persona.character.display_name}. Keep it short 
 
         curiosity_chance = curiosity_probabilities.get(curiosity_level, 0.30)
 
-        # 1. Check follow-up cooldown (max 1 question per 5 minutes)
+        # 1. Check follow-up cooldown (max 1 question per configured interval)
+        from config import Config
+
         now = datetime.now()
-        if (now - state.last_followup_time).total_seconds() < 300:  # 5 minutes
+        if (
+            now - state.last_followup_time
+        ).total_seconds() < Config.PERSONA_FOLLOWUP_COOLDOWN:
             return None
 
         # 2. Check 15-minute window limit (max 3 questions per 15 minutes)

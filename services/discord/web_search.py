@@ -6,6 +6,7 @@ import aiohttp
 import asyncio
 import time
 from ddgs import DDGS
+from config import Config
 
 # Query optimizer removed - feature was never fully integrated
 # from services.query_optimizer import get_query_optimizer
@@ -46,7 +47,7 @@ class WebSearchService:
 
         # Rate limiting
         self.last_request_time = 0
-        self.min_delay = 2.0  # 2 seconds between requests
+        self.min_delay = Config.WEB_SEARCH_RATE_LIMIT_DELAY
 
         # Query optimizer disabled - service removed
         self.optimizer = None  # Feature removed

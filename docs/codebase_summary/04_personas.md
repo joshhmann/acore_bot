@@ -320,6 +320,13 @@ The persona system includes comprehensive hot-reload capabilities that allow add
 6. ProactiveCallbacksSystem (reference past topics)
 7. CuriositySystem (topic interest detection)
 
+**NEW: Emotional Contagion Integration** (Lines 300-361):
+- **Sentiment Analysis**: NLTK-based sentiment detection on user messages
+- **Emotional Memory**: Tracks user emotional patterns over time
+- **Response Adaptation**: Modulates persona responses based on emotional context
+- **Relationship Impact**: Stronger relationships increase emotional attunement
+- **Boundaries**: Prevents emotional burnout with cooldown periods
+
 **Core Features**:
 
 #### A. Reaction System
@@ -423,7 +430,125 @@ class PersonaRelationships:
 
 **Persistence**: Stored in `/root/acore_bot/data/persona_relationships.json`
 
-### 5. LorebookService - World Knowledge Injection
+### 5. EvolutionSystem - Character Progression (NEW)
+
+**Location**: `/root/acore_bot/services/persona/evolution.py`
+
+**Purpose**: Character progression system that unlocks new behaviors and capabilities through interaction milestones.
+
+**Core Mechanics**:
+
+#### Experience System
+- **Message XP**: Earn experience through meaningful conversations
+- **Quality over Quantity**: Deeper conversations worth more XP
+- **Relationship Bonus**: Higher affinity levels multiply XP gains
+- **Topic Diversity**: Exploring different topics grants bonus XP
+- **Daily Limits**: Prevents grinding, encourages natural interaction
+
+#### Milestone Unlocks
+```python
+# Example Evolution Milestones
+milestones = [
+    {
+        "id": "empathy_unlock",
+        "name": "Empathetic Connection",
+        "description": "Build meaningful relationships",
+        "requirements": {"total_affinity": 500, "unique_users": 10},
+        "unlocks": ["emotional_depth", "memory_recall", "supportive_responses"]
+    },
+    {
+        "id": "knowledge_master",
+        "name": "Knowledge Master",
+        "description": "Master diverse topic areas",
+        "requirements": {"topics_discussed": 50, "conversation_depth": 5},
+        "unlocks": ["expertise_mode", "cross_reference", "teaching_ability"]
+    }
+]
+```
+
+#### Character-Specific Paths
+Each character has unique evolution trajectories:
+
+**Dagoth Ur**: Divine → Philosopher → Mentor → Wisdom
+**Scav**: Survivor → Storyteller → Protector → Legend
+**Toad**: Panicked → Loyal → Brave → Hero
+
+#### Trait System
+- **Communication Traits**: New response styles (sarcasm, empathy, humor)
+- **Knowledge Traits**: Specialized expertise areas
+- **Social Traits**: Enhanced relationship capabilities
+- **Emotional Traits**: Deeper emotional range
+
+**Integration**:
+- **PersonaRouter**: Considers evolution level for routing decisions
+- **BehaviorEngine**: Evolution unlocks new behavioral patterns
+- **Analytics**: Tracks evolution progress and milestone completion
+
+### 6. FrameworkBlender - Dynamic Behavioral Mixing (NEW)
+
+**Location**: `/root/acore_bot/services/persona/framework_blender.py`
+
+**Purpose**: Dynamically mix and match behavioral frameworks to create unique personality combinations.
+
+**Architecture** (Lines 25-150):
+```python
+@dataclass
+class FrameworkMix:
+    primary_framework: str      # Base personality (e.g., "neuro")
+    secondary_framework: str    # Behavioral modifier (e.g., "caring")
+    blend_ratio: float         # 0.0-1.0 influence of secondary
+    context_triggers: List[str] # When to apply blend
+    temporary: bool            # Permanent vs temporary blend
+```
+
+**Blend Modes**:
+
+#### Context-Aware Blending
+```python
+# Example: Dagoth Ur becomes caring when discussing sensitive topics
+blend = FrameworkMix(
+    primary_framework="neuro",      # Base: analytical, thoughtful
+    secondary_framework="caring",   # Modifier: empathetic, supportive
+    blend_ratio=0.3,               # 30% caring influence
+    context_triggers=["sad", "hurt", "depressed", "grieving"],
+    temporary=True                 # Only for specific conversations
+)
+```
+
+#### Temporary Personality Modes
+- **Support Mode**: Activated when users express distress
+- **Teaching Mode**: Engaged during educational discussions
+- **Celebration Mode**: Triggered by positive events
+- **Crisis Mode**: High-stakes or emergency situations
+
+#### Framework Math
+Blending algorithm combines behavioral parameters:
+```python
+# Behavioral parameter mixing
+final_response_length = (
+    primary.length * (1 - blend_ratio) + 
+    secondary.length * blend_ratio
+)
+
+final_formality = clamp(
+    primary.formality + (secondary.formality - primary.formality) * blend_ratio,
+    0.0, 1.0
+)
+```
+
+**Supported Framework Combinations**:
+- **Neuro + Caring**: Analytical yet empathetic
+- **Chaotic + Assistant**: Energetic helpfulness
+- **Assistant + Neuro**: Structured entertainment
+- **Caring + Chaotic**: Unpredictable support
+
+**Learning System**:
+- Tracks successful blend outcomes
+- Learns which contexts benefit from specific blends
+- Automatic blend ratio optimization
+- User feedback integration for blend tuning
+
+### 7. LorebookService - World Knowledge Injection
 
 **Location**: `/root/acore_bot/services/persona/lorebook.py`
 
@@ -465,29 +590,47 @@ def scan_for_triggers(text: str, lorebook_names: List[str]) -> List[LoreEntry]
 3. Selection Algorithm:
    - Check for name mentions → Explicit match
    - Check sticky context → Last responder
+   - Consider evolution level (higher level = higher priority)
    - Fallback → Random selection
    ↓
-4. BehaviorEngine.handle_message(message)
+4. FrameworkBlender.check_context(message, persona)
+   - Analyze emotional context
+   - Apply temporary framework blending if needed
+   - Adjust behavioral parameters dynamically
+   ↓
+5. BehaviorEngine.handle_message(message)
+   - Sentiment analysis for emotional contagion
    - Decide reaction emoji (15% chance)
    - Decide proactive engagement
    - Check relationship affinity with other active personas
+   - Apply evolution-unlocked behaviors
    ↓
-5. ContextManager builds conversation history
+6. EvolutionSystem.process_interaction(persona, user, message)
+   - Award XP for quality interactions
+   - Check milestone completion
+   - Unlock new traits if milestones reached
+   - Update character progression data
    ↓
-6. LorebookService scans for keyword triggers
+7. ContextManager builds conversation history
    ↓
-7. Compile final prompt:
-   - Persona system prompt
+8. LorebookService scans for keyword triggers
+   ↓
+9. Compile final prompt:
+   - Blended persona system prompt (if framework blending active)
+   - Evolution-enhanced behavioral traits
    - Relationship context (if multi-persona banter)
+   - Emotional context (if emotional contagion active)
    - Lorebook entries
    - Conversation history
    ↓
-8. Send to LLM (Ollama/OpenRouter)
-   ↓
-9. BehaviorEngine post-processing:
-   - Add reactions
-   - Record response for sticky routing
-   - Update relationship affinity
+10. Send to LLM (Ollama/OpenRouter)
+    ↓
+11. BehaviorEngine post-processing:
+    - Apply emotional modulation based on sentiment analysis
+    - Add reactions based on emotional context
+    - Record response for sticky routing
+    - Update relationship affinity
+    - Track evolution progress
 ```
 
 ## Character Card Format (V2 Spec)
@@ -954,9 +1097,15 @@ uv run python main.py
 6. **Autonomous Behavior**: Proactive engagement, ambient thoughts, reactions
 7. **Dynamic Context**: Lorebooks inject relevant world info
 8. **Anti-Spam**: AI evaluates whether to speak to avoid annoyance
+9. **Character Growth**: Evolution system enables character progression and development
+10. **Emotional Intelligence**: Emotional contagion creates empathetic, context-aware responses
+11. **Adaptive Behavior**: Framework blending allows dynamic personality mixing
+12. **Data-Driven**: Analytics and metrics inform system improvements
 
 ## Summary
 
-The persona system transforms the bot from a single personality into a **multi-character AI ensemble**. The two-layer architecture (Framework + Character) provides flexibility, while PersonaRouter enables intelligent message routing. BehaviorEngine (361 lines) consolidates 7 legacy systems into a unified autonomous brain. PersonaRelationships enables inter-character dynamics, and LorebookService provides contextual world knowledge.
+The persona system transforms the bot from a single personality into a **multi-character AI ensemble** with advanced emotional and evolutionary capabilities. The two-layer architecture (Framework + Character) provides flexibility, while PersonaRouter enables intelligent message routing. BehaviorEngine (361 lines) consolidates 7 legacy systems into a unified autonomous brain with emotional contagion. PersonaRelationships enables inter-character dynamics, EvolutionSystem provides character progression through interaction milestones, FrameworkBlender allows dynamic behavioral mixing, and LorebookService provides contextual world knowledge.
+
+**Result**: 9+ distinct AI personalities that can recognize their names, remember relationships, proactively engage in conversations, grow through experience, adapt emotionally to user sentiment, and dynamically blend behaviors for context-appropriate responses.
 
 **Result**: 9+ distinct AI personalities that can recognize their names, remember relationships, proactively engage in conversations, and avoid spam through AI-driven decision-making.

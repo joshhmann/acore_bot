@@ -121,10 +121,12 @@ class UserProfileService:
         await self._flush_all_dirty()
 
     async def _periodic_save_loop(self):
-        """Loop to save dirty profiles every minute."""
+        """Loop to save dirty profiles at configured interval."""
+        from config import Config
+
         try:
             while True:
-                await asyncio.sleep(60)  # Save every minute
+                await asyncio.sleep(Config.PROFILE_SAVE_INTERVAL_SECONDS)
                 await self._flush_all_dirty()
         except asyncio.CancelledError:
             pass

@@ -29,8 +29,10 @@ class PersonaRouter:
 
         # Track last responder per channel for "sticky" conversations
         # {channel_id: {"persona": CompiledPersona, "time": datetime}}
+        from config import Config
+
         self.last_responder: Dict[int, Dict] = {}
-        self.sticky_timeout = 300  # 5 minutes - stick to same persona
+        self.sticky_timeout = Config.PERSONA_STICKY_TIMEOUT
 
         # Core system for compiling/loading individual personas
         # PersonaSystem expects base_path containing 'characters/' subdir

@@ -10,8 +10,17 @@ import json
 from datetime import datetime, timedelta
 
 from config import Config
+from utils.logging_config import (
+    log_with_context,
+    TraceContext,
+    set_trace_id,
+    get_trace_id,
+    add_context_data,
+)
+from utils.error_handlers import handle_command_error, ServiceError
 
 logger = logging.getLogger(__name__)
+
 
 class MessageHandler:
     def __init__(self, cog: commands.Cog):
@@ -196,11 +205,15 @@ JSON only:"""
             return False
 
         # GLOBAL MUTE CHECK - If bot is muted, only respond to unmute command
-        if getattr(self.cog, '_muted', False):
+        if getattr(self.cog, "_muted", False):
             # Still allow direct @mentions to check for unmute
             if self.cog.bot.user in message.mentions:
                 content_lower = message.content.lower()
-                if 'unmute' in content_lower or 'speak' in content_lower or 'wake' in content_lower:
+                if (
+                    "unmute" in content_lower
+                    or "speak" in content_lower
+                    or "wake" in content_lower
+                ):
                     self.cog._muted = False
                     await message.channel.send("🔊 I'm back! Ready to chat.")
                     return True
@@ -211,14 +224,17 @@ JSON only:"""
         if message.webhook_id:
             # We can check if the author name matches a known character
             if hasattr(self.cog, "persona_router"):
-                known_names = [p.character.display_name for p in self.cog.persona_router.get_all_personas()]
+                known_names = [
+                    p.character.display_name
+                    for p in self.cog.persona_router.get_all_personas()
+                ]
                 if message.author.display_name in known_names:
                     is_persona_message = True
 
         # Ignore other bots (unless it's one of our personas)
         if message.author.bot and not is_persona_message:
             return False
-            
+
         # Ignore system messages
         if message.is_system():
             return False
@@ -258,7 +274,7 @@ JSON only:"""
             # Check interaction depth from recent history
             # (Simple heuristic: 50% base chance, div by 2 for each recent bot msg? expensive to check)
             # Better: Fixed probability (30%) or look for mentions
-            
+
             # 1. If they Explicitly Mention another character: 100% chance (handled below by name trigger)
             # 2. Otherwise: Low chance (20%) for banter
             pass
@@ -306,33 +322,35 @@ JSON only:"""
             # Build persona name mapping (name -> persona object)
             persona_name_map = {}
             if hasattr(self.cog, "persona_router"):
-                 for p in self.cog.persona_router.get_all_personas():
-                      p_name = p.character.display_name
-                      if p_name:
-                           bot_names.append(p_name.lower())
-                           persona_name_map[p_name.lower()] = p
-                           if " " in p_name:
-                               first_name = p_name.split(" ")[0].lower()
-                               bot_names.append(first_name)
-                               persona_name_map[first_name] = p
-            
+                for p in self.cog.persona_router.get_all_personas():
+                    p_name = p.character.display_name
+                    if p_name:
+                        bot_names.append(p_name.lower())
+                        persona_name_map[p_name.lower()] = p
+                        if " " in p_name:
+                            first_name = p_name.split(" ")[0].lower()
+                            bot_names.append(first_name)
+                            persona_name_map[first_name] = p
+
             # Fallback to current
             if self.cog.current_persona:
                 p_name = getattr(self.cog.current_persona, "display_name", "")
                 if not p_name and hasattr(self.cog.current_persona, "name"):
-                     p_name = self.cog.current_persona.name
-                
+                    p_name = self.cog.current_persona.name
+
                 if p_name and p_name.lower() not in bot_names:
                     bot_names.append(p_name.lower())
                     if " " in p_name:
-                         if p_name.split(" ")[0].lower() not in bot_names:
-                             bot_names.append(p_name.split(" ")[0].lower())
+                        if p_name.split(" ")[0].lower() not in bot_names:
+                            bot_names.append(p_name.split(" ")[0].lower())
 
             content_lower = message.content.lower()
-            
+
             # DEBUG: Trace Persona Detection
-            logger.debug(f"Handling msg from {message.author.display_name}. IsPersona: {is_persona_message}. Known names: {bot_names}")
-            
+            logger.debug(
+                f"Handling msg from {message.author.display_name}. IsPersona: {is_persona_message}. Known names: {bot_names}"
+            )
+
             # Detect ALL mentioned personas (for multi-persona interactions)
             mentioned_personas = []
             for name in bot_names:
@@ -341,18 +359,20 @@ JSON only:"""
                     # Avoid duplicates
                     if persona not in mentioned_personas:
                         mentioned_personas.append(persona)
-            
+
             # Check if any character name is mentioned in message
             if any(name in content_lower for name in bot_names):
                 should_respond = True
                 response_reason = "name_trigger"
                 suggested_style = "direct"
-                
+
                 # If multiple personas mentioned, set up multi-persona interaction
                 if len(mentioned_personas) > 1:
                     response_reason = "multi_persona_trigger"
                     # Store metadata for persona selection
-                    self._multiagent_personas[message.id] = mentioned_personas  # Store for later
+                    self._multiagent_personas[message.id] = (
+                        mentioned_personas  # Store for later
+                    )
                     logger.info(
                         f"Multi-persona trigger detected: {[p.character.display_name for p in mentioned_personas]} in '{message.content[:50]}...'"
                     )
@@ -360,7 +380,7 @@ JSON only:"""
                     logger.info(
                         f"Name trigger detected: '{message.content[:50]}...' mentioned a character name"
                     )
-        
+
         # LOOP PREVENTION: If this is a persona message, apply strict chance decay
         # This runs AFTER name detection so personas can still respond to callouts
         # but prevents infinite back-and-forth
@@ -371,12 +391,12 @@ JSON only:"""
             if hasattr(curr_p, "character"):
                 current_name = curr_p.character.display_name
             elif curr_p:
-                 current_name = getattr(curr_p, "display_name", "")
-            
+                current_name = getattr(curr_p, "display_name", "")
+
             if current_name and message.author.display_name == current_name:
                 logger.debug(f"Loop Prevention: {current_name} won't respond to self")
                 return False
-            
+
             # Base chance of replying to another persona is 50% even if mentioned
             # This breaks infinite "reply-chains" eventually
             if random.random() > 0.5:
@@ -386,8 +406,10 @@ JSON only:"""
                     p_name = curr_p.character.display_name
                 else:
                     p_name = getattr(curr_p, "display_name", "Bot")
-                
-                logger.info(f"Loop Prevention: {p_name} ignored {message.author.display_name} (50% decay)")
+
+                logger.info(
+                    f"Loop Prevention: {p_name} ignored {message.author.display_name} (50% decay)"
+                )
                 return False
 
         # 4. Image reference / Question about attachment (ALWAYS respond)
@@ -429,7 +451,11 @@ JSON only:"""
                         pass
 
         # 5. Behavior Engine (replaced decision_engine)
-        if not should_respond and hasattr(self.cog, 'behavior_engine') and self.cog.behavior_engine:
+        if (
+            not should_respond
+            and hasattr(self.cog, "behavior_engine")
+            and self.cog.behavior_engine
+        ):
             try:
                 {
                     "channel_id": message.channel.id,
@@ -447,13 +473,17 @@ JSON only:"""
                     if decision.get("reaction"):
                         try:
                             await message.add_reaction(decision["reaction"])
-                            logger.info(f"✨ Behavior Engine: Reacted with {decision['reaction']}")
+                            logger.info(
+                                f"✨ Behavior Engine: Reacted with {decision['reaction']}"
+                            )
                         except Exception as e:
                             logger.warning(f"Failed to add reaction: {e}")
 
                     if decision.get("should_respond"):
                         should_respond = True
-                        response_reason = f"behavior_engine:{decision.get('reason', 'unknown')}"
+                        response_reason = (
+                            f"behavior_engine:{decision.get('reason', 'unknown')}"
+                        )
                         suggested_style = decision.get("suggested_style")
                         logger.info(
                             f"✨ Behavior Engine: RESPOND - Reason: {decision.get('reason')}, Style: {suggested_style}"
@@ -479,24 +509,32 @@ JSON only:"""
                         # Auto-banter with AFFINITY-BASED probability
                         # Characters who interact more have higher chance to respond to each other
                         banter_chance = 0.05  # Base 5% chance
-                        
+
                         # Get affinity-based chance if persona_relationships available
                         if self.cog.persona_relationships and self.cog.current_persona:
-                            current_name = getattr(self.cog.current_persona, 'display_name', None)
-                            if hasattr(self.cog.current_persona, 'character'):
-                                current_name = self.cog.current_persona.character.display_name
-                            
+                            current_name = getattr(
+                                self.cog.current_persona, "display_name", None
+                            )
+                            if hasattr(self.cog.current_persona, "character"):
+                                current_name = (
+                                    self.cog.current_persona.character.display_name
+                                )
+
                             speaker_name = message.author.display_name
                             if current_name and speaker_name:
-                                banter_chance = self.cog.persona_relationships.get_banter_chance(
-                                    current_name, speaker_name, base_chance=0.05
+                                banter_chance = (
+                                    self.cog.persona_relationships.get_banter_chance(
+                                        current_name, speaker_name, base_chance=0.05
+                                    )
                                 )
-                        
+
                         if random.random() < banter_chance:
-                             should_respond = True
-                             response_reason = "persona_banter"
-                             suggested_style = "casual"
-                             logger.info(f"Triggering inter-character banter! (chance: {banter_chance:.1%})")
+                            should_respond = True
+                            response_reason = "persona_banter"
+                            suggested_style = "casual"
+                            logger.info(
+                                f"Triggering inter-character banter! (chance: {banter_chance:.1%})"
+                            )
                     else:
                         should_respond = True
                         response_reason = "conversation_context"
@@ -559,8 +597,27 @@ Answer ONLY "yes" or "no"."""
         if should_respond:
             self.cog.session_manager.update_response_time(message.channel.id)
 
-            logger.info(
-                f"Responding to message - Reason: {response_reason}, Style: {suggested_style}"
+            # Set up trace context for this message processing
+            trace_id = f"msg_{message.id}_{int(message.created_at.timestamp())}"
+            set_trace_id(trace_id)
+
+            # Add context for structured logging
+            add_context_data("user_id", message.author.id)
+            add_context_data("channel_id", message.channel.id)
+            if hasattr(self.cog, "current_persona") and self.cog.current_persona:
+                add_context_data(
+                    "persona_id", getattr(self.cog.current_persona, "id", "unknown")
+                )
+
+            # Use structured logging for better observability
+            log_with_context(
+                logger,
+                logging.INFO,
+                f"Responding to message - Reason: {response_reason}, Style: {suggested_style}",
+                response_reason=response_reason,
+                suggested_style=suggested_style,
+                message_id=message.id,
+                message_length=len(message.content),
             )
 
             async def respond_callback(

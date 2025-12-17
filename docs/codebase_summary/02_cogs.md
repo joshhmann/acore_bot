@@ -29,6 +29,9 @@ The bot uses Discord.py's **Cog system** to modularize functionality. Each cog i
 - **NotesCog**: User note storage
 - **HelpCog**: Interactive help system
 - **SystemCog**: Bot health, metrics, logging
+- **SearchCommandsCog**: Web search integration and commands
+- **ProfileCommandsCog**: User profile management and learning
+- **EventListenersCog**: Voice state and member event handling
 
 All cogs are loaded dynamically in `/root/acore_bot/main.py` during bot initialization.
 
@@ -1253,7 +1256,7 @@ System Status
 - **Cache Hits**: History cache, RAG cache (hit rate %)
 - **Activity**: Messages processed, commands executed
 
-**Requires**: `bot.metrics` service (`services/monitoring/metrics.py`)
+**Requires**: `bot.metrics` service (`services/core/metrics.py`)
 
 #### `/errors` (lines 143-179)
 
@@ -1277,7 +1280,7 @@ System Status
 
 ### Metrics Service
 
-**Location**: `services/monitoring/metrics.py`
+**Location**: `services/core/metrics.py`
 
 **Tracked Metrics**:
 - Response times (LLM latency)
@@ -1516,6 +1519,243 @@ Continue buffering audio until /stop_listening
 
 ---
 
+## SearchCommandsCog
+
+**Location**: `/root/acore_bot/cogs/search_commands.py`
+
+**Purpose**: Web search integration with multiple search engines and result formatting.
+
+### Architecture
+
+**Service**: `WebSearchService` (`services/discord/web_search.py`)
+
+**Supported Engines**:
+- **DuckDuckGo** - Default, privacy-focused
+- **Google** - API key required
+
+### Slash Commands
+
+#### `/search <query>` (lines 16-45)
+- Performs web search with specified query
+- Returns top 5 results with titles and snippets
+- Supports advanced search operators
+
+#### `/search_images <query>` (lines 47-78)
+- Searches for images using web search
+- Returns image URLs and thumbnails
+- Safe search filtering enabled
+
+#### `/news <topic>` (lines 80-112)
+- Searches for recent news on specified topic
+- Filters results by publication date
+- Includes source credibility indicators
+
+### Search Features
+
+**Result Processing**:
+- Automatic deduplication
+- Source reliability scoring
+- Content sanitization for Discord
+- Rate limiting (10 searches per minute per user)
+
+**Advanced Filters**:
+- Site-specific search (`site:example.com`)
+- File type filtering (`filetype:pdf`)
+- Time-based filtering (`after:2024-01-01`)
+
+---
+
+## ProfileCommandsCog
+
+**Location**: `/root/acore_bot/cogs/profile_commands.py`
+
+**Purpose**: User profile management with AI-powered learning and relationship tracking.
+
+### Architecture
+
+**Service**: `UserProfileService` (`services/discord/profiles.py`)
+
+**Features**:
+- Automatic profile creation on first interaction
+- AI-powered profile updates based on conversations
+- Relationship and affection tracking with personas
+- Memory system for user preferences and facts
+
+### Slash Commands
+
+#### `/profile` (lines 25-65)
+- Shows your current profile
+- Displays relationship levels with personas
+- Shows learned facts and preferences
+
+#### `/profile_stats` (lines 67-98)
+- Detailed statistics about your interactions
+- Message count per persona
+- Relationship history and progression
+
+#### `/reset_profile` (lines 100-132)
+- Resets your profile to default state
+- Confirmation required
+- Clears all learned data
+
+#### `/profile_note <note>` (lines 134-166)
+- Add a note to your profile
+- Maximum 500 characters
+- Used for personal reminders and preferences
+
+### AI Learning System
+
+**Background Learning**:
+- Conversations automatically analyzed for user preferences
+- Sentiment analysis tracks emotional responses
+- Topics of interest identified and stored
+- Communication patterns learned for better responses
+
+**Privacy Controls**:
+- Users can opt out of learning system
+- Data retention limits (90 days by default)
+- Export profile data on request
+- Manual profile editing capabilities
+
+---
+
+## EventListenersCog
+
+**Location**: `/root/acore_bot/cogs/event_listeners.py`
+
+**Purpose**: Handles Discord events for voice state changes, member updates, and system notifications.
+
+### Event Handlers
+
+#### `on_voice_state_update` (lines 35-89)
+- **Voice Join Detection**: Notifies when users join/leave voice channels
+- **Streaming Detection**: Alerts when members start streaming
+- **Mute/Deaf Changes**: Tracks voice state changes for analytics
+- **Auto-Disconnect**: Removes bot when alone in voice for 5 minutes
+
+#### `on_member_join` (lines 91-125)
+- **Welcome Messages**: Personalized greetings for new members
+- **Role Assignment**: Automatic role assignment based on configuration
+- **Analytics Tracking**: Records new member statistics
+- **Integration**: Works with persona system for character responses
+
+#### `on_member_remove` (lines 127-158)
+- **Farewell Messages**: Optional goodbye notifications
+- **Data Cleanup**: Removes user-specific data after grace period
+- **Analytics Update**: Updates member count statistics
+
+#### `on_guild_join` / `on_guild_remove` (lines 160-195)
+- **Server Analytics**: Tracks bot server additions/removals
+- **Configuration Setup**: Initial setup for new servers
+- **Data Migration**: Handles data transfer between servers
+
+### Voice Integration Features
+
+**Smart Voice Detection**:
+- Detects when user needs bot in voice channel
+- Automatic suggestions: "Need me to join voice?"
+- Integration with VoiceCog for seamless handoff
+
+**Voice Activity Analytics**:
+- Tracks most active voice channels
+- Monitors voice session durations
+- Identifies popular voice times
+
+### Configuration Options
+
+```python
+# Event Listeners Configuration
+WELCOME_ENABLED=true
+WELCOME_MESSAGE="Welcome {user} to {server}!"
+AUTO_ROLES_ENABLED=true
+DEFAULT_ROLES=["Member"]
+FAREWELLAY_ENABLED=false
+VOICE_AUTO_DISCONNECT=true
+VOICE_ALONE_TIMEOUT=300  # 5 minutes
+```
+
+---
+
+## Emotional Contagion System (Integrated in ChatCog)
+
+**Location**: Integrated in `cogs/chat/message_handler.py` and `services/persona/behavior.py`
+
+**Purpose**: Bot adapts tone and emotional responses based on user sentiment and conversation context.
+
+### How It Works
+
+**Sentiment Analysis Pipeline**:
+1. **User Message Analysis**: NLTK sentiment analysis on incoming messages
+2. **Sentiment History Tracking**: Maintains rolling window of user sentiment
+3. **Emotional State Calculation**: Combines recent sentiment with relationship level
+4. **Response Adaptation**: Modifies persona response style based on emotional context
+
+**Emotional Adaptation Features**:
+
+#### Sentiment Detection
+- **Compound Score**: Overall sentiment (-1.0 to 1.0)
+- **Emotional Categories**: Joy, sadness, anger, fear, surprise, disgust
+- **Confidence Levels**: Certainty of sentiment classification
+- **Context Weighting**: Recent messages weighted more heavily
+
+#### Response Modulation
+```python
+# Example emotional response adaptation
+if user_sentiment < -0.3:  # User is sad/down
+    response_style = "empathetic"
+    response_length = "longer"  # More detailed responses
+elif user_sentiment > 0.5:  # User is happy/excited
+    response_style = "energetic"
+    response_length = "shorter"  # Quick, enthusiastic responses
+```
+
+#### Emotional Memory
+- **User Emotional Profiles**: Long-term emotional patterns per user
+- **Relationship Impact**: Stronger relationships increase emotional attunement
+- **Recovery Mechanisms**: Gradual return to baseline emotional state
+- **Boundaries**: Prevents emotional burnout with cooldown periods
+
+### Integration with Personas
+
+**Persona-Specific Emotional Responses**:
+- **Dagoth Ur**: Becomes more philosophical when user is contemplative
+- **Scav**: Increases humor when user is sad (cheering up)
+- **Toad**: Shows panic when user is stressed (shared anxiety)
+- **HAL 9000**: Maintains calm regardless of user emotion
+
+**Emotional Contagion Rules**:
+1. **Mirror Positive**: Positive emotions often mirrored back
+2. **Support Negative**: Negative emotions met with support
+3. **Maintain Character**: Emotional adaptation doesn't break character
+4. **Gradual Change**: Emotional state changes slowly, not abruptly
+
+### Configuration
+
+```python
+# Emotional Contagion Settings
+EMOTIONAL_CONTAGION_ENABLED=true
+SENTIMENT_WINDOW_SIZE=10  # Messages to analyze
+EMOTIONAL_DECAY_RATE=0.1  # How quickly emotions return to baseline
+MIN_CONFIDENCE_THRESHOLD=0.6  # Minimum sentiment confidence
+EMOTIONAL_COOLDOWN=300  # Seconds between emotional state changes
+```
+
+### Analytics and Monitoring
+
+**Emotional Metrics Tracked**:
+- Average sentiment per user
+- Emotional response effectiveness
+- Relationship correlation with emotional attunement
+- Persona emotional range analysis
+
+**Health Monitoring**:
+- Detects emotional burnout patterns
+- Alerts on unusual emotional spikes
+- Tracks emotional system performance
+- Provides emotional state debugging tools
+
+---
+
 ## Summary
 
 ### Cog Responsibilities
@@ -1529,7 +1769,10 @@ Continue buffering audio until /stop_listening
 | **RemindersCog** | Reminders | /remind, /reminders, /cancel_reminder | RemindersService |
 | **NotesCog** | Notes | /note, /notes, /delnote | NotesService |
 | **HelpCog** | Help menu | /help | - |
-| **SystemCog** | Diagnostics | /botstatus, /metrics, /errors, /logs | MetricsService |
+| **SystemCog** | Diagnostics | /botstatus, /metrics, /errors, /logs | MetricsService, HealthService |
+| **SearchCommandsCog** | Web search | /search, /search_images, /news | WebSearchService |
+| **ProfileCommandsCog** | User profiles | /profile, /profile_stats, /reset_profile | UserProfileService |
+| **EventListenersCog** | Events | (event-driven) | Analytics, VoiceIntegration |
 
 ### Key Patterns
 
@@ -1541,6 +1784,8 @@ Continue buffering audio until /stop_listening
 6. **Webhook Spoofing**: Persona messages sent via webhooks for custom names/avatars
 7. **Context Management**: Smart context building with history, RAG, user profiles, lorebook
 8. **Trigger System**: Multi-level priority triggers for message responses
+9. **Emotional Contagion**: Bot adapts responses based on user sentiment and relationship levels
+10. **Event-Driven Architecture**: EventListenersCog handles Discord events for proactive features
 
 ### Configuration Hierarchy
 
@@ -1551,4 +1796,4 @@ Continue buffering audio until /stop_listening
 
 ---
 
-**Next Steps**: See `03_services.md` for detailed service architecture and `04_message_flow.md` for complete message processing pipeline.
+**Next Steps**: See `03_services.md` for detailed service architecture and `04_personas.md` for persona system documentation.

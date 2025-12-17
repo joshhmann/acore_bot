@@ -73,7 +73,13 @@ class CompiledPersona:
     tools_required: List[str]
     config: Dict[str, Any]
     # T19: Framework Blending
-    blend_data: Optional[Dict[str, Any]] = None  # Stores rules and cached framework prompts
+    blend_data: Optional[Dict[str, Any]] = (
+        None  # Stores rules and cached framework prompts
+    )
+
+    def __hash__(self) -> int:
+        """Make CompiledPersona hashable for use as dictionary keys."""
+        return hash(self.persona_id)
 
 
 class PersonaSystem:
@@ -453,11 +459,13 @@ class PersonaSystem:
 
             # T19: Process Framework Blending
             blend_data = None
-            if character.framework_blending and character.framework_blending.get("enabled"):
+            if character.framework_blending and character.framework_blending.get(
+                "enabled"
+            ):
                 try:
                     rules = character.framework_blending.get("blend_rules", [])
                     cached_frameworks = {}
-                    
+
                     for rule in rules:
                         target_fw_id = rule.get("framework")
                         if target_fw_id and target_fw_id not in cached_frameworks:
@@ -466,16 +474,22 @@ class PersonaSystem:
                             if fw:
                                 cached_frameworks[target_fw_id] = fw.prompt_template
                             else:
-                                logger.warning(f"Blend target framework not found: {target_fw_id}")
-                    
+                                logger.warning(
+                                    f"Blend target framework not found: {target_fw_id}"
+                                )
+
                     if cached_frameworks:
                         blend_data = {
-                            "base_framework_id": framework.framework_id if framework else "none",
+                            "base_framework_id": framework.framework_id
+                            if framework
+                            else "none",
                             "rules": rules,
-                            "cached_prompts": cached_frameworks
+                            "cached_prompts": cached_frameworks,
                         }
-                        logger.info(f"Enabled framework blending for {character_id} with {len(cached_frameworks)} frameworks")
-                        
+                        logger.info(
+                            f"Enabled framework blending for {character_id} with {len(cached_frameworks)} frameworks"
+                        )
+
                 except Exception as e:
                     logger.error(f"Error processing framework blending: {e}")
 

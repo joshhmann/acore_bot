@@ -5,12 +5,19 @@ import logging
 import json
 import asyncio
 import hashlib
-from typing import List, Dict, Optional, AsyncGenerator, Any, cast
+from typing import List, Dict, Optional, Any, AsyncGenerator
 
 from config import Config
 from services.llm.cache import LLMCache
 from services.core.rate_limiter import RateLimiter
 from services.interfaces import LLMInterface
+from utils.error_handlers import (
+    handle_service_error,
+    retry_with_backoff,
+    LLMServiceError,
+    NetworkError,
+    ErrorType,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -208,6 +215,15 @@ class OllamaService(LLMInterface):
             )
         return cleaned
 
+    @handle_service_error(
+        error_type=ErrorType.API_ERROR,
+        fallback_return="I'm having trouble thinking right now.",
+    )
+    @retry_with_backoff(
+        max_retries=3,
+        base_delay=1.0,
+        exceptions=(aiohttp.ClientError, asyncio.TimeoutError, LLMServiceError),
+    )
     async def chat(
         self,
         messages: List[Dict[str, str]],
@@ -320,6 +336,12 @@ class OllamaService(LLMInterface):
         # Deduplicate the request
         return await self.deduplicator.deduplicate(dedup_key, perform_request())
 
+    @handle_service_error(error_type=ErrorType.API_ERROR)
+    @retry_with_backoff(
+        max_retries=3,
+        base_delay=1.0,
+        exceptions=(aiohttp.ClientError, asyncio.TimeoutError),
+    )
     async def chat_stream(
         self,
         messages: List[Dict[str, str]],
@@ -327,7 +349,7 @@ class OllamaService(LLMInterface):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         **kwargs: Any,
-    ):
+    ) -> AsyncGenerator[str, None]:
         """Stream chat responses from Ollama token by token.
 
         Args:
@@ -371,6 +393,7 @@ class OllamaService(LLMInterface):
         try:
             async with self.rate_limiter.acquire():
                 url = f"{self.host}/api/chat"
+                assert self.session is not None  # For type checker
                 async with self.session.post(
                     url, json=payload, timeout=aiohttp.ClientTimeout(total=120)
                 ) as resp:
@@ -471,8 +494,12 @@ class OllamaService(LLMInterface):
         }
 
         try:
+            if not self.session:
+                await self.initialize()
+
             async with self.rate_limiter.acquire():
                 url = f"{self.host}/api/chat"
+                assert self.session is not None  # For mypy
                 async with self.session.post(
                     url, json=payload, timeout=aiohttp.ClientTimeout(total=120)
                 ) as resp:
@@ -503,6 +530,7 @@ class OllamaService(LLMInterface):
 
         try:
             url = f"{self.host}/api/tags"
+            assert self.session is not None  # For type checker
             async with self.session.get(
                 url, timeout=aiohttp.ClientTimeout(total=5)
             ) as resp:
@@ -522,6 +550,7 @@ class OllamaService(LLMInterface):
 
         try:
             url = f"{self.host}/api/tags"
+            assert self.session is not None  # For type checker
             async with self.session.get(
                 url, timeout=aiohttp.ClientTimeout(total=10)
             ) as resp:
@@ -559,6 +588,7 @@ class OllamaService(LLMInterface):
             if not self.session:
                 await self.initialize()
 
+            assert self.session is not None  # For type checker
             async with self.session.get(
                 f"{self.host}/api/tags", timeout=aiohttp.ClientTimeout(total=5)
             ) as resp:

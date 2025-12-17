@@ -611,12 +611,16 @@ class RAGService:
             return ""
 
         # Filter out low relevance results to prevent context pollution
-        # Keep results if score > 0.5 (tunable)
-        relevant_results = [r for r in results if r.get("relevance_score", 0) > 0.5]
+        from config import Config
+
+        threshold = Config.RAG_RELEVANCE_THRESHOLD
+        relevant_results = [
+            r for r in results if r.get("relevance_score", 0) > threshold
+        ]
 
         if not relevant_results:
             logger.debug(
-                f"Matches found but below relevance threshold (0.5). Best: {results[0].get('relevance_score', 0):.2f}"
+                f"Matches found but below relevance threshold ({threshold}). Best: {results[0].get('relevance_score', 0):.2f}"
             )
             return ""
 
