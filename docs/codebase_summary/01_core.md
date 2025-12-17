@@ -78,6 +78,13 @@ class OllamaBot(commands.Bot):
         self.tts = self.services.get('tts')
         self.rvc = self.services.get('rvc')
         self.metrics = self.services.get('metrics')
+
+        # Initialize Analytics Dashboard (T23-T24)
+        self.dashboard = None
+        if Config.ANALYTICS_DASHBOARD_ENABLED:
+            from services.analytics.dashboard import AnalyticsDashboard
+            self.dashboard = AnalyticsDashboard(...)
+            self.dashboard.bot = self
 ```
 
 **Key Points:**
@@ -405,8 +412,7 @@ class ServiceFactory:
         self._init_audio()     # TTS, RVC, STT
         self._init_data()      # History, Profiles, RAG
         self._init_features()  # Web Search, Reminders
-        self._init_ai_systems()  # Persona, Tools, Evolution
-        self._init_analytics()  # Dashboard, Health checks
+        self._init_ai_systems()  # Persona, Tools
 
         return self.services
 ```
@@ -568,26 +574,11 @@ def _init_ai_systems(self):
             self.services['compiled_persona'] = compiled_persona
             self.services['tool_system'] = EnhancedToolSystem()
             self.services['persona_relationships'] = PersonaRelationships()
-            self.services['evolution_system'] = EvolutionSystem()
 ```
 
-#### Phase 6: Analytics & Monitoring (NEW)
+#### Phase 6: Analytics & Monitoring
 
-```python
-def _init_analytics(self):
-    """Initialize analytics and monitoring services."""
-    # Analytics Dashboard (FastAPI)
-    if Config.ANALYTICS_ENABLED:
-        from services.analytics.dashboard import AnalyticsDashboard
-        self.services['analytics'] = AnalyticsDashboard(
-            host=Config.ANALYTICS_HOST,
-            port=Config.ANALYTICS_PORT,
-            api_key=Config.ANALYTICS_API_KEY
-        )
-    
-    # Health Check Service
-    self.services['health'] = HealthService(self.services)
-```
+**Note**: `AnalyticsDashboard` is initialized directly in `main.py` (lines 72-88) to ensure it runs as a separate server process alongside the bot. It is not part of the `ServiceFactory` dictionary.
 
 **Key Services:**
 - **persona_system**: Persona loader and compiler
@@ -976,7 +967,7 @@ The bot uses a **service-oriented architecture** with:
 ✅ **PRODUCTION READY**
 
 **Startup Verification:**
-- All 23 services initialize successfully (added analytics, evolution)
+- All 21 services initialize successfully (analytics initialized in main.py, evolution lazy-loaded)
 - 14 cogs + extensions load without errors
 - Command tree sync with proper error handling
 - Graceful shutdown and resource cleanup

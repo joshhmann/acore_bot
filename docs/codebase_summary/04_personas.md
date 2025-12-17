@@ -482,6 +482,7 @@ Each character has unique evolution trajectories:
 **Integration**:
 - **PersonaRouter**: Considers evolution level for routing decisions
 - **BehaviorEngine**: Evolution unlocks new behavioral patterns
+- **ContextManager**: Injects evolution-based prompt modifiers
 - **Analytics**: Tracks evolution progress and milestone completion
 
 ### 6. FrameworkBlender - Dynamic Behavioral Mixing (NEW)
@@ -541,6 +542,9 @@ final_formality = clamp(
 - **Chaotic + Assistant**: Energetic helpfulness
 - **Assistant + Neuro**: Structured entertainment
 - **Caring + Chaotic**: Unpredictable support
+
+**Integration**:
+- **ContextManager**: Uses `FrameworkBlender` to modify system prompts dynamically based on conversation context.
 
 **Learning System**:
 - Tracks successful blend outcomes
