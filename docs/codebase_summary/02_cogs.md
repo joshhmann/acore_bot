@@ -11,9 +11,10 @@ This document provides a comprehensive overview of all Discord cogs in the acore
 5. [MusicCog - YouTube Playback](#musiccog)
 6. [RemindersCog - Time-Based Reminders](#reminderscog)
 7. [NotesCog - User Notes](#notescog)
-8. [HelpCog - Interactive Help](#helpcog)
-9. [SystemCog - Bot Status & Metrics](#systemcog)
-10. [Event Flow Diagrams](#event-flow-diagrams)
+8. [MemoryCommandsCog - History & RAG](#memorycommandscog)
+9. [HelpCog - Interactive Help](#helpcog)
+10. [SystemCog - Bot Status & Metrics](#systemcog)
+11. [Event Flow Diagrams](#event-flow-diagrams)
 
 ---
 
@@ -1138,6 +1139,41 @@ async def check_reminders():
 
 ---
 
+## MemoryCommandsCog
+
+**Location**: `/root/acore_bot/cogs/memory_commands.py`
+
+**Purpose**: Manage conversation history, import/export chats, and control memory systems.
+
+### Commands
+
+#### `/export_chat`
+- Exports the current channel's history to a JSON file.
+- Useful for backing up conversations or moving them.
+
+#### `/import_chat` (attachment)
+- Imports a JSON history file into the current channel.
+- Merges with existing history.
+
+#### `/summarize_now`
+- Forces an immediate summarization of the conversation.
+- Stores summary in RAG and long-term memory.
+- **Cooldown**: 30 seconds.
+
+#### `/recall <query>`
+- Searches past conversation summaries using RAG.
+- Returns top 3 relevant memories.
+
+#### `/rag_reload`
+- Reloads RAG documents from disk (hot-reload).
+- **Cooldown**: 60 seconds.
+
+#### `/clear_history`
+- Clears the conversation history for the current channel.
+- Does NOT delete long-term summaries.
+
+---
+
 ## HelpCog
 
 **Location**: `/root/acore_bot/cogs/help.py`
@@ -1768,6 +1804,7 @@ EMOTIONAL_COOLDOWN=300  # Seconds between emotional state changes
 | **MusicCog** | Music playback | /play, /skip, /queue, /volume | MusicPlayer |
 | **RemindersCog** | Reminders | /remind, /reminders, /cancel_reminder | RemindersService |
 | **NotesCog** | Notes | /note, /notes, /delnote | NotesService |
+| **MemoryCommandsCog** | History & RAG | /export, /import, /recall, /summarize | History, Summarizer, RAG |
 | **HelpCog** | Help menu | /help | - |
 | **SystemCog** | Diagnostics | /botstatus, /metrics, /errors, /logs | MetricsService, HealthService |
 | **SearchCommandsCog** | Web search | /search, /search_images, /news | WebSearchService |

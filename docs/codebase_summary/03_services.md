@@ -976,6 +976,8 @@ Tracks relationships and affinity between users and personas.
 
 **Purpose**: Character progression system that unlocks new behaviors and capabilities through interaction milestones.
 
+**Initialization**: Lazy-loaded by `BehaviorEngine` when needed.
+
 **Architecture** (Lines 25-120):
 ```python
 @dataclass
@@ -1097,6 +1099,8 @@ Real-time monitoring and dashboard services for production insights.
 **File**: `/root/acore_bot/services/analytics/dashboard.py`
 
 **Purpose**: FastAPI-based real-time dashboard for monitoring bot performance, persona interactions, and system health.
+
+**Note**: Initialized in `main.py` to run as a separate server process.
 
 **Architecture** (Lines 25-150):
 ```python
@@ -1313,13 +1317,6 @@ The ServiceFactory is the central initialization hub for all services.
 - Compiled persona
 - Tool system
 - Persona relationships
-- Evolution system
-
-**`_init_analytics()`** (Lines 274-290) - **NEW**:
-- Analytics dashboard
-- Health check service
-- Metrics integration
-- WebSocket endpoints
 
 ### Service Access
 

@@ -443,6 +443,7 @@ For 200K token context window:
 │   ├── music.py        # Music playback
 │   └── ...
 ├── services/           # Business logic services
+│   ├── analytics/      # Dashboard and monitoring
 │   ├── core/           # Infrastructure (factory, metrics, context)
 │   ├── llm/            # LLM providers (Ollama, OpenRouter)
 │   ├── memory/         # RAG, summarizer, history
