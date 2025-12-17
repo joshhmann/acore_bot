@@ -314,8 +314,8 @@ JSON only:"""
             # Fallback to current
             if self.cog.current_persona:
                 p_name = getattr(self.cog.current_persona, "display_name", "")
-                if not p_name and hasattr(self.cog.current_persona, "name"):
-                     p_name = self.cog.current_persona.name
+                if not p_name:
+                    p_name = getattr(self.cog.current_persona, "name", "")
                 
                 if p_name and p_name.lower() not in bot_names:
                     bot_names.append(p_name.lower())
@@ -498,7 +498,9 @@ JSON only:"""
                 try:
                     persona_name = "Dagoth Ur"
                     if self.cog.current_persona:
-                        persona_name = self.cog.current_persona.name
+                        # SAFELY access display_name or name
+                        persona_name = getattr(self.cog.current_persona, "display_name",
+                                             getattr(self.cog.current_persona, "name", "Dagoth Ur"))
 
                     prompt = f"""Message: "{message.content}"
 

@@ -141,11 +141,6 @@ class ChatCog(commands.Cog):
         if default_p:
             self.behavior_engine.set_persona(default_p)
             self.current_persona = default_p.character # Legacy support for MessageHandler
-            # Compatibility shim: MessageHandler expects .name on character object? 
-            # Character dataclass has .display_name. 
-            # If MessageHandler accesses .name, we might need a wrapper or ignore if it fails.
-            # Character dataclass DOES NOT have .name. It has .display_name.
-            # MessageHandler lines 270 check .name. This might be another bug.
             logger.info(f"Set initial persona: {default_p.character.display_name}")
 
         # 6. Start Engines
