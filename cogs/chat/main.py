@@ -954,61 +954,28 @@ class ChatCog(commands.Cog):
                             bot_response=response,
                         )
                     )
-            # 1. Start Timing & Setup
-            start_time = time.time()
-            
-            # 2. Persona Selection (Moved to top)
-            # selected_persona already set above
-            
-            system_prompt = selected_persona.system_prompt
+            # Post-Processing & Sending (Ensure response is prepared for Discord/TTS)
+            discord_response, tts_response = self._prepare_response_content(response, channel)
+
+            # Prepare persona details for sending
             display_name = selected_persona.character.display_name
             avatar_url = selected_persona.character.avatar_url
-            
-            # 3. Context Management
-            # Build conversation context (history + summary + RAG)
-            # Build conversation context (history + summary + RAG)
-            context_result = await self.context_router.get_context(
-                 channel=channel, 
-                 user=user,
-                 message_content=message_content
-            )
-            history = context_result.history
-            summary = context_result.summary
 
-            # Use Context Manager to build optimized LLM input
-            # We construct a dummy/wrapped persona object if needed, or use the selected one
-            context = await self.context_manager.build_context(
-                persona=selected_persona,
-                history=history,
-                model_name=self.ollama.get_model_name(),
-                lore_entries=[], # TODO: scan lore if needed
-                rag_content="", # TODO: fetch RAG if needed
-                user_context="", # TODO: fetch user profile if needed
-                llm_service=self.ollama
+            # Check if we likely already sent the message via streaming to interaction
+            # This prevents double-sending (once via stream, once via webhook)
+            already_sent_via_stream = (
+                interaction and
+                Config.RESPONSE_STREAMING_ENABLED and
+                not (recent_image_url and Config.VISION_ENABLED) and
+                not self.agentic_tools
             )
-            
-            # Add user message to context if not already there (ContextManager typically handles history+current)
-            # But ContextManager.build_context expects 'history' which includes previous messages.
-            # We need to append the current message OR rely on `build_context` taking `user_message`.
-            # The signature of `build_context` above only took `history`. 
-            # Let's check `services/core/context.py` if needed.
-            # For robustness, let's manually ensure current message is at end of `context` list if missing.
-            if not context or context[-1]["role"] != "user":
-                context.append({"role": "user", "content": message_content})
-
-            # 4. Generate Response
-            response = await self._llm_chat(
-                messages=context,
-                system_prompt=None, # System prompt is inside context[0]
-            )
-            
-            # 5. Post-Processing & Sending
-            # 5. Post-Processing & Sending
-            discord_response, tts_response = self._prepare_response_content(response, channel)
             
             # Send via Webhook (Spoofing) or Fallback
             sent_via_webhook = False
-            if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
+            if already_sent_via_stream:
+                sent_via_webhook = True # Mark as handled to skip fallback sending
+
+            if not already_sent_via_stream and isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
                 try:
                     webhooks = await channel.webhooks()
                     webhook = next((w for w in webhooks if w.name == "PersonaBot_Proxy"), None)
