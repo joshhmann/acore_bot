@@ -203,7 +203,12 @@ class OllamaBot(commands.Bot):
         ]
 
         for ext in extensions:
-            await self.load_extension(ext)
+            try:
+                await self.load_extension(ext)
+                logger.info(f"Loaded extension: {ext}")
+            except Exception as e:
+                logger.error(f"Failed to load extension {ext}: {e}")
+                # Continue loading other extensions instead of crashing
 
         # Load Event Listeners
         from cogs.event_listeners import EventListenersCog

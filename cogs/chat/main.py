@@ -95,77 +95,81 @@ class ChatCog(commands.Cog):
         self.current_persona = None  # Default value until _async_init completes
 
     async def _async_init(self):
-        """Asynchronous initialization."""
-        # 0. Core properties
-        self._background_tasks: set = set()
+        """Asynchronous initialization with comprehensive error handling."""
+        try:
+            # 0. Core properties
+            self._background_tasks: set = set()
 
-        # 1. Initialize Helpers & Managers
-        self.helpers = ChatHelpers()
-        self.session_manager = SessionManager()
-        self.voice_integration = VoiceIntegration(
-            self.bot, self.helpers.analyze_sentiment
-        )
-        self.message_handler = MessageHandler(self)
-        self.command_handler = ChatCommandHandler(self)
+            # 1. Initialize Helpers & Managers
+            self.helpers = ChatHelpers()
+            self.session_manager = SessionManager()
+            self.voice_integration = VoiceIntegration(
+                self.bot, self.helpers.analyze_sentiment
+            )
+            self.message_handler = MessageHandler(self)
+            self.command_handler = ChatCommandHandler(self)
 
-        # 2. Initialize Logic Services
-        self.context_manager = ContextManager()
-        self.lorebook_service = LorebookService(
-            semantic_threshold=Config.SEMANTIC_LOREBOOK_THRESHOLD,
-            enable_semantic=Config.SEMANTIC_LOREBOOK_ENABLED,
-            max_cache_size=Config.SEMANTIC_LOREBOOK_CACHE_SIZE,
-        )
+            # 2. Initialize Logic Services
+            self.context_manager = ContextManager()
+            self.lorebook_service = LorebookService(
+                semantic_threshold=Config.SEMANTIC_LOREBOOK_THRESHOLD,
+                enable_semantic=Config.SEMANTIC_LOREBOOK_ENABLED,
+                max_cache_size=Config.SEMANTIC_LOREBOOK_CACHE_SIZE,
+            )
 
-        from services.memory.context_router import ContextRouter
+            from services.memory.context_router import ContextRouter
 
-        self.context_router = ContextRouter(self.history, self.summarizer)
+            self.context_router = ContextRouter(self.history, self.summarizer)
 
-        # 3. Initialize Behavior Engine (Needs ContextManager)
-        self.behavior_engine = BehaviorEngine(
-            self.bot, self.ollama, self.context_manager, self.lorebook_service
-        )
+            # 3. Initialize Behavior Engine (Needs ContextManager)
+            self.behavior_engine = BehaviorEngine(
+                self.bot, self.ollama, self.context_manager, self.lorebook_service
+            )
 
-        # 4. Initialize Persona Router (Loads Characters)
-        await self.persona_router.initialize()
+            # 4. Initialize Persona Router (Loads Characters)
+            await self.persona_router.initialize()
 
-        # 4b. Initialize Persona Relationships (Affinity between characters)
-        if self.persona_relationships:
-            await self.persona_relationships.initialize()
+            # 4b. Initialize Persona Relationships (Affinity between characters)
+            if self.persona_relationships:
+                await self.persona_relationships.initialize()
 
-        # 5. Set Initial Persona (Sync Legacy & Router)
-        # Try to set Dagoth Ur as default, or first available
-        default_p = self.persona_router.get_persona_by_name("Dagoth Ur")
-        if not default_p:
-            all_p = self.persona_router.get_all_personas()
-            if all_p:
-                default_p = all_p[0]
+            # 5. Set Initial Persona (Sync Legacy & Router)
+            # Try to set Dagoth Ur as default, or first available
+            default_p = self.persona_router.get_persona_by_name("Dagoth Ur")
+            if not default_p:
+                all_p = self.persona_router.get_all_personas()
+                if all_p:
+                    default_p = all_p[0]
 
-        if default_p:
-            self.behavior_engine.set_persona(default_p)
-            self.current_persona = (
-                default_p.character
-            )  # Legacy support for MessageHandler
-            # Compatibility shim: MessageHandler expects .name on character object?
-            # Character dataclass has .display_name.
-            # If MessageHandler accesses .name, we might need a wrapper or ignore if it fails.
-            # Character dataclass DOES NOT have .name. It has .display_name.
-            # MessageHandler lines 270 check .name. This might be another bug.
-            logger.info(f"Set initial persona: {default_p.character.display_name}")
+            if default_p:
+                self.behavior_engine.set_persona(default_p)
+                self.current_persona = (
+                    default_p.character
+                )  # Legacy support for MessageHandler
+                logger.info(f"Set initial persona: {default_p.character.display_name}")
 
-        # 6. Start Engines
-        self._create_background_task(self.behavior_engine.start())
-        self.system_prompt = self._load_system_prompt()
+            # 6. Start Engines
+            self._create_background_task(self.behavior_engine.start())
+            self.system_prompt = self._load_system_prompt()
 
-        # 7. cleanup unused placeholders
-        self.callbacks_system = None
-        self.curiosity_system = None
-        self.pattern_learner = None
-        self.intent_recognition = None
-        self.intent_handler = None
-        self.message_batcher = None
-        self.agentic_tools = None
+            # 7. cleanup unused placeholders
+            self.callbacks_system = None
+            self.curiosity_system = None
+            self.pattern_learner = None
+            self.intent_recognition = None
+            self.intent_handler = None
+            self.message_batcher = None
+            self.agentic_tools = None
 
-        logger.info("ChatCog initialization complete.")
+            logger.info("ChatCog initialization complete.")
+
+        except Exception as e:
+            logger.error(f"ChatCog async initialization failed: {e}", exc_info=True)
+            # Set fallback state to prevent crashes
+            self.current_persona = None
+            self.behavior_engine = None
+            # Re-raise to let bot know initialization failed
+            raise
 
     async def _llm_chat(
         self, messages, system_prompt=None, temperature=None, max_tokens=None
