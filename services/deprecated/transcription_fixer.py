@@ -1,7 +1,6 @@
 """Post-processing for speech transcription to fix common errors."""
 import logging
 import re
-from typing import Dict, List
 
 logger = logging.getLogger(__name__)
 

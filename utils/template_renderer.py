@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from jinja2 import Environment, FileSystemLoader, select_autoescape, Template
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)

@@ -138,6 +138,21 @@ Check the included prompts:
 - `gaming.txt` - Gaming community
 - `pirate.txt` - Fun pirate character
 
-Mix and match ideas from these to create your perfect bot personality!
+## Character Import System
+
+**NEW!** You can now import complete character personalities from SillyTavern cards! 
+
+📖 **Full Guide:** [Importing Characters](../docs/prompts/IMPORTING_CHARACTERS.md)
+
+✨ **Quick Start:** Upload a character card with `/import_character` and start chatting immediately!
+
+The import system supports:
+- PNG and JSON character cards
+- Automatic format normalization
+- Hot-reload without bot restart
+- Batch import from folders
+- RAG category validation
+
+Mix and match ideas from these prompts or import pre-made characters to create your perfect bot personality!
 
 Happy prompting! 🤖✨

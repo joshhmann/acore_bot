@@ -37,6 +37,10 @@ Analyze the user's task, break it down into necessary code changes, and provide 
 * Code must be **well-commented** and follow solid engineering principles (e.g., DRY, appropriate class/method structure).
 * After making changes, you MUST advise running `uv run pytest` and `uv run python main.py` for verification.
 * Output only the code and a brief explanation of the changes.
+* **DOCUMENTATION RULES**:
+    * **NO NEW DOC FILES**: Do not create new summary files (e.g. `feature_summary.md`) for tasks.
+    * **UPDATE EXISTING**: Update `docs/STATUS.md` and files in `docs/features/`.
+    * **CLEANUP**: Delete any temporary plan files (`.agent/*.md`) immediately after use.
 
 ## Output Format
 Always present code in **markdown fenced code blocks**, using the correct language identifier (`python`). Follow the code with a brief, high-level summary of the implementation strategy and a verification instruction.

@@ -1,12 +1,12 @@
 """Dependency Injection Container for managing service lifecycles."""
 
 import logging
-from typing import Dict, Any, Optional, Type, TypeVar, Callable
+from typing import Dict, Any, Optional, TypeVar, Callable
 from config import Config
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
 class DIContainer:
@@ -22,12 +22,7 @@ class DIContainer:
         self._factories: Dict[str, Callable] = {}
         self._singletons: Dict[str, bool] = {}
 
-    def register(
-        self,
-        name: str,
-        factory: Callable,
-        singleton: bool = True
-    ):
+    def register(self, name: str, factory: Callable, singleton: bool = True):
         """Register a service factory.
 
         Args:
@@ -167,13 +162,13 @@ class DIContainer:
         """
         for name, service in self._services.items():
             try:
-                if hasattr(service, 'cleanup') and callable(service.cleanup):
+                if hasattr(service, "cleanup") and callable(service.cleanup):
                     logger.info(f"Cleaning up service '{name}'")
                     cleanup_method = service.cleanup
                     # Check if cleanup is async
-                    if hasattr(cleanup_method, '__call__'):
-                        import asyncio
+                    if hasattr(cleanup_method, "__call__"):
                         import inspect
+
                         if inspect.iscoroutinefunction(cleanup_method):
                             await cleanup_method()
                         else:
@@ -216,6 +211,7 @@ container = DIContainer()
 # Helper Functions
 # ============================================================================
 
+
 def create_bot_services_container() -> DIContainer:
     """Create and configure a DI container with all bot services.
 
@@ -236,78 +232,109 @@ def create_bot_services_container() -> DIContainer:
     # LLM Service (Ollama or OpenRouter)
     if Config.LLM_PROVIDER == "openrouter":
         from services.llm.openrouter import OpenRouterService
-        c.register("llm", lambda: OpenRouterService(
-            api_key=Config.OPENROUTER_API_KEY,
-            model=Config.OPENROUTER_MODEL,
-            temperature=Config.LLM_TEMPERATURE,
-            max_tokens=Config.LLM_MAX_TOKENS,
-        ))
+
+        c.register(
+            "llm",
+            lambda: OpenRouterService(
+                api_key=Config.OPENROUTER_API_KEY,
+                model=Config.OPENROUTER_MODEL,
+                temperature=Config.LLM_TEMPERATURE,
+                max_tokens=Config.LLM_MAX_TOKENS,
+            ),
+        )
     else:  # ollama
         from services.llm.ollama import OllamaService
-        c.register("llm", lambda: OllamaService(
-            host=Config.OLLAMA_HOST,
-            model=Config.OLLAMA_MODEL,
-            temperature=Config.LLM_TEMPERATURE,
-            max_tokens=Config.LLM_MAX_TOKENS,
-        ))
+
+        c.register(
+            "llm",
+            lambda: OllamaService(
+                host=Config.OLLAMA_HOST,
+                model=Config.OLLAMA_MODEL,
+                temperature=Config.LLM_TEMPERATURE,
+                max_tokens=Config.LLM_MAX_TOKENS,
+            ),
+        )
 
     # TTS Service
     from services.voice.tts import TTSService
-    c.register("tts", lambda: TTSService(
-        engine=Config.TTS_ENGINE,
-        kokoro_api_url=Config.KOKORO_API_URL,
-        kokoro_voice=Config.KOKORO_VOICE,
-    ))
+
+    c.register(
+        "tts",
+        lambda: TTSService(
+            engine=Config.TTS_ENGINE,
+            kokoro_api_url=Config.KOKORO_API_URL,
+            kokoro_voice=Config.KOKORO_VOICE,
+        ),
+    )
 
     # STT Service (Whisper)
     if Config.STT_PROVIDER == "whisper":
         from services.whisper_stt import WhisperSTTService
-        c.register("stt", lambda: WhisperSTTService(
-            model_size=Config.WHISPER_MODEL_SIZE,
-            language="en",
-        ))
+
+        c.register(
+            "stt",
+            lambda: WhisperSTTService(
+                model_size=Config.WHISPER_MODEL_SIZE,
+                language="en",
+            ),
+        )
 
     # RVC Service (if enabled)
     if Config.RVC_ENABLED:
         from services.clients.rvc_client import RVCHTTPClient
-        c.register("rvc", lambda: RVCHTTPClient(
-            base_url=Config.RVC_WEBUI_URL,
-            default_model=Config.DEFAULT_RVC_MODEL,
-        ))
+
+        c.register(
+            "rvc",
+            lambda: RVCHTTPClient(
+                base_url=Config.RVC_WEBUI_URL,
+                default_model=Config.DEFAULT_RVC_MODEL,
+            ),
+        )
 
     # Chat History Manager
     from utils.helpers import ChatHistoryManager
+
     c.register("history", lambda: ChatHistoryManager(Config.DATA_DIR))
 
     # User Profiles (if enabled)
     if Config.USER_PROFILES_ENABLED:
         from services.discord.profiles import UserProfileService
-        c.register("user_profiles", lambda: UserProfileService(Config.DATA_DIR))
+
+        c.register(
+            "user_profiles", lambda: UserProfileService(Config.USER_PROFILES_PATH)
+        )
 
     # RAG Service (if enabled)
     if Config.RAG_ENABLED:
         from services.rag import RAGService
-        c.register("rag", lambda: RAGService(
-            knowledge_dir=Config.RAG_KNOWLEDGE_DIR,
-            collection_name=Config.RAG_COLLECTION_NAME,
-        ))
+
+        c.register(
+            "rag",
+            lambda: RAGService(
+                knowledge_dir=Config.RAG_KNOWLEDGE_DIR,
+                collection_name=Config.RAG_COLLECTION_NAME,
+            ),
+        )
 
     # LLM Fallback Manager (if enabled)
     if Config.LLM_FALLBACK_ENABLED and Config.LLM_FALLBACK_MODELS:
         from services.llm_fallback import LLMFallbackManager, ModelConfig
+
         fallback_models = []
-        for i, model_spec in enumerate(Config.LLM_FALLBACK_MODELS.split(',')):
-            parts = model_spec.strip().split(':')
+        for i, model_spec in enumerate(Config.LLM_FALLBACK_MODELS.split(",")):
+            parts = model_spec.strip().split(":")
             model_name = parts[0].strip()
             cost_tier = parts[1].strip() if len(parts) > 1 else "free"
             max_temp = 1.0 if "amazon/nova" in model_name.lower() else None
-            fallback_models.append(ModelConfig(
-                name=model_name,
-                provider=Config.LLM_PROVIDER,
-                max_temp=max_temp,
-                cost_tier=cost_tier,
-                priority=i
-            ))
+            fallback_models.append(
+                ModelConfig(
+                    name=model_name,
+                    provider=Config.LLM_PROVIDER,
+                    max_temp=max_temp,
+                    cost_tier=cost_tier,
+                    priority=i,
+                )
+            )
         c.register("llm_fallback", lambda: LLMFallbackManager(fallback_models))
 
     logger.info(f"DI Container configured with {len(c.list_services())} services")

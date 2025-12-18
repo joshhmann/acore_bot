@@ -13,6 +13,7 @@
 3. **Rebaser Agent** - Read `.promptx/personas/agent-rebaser.md` - For cleaning git history and rebasing changes
 4. **Merger Agent** - Read `.promptx/personas/agent-merger.md` - For merging code across branches
 5. **Multiplan Manager Agent** - Read `.promptx/personas/agent-multiplan-manager.md` - For orchestrating parallel work and creating plans
+6. **Production Readiness Agent** - Read `.promptx/personas/agent-prod-warden.md` - For final deployment safety checks and dependency validation
 
 **DO NOT PROCEED WITHOUT SELECTING A PERSONA.** Each persona has specific rules, workflows, and tools that you MUST follow exactly.
 
@@ -23,6 +24,7 @@
 - **Asked to clean git history or rebase changes?** → Use Rebaser Agent
 - **Asked to merge branches or consolidate work?** → Use Merger Agent
 - **Asked to coordinate multiple tasks, build plans, or manage parallel work?** → Use Multiplan Manager Agent
+- **Asked to verify if code is safe to deploy/ship?** → Use Production Readiness Agent
 
 ## Project Context
 
@@ -109,6 +111,20 @@ sudo ./install_service.sh
 - Class docstrings explaining purpose and usage
 - Method docstrings with Args/Returns sections
 - Use `"""Triple quotes"""` for docstrings
+
+## Documentation Strategy
+
+**CRITICAL RULE: STOP CREATING NEW DOC FILES.**
+We avoid clutter ("a ton of docs laying around") by updating central, living documentation.
+
+1.  **Do NOT create new implementation summary files** (e.g., `T05_Implementation_Summary.md`) for every small task.
+2.  **Update Existing Docs**:
+    *   **Features**: Update files in `docs/features/` with new details.
+    *   **Status**: Update `docs/STATUS.md` to reflect progress.
+    *   **Reports**: Only use `docs/reports/` for immutable snapshots (reviews, major checkpoints).
+3.  **Temporary Files**: If you create a plan (`.agent/plan.md`), **DELETE IT** when the task is done.
+4.  **Code is Documentation**: Prioritize excellent docstrings and type hints over external markdown files.
+
 
 # CRITICAL REMINDER
 You CANNOT proceed without adopting a persona. Each persona has:

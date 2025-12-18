@@ -21,6 +21,10 @@
     "creator": "Migration Script",
     "character_version": "2.0",
     "avatar_url": "https://files.catbox.moe/0s0ay8.jpg",
-    "extensions": {}
+    "extensions": {
+      "knowledge_domain": {
+        "rag_categories": ["jesus", "biblical"]
+      }
+    }
   }
 }

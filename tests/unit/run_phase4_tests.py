@@ -2,7 +2,6 @@
 """Simple test runner for Phase 4 optimizations (no pytest required)."""
 
 import asyncio
-import json
 import tempfile
 import sys
 from pathlib import Path

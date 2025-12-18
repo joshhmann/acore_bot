@@ -228,7 +228,7 @@ class OpenRouterService(LLMInterface):
                     )
 
                 if not data["choices"] or len(data["choices"]) == 0:
-                    logger.error(f"OpenRouter returned empty choices array")
+                    logger.error("OpenRouter returned empty choices array")
                     raise Exception("OpenRouter returned no response choices")
 
                 # Get token usage from response

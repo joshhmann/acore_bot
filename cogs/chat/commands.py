@@ -4,7 +4,6 @@ import logging
 import discord
 from discord.ext import commands
 
-from config import Config
 from utils.helpers import format_error, format_success
 
 logger = logging.getLogger(__name__)
@@ -100,7 +99,7 @@ class ChatCommandHandler:
                     
                 await interaction.response.send_message(
                     format_success(
-                        f"Conversation session ended & history cleared. Use @mention or `/chat` to start a new session."
+                        "Conversation session ended & history cleared. Use @mention or `/chat` to start a new session."
                     ),
                     ephemeral=True,
                 )

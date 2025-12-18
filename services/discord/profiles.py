@@ -1,13 +1,13 @@
 """User Profile service for learning about Discord users over time."""
+
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
 from datetime import datetime
 import asyncio
 import aiofiles
 import pickle
-import os
 import time
 
 logger = logging.getLogger(__name__)
@@ -26,19 +26,27 @@ class UserProfileService:
     INDEX_VERSION = 1
     INDEX_CACHE_FILE = "_index_cache.pkl"
 
-    def __init__(self, profiles_dir: Path, ollama_service=None):
+    def __init__(
+        self, profiles_dir: Path, ollama_service=None, persona_id: Optional[str] = None
+    ):
         """Initialize user profile service.
 
         Args:
-            profiles_dir: Directory to store user profile JSON files
+            profiles_dir: Base directory to store user profile JSON files
             ollama_service: Optional OllamaService for AI-powered profile extraction
+            persona_id: Optional persona ID for memory isolation (default: "default")
         """
-        self.profiles_dir = Path(profiles_dir)
+        # Store base directory and persona ID
+        self.profiles_base_dir = Path(profiles_dir)
+        self.persona_id = persona_id or "default"
+
+        # Persona-scoped directory: data/profiles/{persona_id}/
+        self.profiles_dir = self.profiles_base_dir / self.persona_id
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
 
         # In-memory cache of loaded profiles
         self.profiles: Dict[int, Dict] = {}
-        
+
         # Indices for fast lookups
         self.trait_index: Dict[str, set] = {}
         self.interest_index: Dict[str, set] = {}
@@ -52,14 +60,49 @@ class UserProfileService:
         self._save_task = None
         self._index_task = None
 
-        logger.info(f"User profile service initialized (dir: {self.profiles_dir})")
+        logger.info(
+            f"User profile service initialized (persona: {self.persona_id}, dir: {self.profiles_dir})"
+        )
+
+    def set_persona(self, persona_id: str):
+        """Switch to a different persona context.
+
+        This updates the profiles directory and clears caches.
+        Pending dirty profiles will be flushed before switching.
+
+        Args:
+            persona_id: The persona ID to switch to
+        """
+        if persona_id == self.persona_id:
+            return  # Already using this persona
+
+        logger.info(
+            f"Switching persona context from '{self.persona_id}' to '{persona_id}'"
+        )
+
+        # Flush any pending saves for current persona
+        # Note: This is sync, caller should await _flush_all_dirty() if needed
+
+        # Update persona context
+        self.persona_id = persona_id
+        self.profiles_dir = self.profiles_base_dir / self.persona_id
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+
+        # Clear caches
+        self.profiles.clear()
+        self.trait_index.clear()
+        self.interest_index.clear()
+        self._indices_built = False
+        self.dirty_profiles.clear()
+
+        logger.info(f"Switched to persona '{persona_id}' (dir: {self.profiles_dir})")
 
     async def start_background_saver(self):
         """Start the background task to save dirty profiles periodically."""
         if self._save_task is None:
             self._save_task = asyncio.create_task(self._periodic_save_loop())
             logger.info("Started background profile saver")
-            
+
         # Also start building/loading indices in background
         if self._index_task is None and not self._indices_built:
             self._index_task = asyncio.create_task(self._load_or_build_indices())
@@ -73,15 +116,17 @@ class UserProfileService:
             except asyncio.CancelledError:
                 pass
             self._save_task = None
-        
+
         # Flush all dirty profiles
         await self._flush_all_dirty()
 
     async def _periodic_save_loop(self):
-        """Loop to save dirty profiles every minute."""
+        """Loop to save dirty profiles at configured interval."""
+        from config import Config
+
         try:
             while True:
-                await asyncio.sleep(60)  # Save every minute
+                await asyncio.sleep(Config.PROFILE_SAVE_INTERVAL_SECONDS)
                 await self._flush_all_dirty()
         except asyncio.CancelledError:
             pass
@@ -95,7 +140,7 @@ class UserProfileService:
 
         dirty_ids = list(self.dirty_profiles)
         self.dirty_profiles.clear()
-        
+
         logger.debug(f"Flushing {len(dirty_ids)} dirty profiles...")
 
         # Parallel save with concurrency limit
@@ -107,8 +152,7 @@ class UserProfileService:
 
         # Use asyncio.gather for parallel saving
         await asyncio.gather(
-            *[save_with_limit(uid) for uid in dirty_ids],
-            return_exceptions=True
+            *[save_with_limit(uid) for uid in dirty_ids], return_exceptions=True
         )
 
     async def _flush_profile(self, user_id: int) -> bool:
@@ -137,6 +181,7 @@ class UserProfileService:
         if cache_path.exists():
             try:
                 logger.info(f"Loading profile indices from cache: {cache_path}")
+
                 # Use to_thread for pickle loading as it can be CPU intensive
                 def load_pickle():
                     with open(cache_path, "rb") as f:
@@ -151,7 +196,9 @@ class UserProfileService:
                     logger.info("Successfully loaded profile indices from cache")
                     return
                 else:
-                    logger.info(f"Index cache version mismatch (got {cache_data.get('version')}, expected {self.INDEX_VERSION})")
+                    logger.info(
+                        f"Index cache version mismatch (got {cache_data.get('version')}, expected {self.INDEX_VERSION})"
+                    )
             except Exception as e:
                 logger.warning(f"Failed to load index cache: {e}")
 
@@ -169,7 +216,7 @@ class UserProfileService:
                 "version": self.INDEX_VERSION,
                 "trait_index": self.trait_index,
                 "interest_index": self.interest_index,
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
 
             def save_pickle():
@@ -193,25 +240,25 @@ class UserProfileService:
                         content = await f.read()
                         profile = json.loads(content)
                         user_id = profile["user_id"]
-                        
+
                         # Cache profile
                         self.profiles[user_id] = profile
-                        
+
                         # Update indices
                         self._update_indices(user_id, profile)
                         count += 1
                 except Exception as e:
                     logger.error(f"Error indexing profile {profile_file}: {e}")
-            
+
             self._indices_built = True
             logger.info(f"Indexed {count} user profiles")
-            
+
         except Exception as e:
             logger.error(f"Failed to build profile indices: {e}")
 
     def _update_indices(self, user_id: int, profile: Dict):
         """Update indices for a single user.
-        
+
         Args:
             user_id: Discord user ID
             profile: User profile dict
@@ -222,7 +269,7 @@ class UserProfileService:
             if trait_lower not in self.trait_index:
                 self.trait_index[trait_lower] = set()
             self.trait_index[trait_lower].add(user_id)
-            
+
         # Update interest index
         for interest in profile.get("interests", []):
             interest_lower = interest.lower()
@@ -315,7 +362,7 @@ class UserProfileService:
 
     async def save_profile(self, user_id: int) -> bool:
         """Mark a user's profile as dirty to be saved later.
-        
+
         Args:
             user_id: Discord user ID
 
@@ -328,12 +375,14 @@ class UserProfileService:
 
         profile = self.profiles[user_id]
         profile["last_updated"] = datetime.utcnow().isoformat()
-        
+
         # Mark as dirty
         self.dirty_profiles.add(user_id)
         return True
 
-    async def add_fact(self, user_id: int, fact: str, source: str = "conversation") -> bool:
+    async def add_fact(
+        self, user_id: int, fact: str, source: str = "conversation"
+    ) -> bool:
         """Add a fact about a user.
 
         Args:
@@ -437,7 +486,9 @@ class UserProfileService:
 
         return await self.save_profile(user_id)
 
-    async def set_relationship(self, user_id: int, other_user_id: int, relationship: str) -> bool:
+    async def set_relationship(
+        self, user_id: int, other_user_id: int, relationship: str
+    ) -> bool:
         """Set relationship between users.
 
         Args:
@@ -510,7 +561,7 @@ class UserProfileService:
 
         # Truncate if too long
         if len(context) > max_length:
-            context = context[:max_length - 3] + "..."
+            context = context[: max_length - 3] + "..."
 
         return context
 
@@ -525,20 +576,20 @@ class UserProfileService:
         """
         matching_users = []
         trait_lower = trait.lower()
-        
+
         # Use index if available
         if trait_lower in self.trait_index:
             return list(self.trait_index[trait_lower])
-            
+
         # Fallback to scanning if indices not built yet (should be rare)
         if not self._indices_built:
-             # Load all profiles
+            # Load all profiles
             for profile_file in self.profiles_dir.glob("user_*.json"):
                 try:
                     async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
                         content = await f.read()
                         profile = json.loads(content)
-                        
+
                         # Update cache while we're at it
                         self.profiles[profile["user_id"]] = profile
                         self._update_indices(profile["user_id"], profile)
@@ -564,7 +615,7 @@ class UserProfileService:
         """
         matching_users = []
         interest_lower = interest.lower()
-        
+
         # Use index if available
         if interest_lower in self.interest_index:
             return list(self.interest_index[interest_lower])
@@ -576,12 +627,14 @@ class UserProfileService:
                     async with aiofiles.open(profile_file, "r", encoding="utf-8") as f:
                         content = await f.read()
                         profile = json.loads(content)
-                        
+
                         # Update cache
                         self.profiles[profile["user_id"]] = profile
                         self._update_indices(profile["user_id"], profile)
 
-                        user_interests = [i.lower() for i in profile.get("interests", [])]
+                        user_interests = [
+                            i.lower() for i in profile.get("interests", [])
+                        ]
                         if interest_lower in user_interests:
                             matching_users.append(profile["user_id"])
 
@@ -600,7 +653,7 @@ class UserProfileService:
             Formatted string describing known users
         """
         all_profiles = []
-        
+
         if self._indices_built:
             # Use cached profiles
             all_profiles = list(self.profiles.values())
@@ -627,8 +680,12 @@ class UserProfileService:
 
         for profile in all_profiles:
             username = profile.get("username", f"User {profile['user_id']}")
-            traits = ", ".join(profile["traits"][:3]) if profile["traits"] else "unknown"
-            interests = ", ".join(profile["interests"][:3]) if profile["interests"] else "none"
+            traits = (
+                ", ".join(profile["traits"][:3]) if profile["traits"] else "unknown"
+            )
+            interests = (
+                ", ".join(profile["interests"][:3]) if profile["interests"] else "none"
+            )
 
             user_desc = f"- {username}: {traits}"
             if interests != "none":
@@ -665,7 +722,9 @@ class UserProfileService:
         profile["interaction_count"] += 1
         return await self.save_profile(user_id)
 
-    async def learn_from_conversation(self, user_id: int, username: str, user_message: str, bot_response: str) -> bool:
+    async def learn_from_conversation(
+        self, user_id: int, username: str, user_message: str, bot_response: str
+    ) -> bool:
         """Automatically learn about a user from a conversation using AI.
 
         Args:
@@ -678,10 +737,13 @@ class UserProfileService:
             True if profile was updated
         """
         if not self.ollama:
-            logger.warning("Cannot learn from conversation - no Ollama service provided")
+            logger.warning(
+                "Cannot learn from conversation - no Ollama service provided"
+            )
             return False
 
         try:
+            response = ""  # Initialize for exception handler
             # Create extraction prompt
             extraction_prompt = f"""Analyze this Discord conversation and extract information about the user.
 
@@ -716,7 +778,7 @@ JSON:"""
             response = await self.ollama.chat(
                 messages=[{"role": "user", "content": extraction_prompt}],
                 system_prompt="You are a precise information extraction system. Return only valid JSON.",
-                temperature=0.3  # Lower temperature for more consistent extraction
+                temperature=0.3,  # Lower temperature for more consistent extraction
             )
 
             # Parse the JSON response
@@ -744,13 +806,17 @@ JSON:"""
 
             # Add new traits (avoid duplicates)
             for trait in extracted.get("traits", []):
-                if trait and trait.lower() not in [t.lower() for t in profile["traits"]]:
+                if trait and trait.lower() not in [
+                    t.lower() for t in profile["traits"]
+                ]:
                     profile["traits"].append(trait)
                     updated = True
 
             # Add new interests (avoid duplicates)
             for interest in extracted.get("interests", []):
-                if interest and interest.lower() not in [i.lower() for i in profile["interests"]]:
+                if interest and interest.lower() not in [
+                    i.lower() for i in profile["interests"]
+                ]:
                     profile["interests"].append(interest)
                     updated = True
 
@@ -787,21 +853,21 @@ JSON:"""
             # Extract behavioral instructions (e.g., "when you see X, say Y")
             if extracted.get("behavioral_instruction"):
                 instruction = extracted["behavioral_instruction"]
-                
+
                 # Check if this instruction is about another user (contains "when you see", "for @user", etc.)
                 # We'll store it in the MENTIONED user's profile, not the speaker's
                 import re
-                
+
                 # Try to extract mentioned user IDs from the original message
-                mention_pattern = r'<@!?(\d+)>'
+                mention_pattern = r"<@!?(\d+)>"
                 mentioned_ids = re.findall(mention_pattern, user_message)
-                
+
                 if mentioned_ids:
                     # Store instruction in the MENTIONED user's profile
                     for mentioned_id_str in mentioned_ids:
                         mentioned_id = int(mentioned_id_str)
                         mentioned_profile = await self.load_profile(mentioned_id)
-                        
+
                         fact_entry = {
                             "fact": f"When you see this user: {instruction}",
                             "timestamp": datetime.utcnow().isoformat(),
@@ -809,7 +875,9 @@ JSON:"""
                         }
                         mentioned_profile["facts"].append(fact_entry)
                         await self.save_profile(mentioned_id)
-                        logger.info(f"Learned behavioral instruction for mentioned user {mentioned_id}: {instruction}")
+                        logger.info(
+                            f"Learned behavioral instruction for mentioned user {mentioned_id}: {instruction}"
+                        )
                         updated = True
                 else:
                     # No mention found, store in speaker's profile as before
@@ -820,24 +888,32 @@ JSON:"""
                     }
                     profile["facts"].append(fact_entry)
                     updated = True
-                    logger.info(f"Learned behavioral instruction for user {user_id}: {instruction}")
+                    logger.info(
+                        f"Learned behavioral instruction for user {user_id}: {instruction}"
+                    )
 
             # Save if anything was learned
             if updated:
                 await self.save_profile(user_id)
-                logger.info(f"Learned new information about user {user_id} from conversation")
+                logger.info(
+                    f"Learned new information about user {user_id} from conversation"
+                )
 
             return updated
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse AI extraction response: {e}")
-            logger.debug(f"Response was: {response}")
+            # Only log response if it was successfully retrieved
+            if "response" in locals():
+                logger.debug(f"Response was: {response}")
             return False
         except Exception as e:
             logger.error(f"Failed to learn from conversation for user {user_id}: {e}")
             return False
 
-    async def update_affection(self, user_id: int, message: str, bot_response: str) -> dict:
+    async def update_affection(
+        self, user_id: int, message: str, bot_response: str
+    ) -> dict:
         """Update affection score based on conversation quality.
 
         Args:
@@ -892,7 +968,7 @@ JSON:"""
             response = await self.ollama.chat(
                 messages=[{"role": "user", "content": sentiment_prompt}],
                 system_prompt="You are a sentiment analyzer. Return only valid JSON.",
-                temperature=0.3
+                temperature=0.3,
             )
 
             # Parse response - clean up markdown and extra text
@@ -911,14 +987,21 @@ JSON:"""
                 start = response.find("{")
                 end = response.rfind("}")
                 if start >= 0 and end > start:
-                    response = response[start:end+1]
+                    response = response[start : end + 1]
 
             # Remove any comments, trailing commas, and fix common JSON issues
             import re
-            response = re.sub(r'//.*$', '', response, flags=re.MULTILINE)  # Remove comments
-            response = re.sub(r',\s*}', '}', response)  # Remove trailing commas
-            response = re.sub(r',\s*]', ']', response)  # Remove trailing commas in arrays
-            response = re.sub(r':\s*\+(\d)', r': \1', response)  # Remove + prefix from positive numbers
+
+            response = re.sub(
+                r"//.*$", "", response, flags=re.MULTILINE
+            )  # Remove comments
+            response = re.sub(r",\s*}", "}", response)  # Remove trailing commas
+            response = re.sub(
+                r",\s*]", "]", response
+            )  # Remove trailing commas in arrays
+            response = re.sub(
+                r":\s*\+(\d)", r": \1", response
+            )  # Remove + prefix from positive numbers
 
             try:
                 sentiment_data = json.loads(response)
@@ -930,12 +1013,14 @@ JSON:"""
                     "sentiment": "neutral",
                     "is_funny": False,
                     "is_interesting": False,
-                    "affection_change": 0
+                    "affection_change": 0,
                 }
 
             # Update affection
             affection_change = sentiment_data.get("affection_change", 0)
-            profile["affection"]["level"] = max(0, min(100, profile["affection"]["level"] + affection_change))
+            profile["affection"]["level"] = max(
+                0, min(100, profile["affection"]["level"] + affection_change)
+            )
 
             # Track positive/negative interactions
             if sentiment_data.get("sentiment") == "positive":

@@ -10,8 +10,6 @@ This script analyzes logs and metrics to show:
 
 import re
 import sys
-from datetime import datetime, timedelta
-from collections import defaultdict
 import statistics
 
 
@@ -90,7 +88,7 @@ def analyze_performance(streaming_data, non_streaming_data):
 
     # Overall stats
     total_requests = len(streaming_data) + len(non_streaming_data)
-    print(f"📊 OVERALL STATISTICS")
+    print("📊 OVERALL STATISTICS")
     print(f"  Total Requests: {total_requests}")
     print(f"  Streaming: {len(streaming_data)} ({len(streaming_data)/total_requests*100:.1f}%)")
     print(f"  Non-Streaming: {len(non_streaming_data)} ({len(non_streaming_data)/total_requests*100:.1f}%)")
@@ -122,13 +120,13 @@ def analyze_performance(streaming_data, non_streaming_data):
         stream_avg_tps = statistics.mean([d['tps'] for d in streaming_data])
         non_stream_avg_tps = statistics.mean([d['tps'] for d in non_streaming_data])
 
-        print(f"  Avg Response Time:")
+        print("  Avg Response Time:")
         print(f"    Streaming:     {stream_avg_time:.2f}s")
         print(f"    Non-Streaming: {non_stream_avg_time:.2f}s")
         print(f"    Difference:    {abs(stream_avg_time - non_stream_avg_time):.2f}s ({abs(stream_avg_time - non_stream_avg_time) / non_stream_avg_time * 100:.1f}%)")
         print()
 
-        print(f"  Avg TPS:")
+        print("  Avg TPS:")
         print(f"    Streaming:     {stream_avg_tps:.1f} tokens/s")
         print(f"    Non-Streaming: {non_stream_avg_tps:.1f} tokens/s")
         print(f"    Ratio:         {non_stream_avg_tps / stream_avg_tps:.1f}x faster")

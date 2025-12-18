@@ -1,4 +1,5 @@
 """Parakeet STT API Client - connects to external Parakeet FastAPI service."""
+
 import aiohttp
 import logging
 from pathlib import Path
@@ -32,9 +33,11 @@ class ParakeetAPIClient:
         return self._session
 
     async def close(self):
-        """Close the client session."""
+        """Close the aiohttp session."""
         if self._session and not self._session.closed:
             await self._session.close()
+            self._session = None
+
 
     async def health_check(self) -> bool:
         """Check if the Parakeet service is healthy."""
@@ -66,13 +69,17 @@ class ParakeetAPIClient:
             )
             data.add_field("include_timestamps", str(include_timestamps).lower())
 
-            async with session.post(f"{self.base_url}/transcribe", data=data) as response:
+            async with session.post(
+                f"{self.base_url}/transcribe", data=data
+            ) as response:
                 if response.status == 200:
                     result = await response.json()
                     return result.get("text", "").strip()
                 else:
                     error_text = await response.text()
-                    logger.error(f"Parakeet transcription failed ({response.status}): {error_text}")
+                    logger.error(
+                        f"Parakeet transcription failed ({response.status}): {error_text}"
+                    )
                     return None
         except asyncio.TimeoutError:
             logger.error("Parakeet transcription timed out")
@@ -84,7 +91,7 @@ class ParakeetAPIClient:
 
 class ParakeetAPIService:
     """High-level STT service that uses the Parakeet API.
-    
+
     This provides the same interface as ParakeetSTTService but uses
     an external API instead of loading the model in-process.
     """
@@ -108,13 +115,13 @@ class ParakeetAPIService:
 
     def is_available(self) -> bool:
         """Check if Parakeet API is available.
-        
+
         Note: This does a synchronous check by running async in a new loop.
         For async code, use is_available_async() instead.
         """
         if self._available is not None:
             return self._available
-        
+
         try:
             loop = asyncio.get_event_loop()
             if loop.is_running():
@@ -126,7 +133,7 @@ class ParakeetAPIService:
                 self._available = asyncio.run(self._client.health_check())
             except Exception:
                 self._available = False
-        
+
         return self._available
 
     async def is_available_async(self) -> bool:
@@ -149,10 +156,10 @@ class ParakeetAPIService:
             Dictionary with transcription results
         """
         text = await self._client.transcribe(audio_path)
-        
+
         if text is None:
             raise RuntimeError("Parakeet API transcription failed")
-        
+
         return {
             "text": text.strip(),
             "language": self.language,
@@ -200,9 +207,33 @@ class ParakeetAPIService:
 
     def get_supported_languages(self) -> list:
         """Get list of supported languages."""
-        return ["en", "de", "es", "fr", "it", "pt", "pl", "nl", "ru", "uk",
-                "cs", "ro", "hu", "sk", "bg", "hr", "sl", "lt", "lv", "et",
-                "fi", "sv", "da", "no", "el"]
+        return [
+            "en",
+            "de",
+            "es",
+            "fr",
+            "it",
+            "pt",
+            "pl",
+            "nl",
+            "ru",
+            "uk",
+            "cs",
+            "ro",
+            "hu",
+            "sk",
+            "bg",
+            "hr",
+            "sl",
+            "lt",
+            "lv",
+            "et",
+            "fi",
+            "sv",
+            "da",
+            "no",
+            "el",
+        ]
 
     def estimate_model_memory(self) -> dict:
         """Estimate memory requirements."""
@@ -218,7 +249,9 @@ class ParakeetAPIService:
 
 
 # Convenience function
-async def transcribe_audio(audio_path: Path, api_url: str = "http://localhost:8890") -> Optional[str]:
+async def transcribe_audio(
+    audio_path: Path, api_url: str = "http://localhost:8890"
+) -> Optional[str]:
     """Transcribe audio using Parakeet API."""
     client = ParakeetAPIClient(base_url=api_url)
     try:

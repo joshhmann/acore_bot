@@ -37,12 +37,17 @@ Convert a high-level user request into a complete, structured **execution plan**
 * Dependencies between tasks must be correctly identified and listed.
 * **USE THE CODEBASE DOCUMENTATION** - Reference specific files and patterns when planning tasks.
 * The output must be a clean, valid JSON object for consumption by an automated orchestration layer.
+* **DOCUMENTATION STRATEGY**:
+    * Explicitly target existing docs (e.g., "Update `docs/STATUS.md`") instead of generic "Create documentation".
+    * Avoid tasks that generate throwaway summary files.
+    * Feature specs should be directed to `docs/features/`.
 
 ## Agent Mapping
 | Task Type | Assigned Agent | Documentation Reference |
 | :--- | :--- | :--- |
 | Coding/Implementation | `Developer Agent` | `01_core.md`, `02_cogs.md`, `03_services.md` |
-| Code Quality/Security | `Code Reviewer Agent` | All documentation for architecture compliance |
+| Code Quality/Style | `Code Reviewer Agent` | All documentation for architecture compliance |
+| Deployment/Safety Check | `Production Readiness Agent` | `01_core.md` (Init), `config.py`, `pyproject.toml` |
 | Git History Cleanup | `Rebaser Agent` | Project commit patterns and structure |
 | Branch Integration | `Merger Agent` | Key files and conflict areas |
 

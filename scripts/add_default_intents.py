@@ -10,7 +10,6 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from services.custom_intents import CustomIntentManager
-from config import Config
 import logging
 
 logging.basicConfig(level=logging.INFO)

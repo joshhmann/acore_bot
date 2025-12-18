@@ -95,7 +95,6 @@ class PerformanceBenchmark:
             # Calculate metrics
             response_length = len(response)
             word_count = len(response.split())
-            tokens_generated = self.llm.total_tokens_generated  # Approximate
 
             result = {
                 'query': query,

@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Optional, Dict
+from typing import List, Dict
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -122,7 +122,7 @@ class Config:
 
     # Specific weights for persona selection (optional)
     # Default is equal 1/N chance for each active persona
-    PERSONA_WEIGHTS = {}
+    PERSONA_WEIGHTS: Dict[str, float] = {}
 
     # System Prompt / Personality
     SYSTEM_PROMPT_FILE: str = os.getenv("SYSTEM_PROMPT_FILE", "./prompts/default.txt")
@@ -354,16 +354,88 @@ class Config:
         os.getenv("NATURAL_TIMING_MAX_DELAY", "2.0")
     )  # Maximum delay in seconds
 
-    # Mood System Settings
-    MOOD_SYSTEM_ENABLED: bool = (
-        os.getenv("MOOD_SYSTEM_ENABLED", "true").lower() == "true"
-    )
+    # --- Persona & Behavior Enhancement Features ---
+
+    # T1-T2: Dynamic Mood System Settings
+    # Note: MOOD_SYSTEM_ENABLED is already defined above at line 329
     MOOD_UPDATE_FROM_INTERACTIONS: bool = (
         os.getenv("MOOD_UPDATE_FROM_INTERACTIONS", "true").lower() == "true"
     )  # Auto-update mood from user interactions
     MOOD_TIME_BASED: bool = (
         os.getenv("MOOD_TIME_BASED", "true").lower() == "true"
     )  # Use time of day for mood
+    MOOD_DECAY_MINUTES: int = int(
+        os.getenv("MOOD_DECAY_MINUTES", "30")
+    )  # Minutes before mood decays to neutral
+    MOOD_MAX_INTENSITY_SHIFT: float = float(
+        os.getenv("MOOD_MAX_INTENSITY_SHIFT", "0.1")
+    )  # Max mood change per message
+
+    # T7-T8: Curiosity-Driven Follow-Up Questions
+    CURIOSITY_ENABLED: bool = os.getenv("CURIOSITY_ENABLED", "true").lower() == "true"
+    CURIOSITY_INDIVIDUAL_COOLDOWN_SECONDS: int = int(
+        os.getenv("CURIOSITY_INDIVIDUAL_COOLDOWN_SECONDS", "300")
+    )
+    CURIOSITY_WINDOW_LIMIT_SECONDS: int = int(
+        os.getenv("CURIOSITY_WINDOW_LIMIT_SECONDS", "900")
+    )
+    CURIOSITY_TOPIC_MEMORY_SIZE: int = int(
+        os.getenv("CURIOSITY_TOPIC_MEMORY_SIZE", "20")
+    )
+
+    # T11-T12: Adaptive Ambient Timing
+    ADAPTIVE_TIMING_ENABLED: bool = (
+        os.getenv("ADAPTIVE_TIMING_ENABLED", "true").lower() == "true"
+    )
+    ADAPTIVE_TIMING_LEARNING_WINDOW_DAYS: int = int(
+        os.getenv("ADAPTIVE_TIMING_LEARNING_WINDOW_DAYS", "7")
+    )
+    CHANNEL_ACTIVITY_PROFILE_PATH: Path = Path(
+        os.getenv(
+            "CHANNEL_ACTIVITY_PROFILE_PATH", "./data/channel_activity_profiles.json"
+        )
+    )
+
+    # T13-T14: Character Evolution System
+    PERSONA_EVOLUTION_ENABLED: bool = (
+        os.getenv("PERSONA_EVOLUTION_ENABLED", "true").lower() == "true"
+    )
+    PERSONA_EVOLUTION_PATH: Path = Path(
+        os.getenv("PERSONA_EVOLUTION_PATH", "./data/persona_evolution")
+    )
+
+    # T15-T16: Persona Conflict System
+    PERSONA_CONFLICTS_ENABLED: bool = (
+        os.getenv("PERSONA_CONFLICTS_ENABLED", "true").lower() == "true"
+    )
+    CONFLICT_DECAY_RATE: float = float(os.getenv("CONFLICT_DECAY_RATE", "0.1"))
+    CONFLICT_ESCALATION_AMOUNT: float = float(
+        os.getenv("CONFLICT_ESCALATION_AMOUNT", "0.2")
+    )
+
+    # T17-T18: Activity-Based Persona Switching
+    ACTIVITY_ROUTING_ENABLED: bool = (
+        os.getenv("ACTIVITY_ROUTING_ENABLED", "true").lower() == "true"
+    )
+    ACTIVITY_ROUTING_PRIORITY: int = int(os.getenv("ACTIVITY_ROUTING_PRIORITY", "100"))
+
+    # T25-T26: Semantic Lorebook Triggering
+    SEMANTIC_LOREBOOK_ENABLED: bool = (
+        os.getenv("SEMANTIC_LOREBOOK_ENABLED", "true").lower() == "true"
+    )
+    SEMANTIC_LOREBOOK_THRESHOLD: float = float(
+        os.getenv("SEMANTIC_LOREBOOK_THRESHOLD", "0.65")
+    )
+    SEMANTIC_LOREBOOK_CACHE_SIZE: int = int(
+        os.getenv("SEMANTIC_LOREBOOK_CACHE_SIZE", "1000")
+    )
+
+    # T23-T24: Real-Time Analytics Dashboard
+    ANALYTICS_DASHBOARD_ENABLED: bool = (
+        os.getenv("ANALYTICS_DASHBOARD_ENABLED", "false").lower() == "true"
+    )
+    ANALYTICS_DASHBOARD_PORT: int = int(os.getenv("ANALYTICS_DASHBOARD_PORT", "8080"))
+    ANALYTICS_API_KEY: str = os.getenv("ANALYTICS_API_KEY", "change_me_in_production")
 
     # Self-Awareness Settings
     SELF_AWARENESS_ENABLED: bool = (
@@ -415,11 +487,81 @@ class Config:
     LOG_BACKUP_COUNT: int = int(
         os.getenv("LOG_BACKUP_COUNT", "5")
     )  # Keep 5 backup files
+    LOG_FORMAT: str = os.getenv(
+        "LOG_FORMAT", "text"
+    )  # "json" or "text" for structured logging
+    LOG_COMPRESS: bool = (
+        os.getenv("LOG_COMPRESS", "true").lower() == "true"
+    )  # Compress old logs
+
+    # Chat Timing Configuration
+    TYPING_INDICATOR_MIN_DELAY: float = float(
+        os.getenv("TYPING_INDICATOR_MIN_DELAY", "0.5")
+    )  # Minimum typing delay in seconds
+    TYPING_INDICATOR_MAX_DELAY: float = float(
+        os.getenv("TYPING_INDICATOR_MAX_DELAY", "2.0")
+    )  # Maximum typing delay in seconds
+
+    # Response Token Limits by Context
+    RESPONSE_TOKENS_VERY_SHORT: int = int(os.getenv("RESPONSE_TOKENS_VERY_SHORT", "50"))
+    RESPONSE_TOKENS_SHORT: int = int(os.getenv("RESPONSE_TOKENS_SHORT", "100"))
+    RESPONSE_TOKENS_MEDIUM: int = int(os.getenv("RESPONSE_TOKENS_MEDIUM", "200"))
+    RESPONSE_TOKENS_LONG: int = int(os.getenv("RESPONSE_TOKENS_LONG", "350"))
+    RESPONSE_TOKENS_VERY_LONG: int = int(os.getenv("RESPONSE_TOKENS_VERY_LONG", "500"))
 
     # Performance Logging
     LOG_PERFORMANCE: bool = os.getenv("LOG_PERFORMANCE", "true").lower() == "true"
     LOG_LLM_REQUESTS: bool = os.getenv("LOG_LLM_REQUESTS", "true").lower() == "true"
     LOG_TTS_REQUESTS: bool = os.getenv("LOG_TTS_REQUESTS", "true").lower() == "true"
+
+    # Analytics & Monitoring Configuration
+    ANALYTICS_WEBSOCKET_UPDATE_INTERVAL: float = float(
+        os.getenv("ANALYTICS_WEBSOCKET_UPDATE_INTERVAL", "2.0")
+    )  # WebSocket update interval in seconds
+    ERROR_SPIKE_WINDOW_SECONDS: int = int(
+        os.getenv("ERROR_SPIKE_WINDOW_SECONDS", "300")
+    )  # Time window for error spike detection (5 minutes)
+
+    # Memory & Profile Configuration
+    PROFILE_SAVE_INTERVAL_SECONDS: int = int(
+        os.getenv("PROFILE_SAVE_INTERVAL_SECONDS", "60")
+    )  # Profile auto-save interval
+    RAG_RELEVANCE_THRESHOLD: float = float(
+        os.getenv("RAG_RELEVANCE_THRESHOLD", "0.5")
+    )  # Minimum relevance score for RAG results
+
+    # Persona Behavior Timeouts
+    PERSONA_STICKY_TIMEOUT: int = int(
+        os.getenv("PERSONA_STICKY_TIMEOUT", "300")
+    )  # Sticky persona timeout in seconds (5 minutes)
+    PERSONA_FOLLOWUP_COOLDOWN: int = int(
+        os.getenv("PERSONA_FOLLOWUP_COOLDOWN", "300")
+    )  # Cooldown between followup questions (5 minutes)
+    PERSONA_EVOLUTION_MILESTONES: List[int] = [
+        int(x.strip())
+        for x in os.getenv(
+            "PERSONA_EVOLUTION_MILESTONES", "50,100,500,1000,5000"
+        ).split(",")
+        if x.strip()
+    ]  # Message count milestones for evolution
+
+    # Mood System Advanced Configuration
+    MOOD_CHECK_INTERVAL_SECONDS: int = int(
+        os.getenv("MOOD_CHECK_INTERVAL_SECONDS", "60")
+    )  # How often to check/update mood
+    MOOD_BOREDOM_TIMEOUT_SECONDS: int = int(
+        os.getenv("MOOD_BOREDOM_TIMEOUT_SECONDS", "600")
+    )  # Time before boredom kicks in (10 minutes)
+
+    # Web Search Configuration
+    WEB_SEARCH_RATE_LIMIT_DELAY: float = float(
+        os.getenv("WEB_SEARCH_RATE_LIMIT_DELAY", "2.0")
+    )  # Minimum delay between search requests
+
+    # Service Cleanup Timeouts
+    SERVICE_CLEANUP_TIMEOUT: float = float(
+        os.getenv("SERVICE_CLEANUP_TIMEOUT", "2.0")
+    )  # Timeout for service cleanup operations
 
     # Metrics Configuration
     METRICS_ENABLED: bool = os.getenv("METRICS_ENABLED", "true").lower() == "true"
@@ -505,7 +647,47 @@ class Config:
 
         if cls.NATURAL_TIMING_MAX_DELAY < cls.NATURAL_TIMING_MIN_DELAY:
             raise ValueError(
-                f"NATURAL_TIMING_MAX_DELAY must be >= NATURAL_TIMING_MIN_DELAY"
+                "NATURAL_TIMING_MAX_DELAY must be >= NATURAL_TIMING_MIN_DELAY"
+            )
+
+        # Validate typing indicator delays
+        if cls.TYPING_INDICATOR_MIN_DELAY < 0:
+            raise ValueError(
+                f"TYPING_INDICATOR_MIN_DELAY must be non-negative, got {cls.TYPING_INDICATOR_MIN_DELAY}"
+            )
+
+        if cls.TYPING_INDICATOR_MAX_DELAY < cls.TYPING_INDICATOR_MIN_DELAY:
+            raise ValueError(
+                "TYPING_INDICATOR_MAX_DELAY must be >= TYPING_INDICATOR_MIN_DELAY"
+            )
+
+        # Validate token limits
+        for token_var in [
+            "RESPONSE_TOKENS_VERY_SHORT",
+            "RESPONSE_TOKENS_SHORT",
+            "RESPONSE_TOKENS_MEDIUM",
+            "RESPONSE_TOKENS_LONG",
+            "RESPONSE_TOKENS_VERY_LONG",
+        ]:
+            val = getattr(cls, token_var)
+            if val < 1:
+                raise ValueError(f"{token_var} must be at least 1, got {val}")
+
+        # Validate RAG relevance threshold
+        if not (0.0 <= cls.RAG_RELEVANCE_THRESHOLD <= 1.0):
+            raise ValueError(
+                f"RAG_RELEVANCE_THRESHOLD must be between 0.0 and 1.0, got {cls.RAG_RELEVANCE_THRESHOLD}"
+            )
+
+        # Validate timeouts
+        if cls.PERSONA_STICKY_TIMEOUT < 0:
+            raise ValueError(
+                f"PERSONA_STICKY_TIMEOUT must be non-negative, got {cls.PERSONA_STICKY_TIMEOUT}"
+            )
+
+        if cls.SERVICE_CLEANUP_TIMEOUT < 0:
+            raise ValueError(
+                f"SERVICE_CLEANUP_TIMEOUT must be non-negative, got {cls.SERVICE_CLEANUP_TIMEOUT}"
             )
 
         # Validate probability values

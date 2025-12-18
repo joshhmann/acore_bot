@@ -1,0 +1,95 @@
+{
+  "plan_title": "Production Readiness Plan for acore_bot",
+  "tasks": [
+    {
+      "task_id": "T1",
+      "description": "Fix 132 fixable ruff errors automatically (unused imports, f-string placeholders, unused variables)",
+      "agent": "Developer Agent",
+      "dependencies": []
+    },
+    {
+      "task_id": "T2", 
+      "description": "Fix 36 remaining ruff errors manually (undefined names F821, bare except E722, module import E402, redefined F811)",
+      "agent": "Developer Agent",
+      "dependencies": ["T1"]
+    },
+    {
+      "task_id": "T3",
+      "description": "Install missing type stubs (types-aiofiles) and fix mypy configuration for scripts directory",
+      "agent": "Developer Agent", 
+      "dependencies": ["T2"]
+    },
+    {
+      "task_id": "T4",
+      "description": "Fix critical type errors in main.py - service None handling and cog attribute access",
+      "agent": "Developer Agent",
+      "dependencies": ["T3"]
+    },
+    {
+      "task_id": "T5",
+      "description": "Fix type errors in services/core/factory.py - RAGService None handling",
+      "agent": "Developer Agent",
+      "dependencies": ["T4"]
+    },
+    {
+      "task_id": "T6",
+      "description": "Fix extensive type errors in cogs/character_commands.py - bot attributes and cog properties",
+      "agent": "Developer Agent",
+      "dependencies": ["T5"]
+    },
+    {
+      "task_id": "T7",
+      "description": "Add proper type annotations to all remaining service classes and interfaces",
+      "agent": "Developer Agent",
+      "dependencies": ["T6"]
+    },
+    {
+      "task_id": "T8",
+      "description": "Review all code fixes for quality, security, and compliance with project patterns",
+      "agent": "Code Reviewer Agent",
+      "dependencies": ["T7"]
+    },
+    {
+      "task_id": "T9",
+      "description": "Implement production logging configuration with structured JSON output and log rotation",
+      "agent": "Developer Agent",
+      "dependencies": ["T8"]
+    },
+    {
+      "task_id": "T10", 
+      "description": "Add comprehensive health check endpoints for all critical services (LLM, TTS, RVC, RAG)",
+      "agent": "Developer Agent",
+      "dependencies": ["T9"]
+    },
+    {
+      "task_id": "T11",
+      "description": "Implement graceful shutdown handling for all background tasks and external connections",
+      "agent": "Developer Agent", 
+      "dependencies": ["T10"]
+    },
+    {
+      "task_id": "T12",
+      "description": "Add comprehensive error handling with proper logging, rate limiting, and user feedback",
+      "agent": "Developer Agent",
+      "dependencies": ["T11"]
+    },
+    {
+      "task_id": "T13",
+      "description": "Create production deployment documentation, Docker setup, and environment templates",
+      "agent": "Developer Agent",
+      "dependencies": ["T12"]
+    },
+    {
+      "task_id": "T14",
+      "description": "Set up automated testing pipeline with coverage reporting and CI/CD integration",
+      "agent": "Developer Agent",
+      "dependencies": ["T13"]
+    },
+    {
+      "task_id": "T15", 
+      "description": "Final production readiness review - security audit, performance testing, and reliability validation",
+      "agent": "Code Reviewer Agent",
+      "dependencies": ["T14"]
+    }
+  ]
+}
