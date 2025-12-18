@@ -1,5 +1,5 @@
 {
-  "persona_id": "dagoth_ur",
+  "persona_id": "dagoth_ur_nonexistent_framework",
   "character_id": "dagoth_ur",
   "character_name": "Dagoth Ur",
   "framework_id": "none",
@@ -15,5 +15,5 @@
     "anti_hallucination": {},
     "context_needs": {}
   },
-  "compiled_at": "1766046188.5647051"
+  "compiled_at": "1765520853.1787581"
 }

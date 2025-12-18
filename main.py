@@ -144,22 +144,27 @@ class OllamaBot(commands.Bot):
 
         # Load ChatCog (Dependencies injected)
 
-        await self.add_cog(
-            ChatCog(
-                self,
-                ollama=cast("LLMInterface", self.ollama),
-                history_manager=self.services["history"],
-                user_profiles=self.services.get("profiles"),
-                summarizer=self.services.get("summarizer"),
-                web_search=self.services.get("web_search"),
-                rag=self.services.get("rag"),
-                conversation_manager=self.services.get("conversation_manager"),
-                persona_system=self.services.get("persona_system"),
-                compiled_persona=self.services.get("compiled_persona"),
-                llm_fallback=self.services.get("llm_fallback"),
-                persona_relationships=self.services.get("persona_relationships"),
-            )
+        chat_cog = ChatCog(
+            self,
+            ollama=cast("LLMInterface", self.ollama),
+            history_manager=self.services["history"],
+            user_profiles=self.services.get("profiles"),
+            summarizer=self.services.get("summarizer"),
+            web_search=self.services.get("web_search"),
+            rag=self.services.get("rag"),
+            conversation_manager=self.services.get("conversation_manager"),
+            persona_system=self.services.get("persona_system"),
+            compiled_persona=self.services.get("compiled_persona"),
+            llm_fallback=self.services.get("llm_fallback"),
+            persona_relationships=self.services.get("persona_relationships"),
         )
+        await self.add_cog(chat_cog)
+
+        # Wait for ChatCog async initialization to complete
+        if hasattr(chat_cog, "_init_task"):
+            await chat_cog._init_task
+            logger.info("ChatCog async initialization completed")
+
         logger.info("Loaded ChatCog")
 
         # Load VoiceCog (only if TTS is available)

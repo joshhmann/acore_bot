@@ -721,7 +721,11 @@ class ChatCog(commands.Cog):
 
         # Fallback
         if not selected_persona:
-            if self.behavior_engine.current_persona:
+            if (
+                self.behavior_engine
+                and hasattr(self.behavior_engine, "current_persona")
+                and self.behavior_engine.current_persona
+            ):
                 selected_persona = self.behavior_engine.current_persona
             else:
                 selected_persona = self.persona_router.get_persona_by_name("Dagoth Ur")
@@ -1335,6 +1339,36 @@ class ChatCog(commands.Cog):
             )
         except Exception as e:
             logger.warning(f"Failed to update affection: {e}")
+
+    def cog_unload(self):
+        """Cleanup when cog is unloaded."""
+        # Schedule cleanup tasks to run asynchronously
+        asyncio.create_task(self._async_cleanup())
+
+    async def _async_cleanup(self):
+        """Async cleanup of resources."""
+        try:
+            # Close aiohttp sessions in ollama service
+            if hasattr(self, "ollama") and self.ollama:
+                await self.ollama.close()
+                logger.info("Closed ollama aiohttp sessions")
+
+            # Stop behavior engine
+            if hasattr(self, "behavior_engine") and self.behavior_engine:
+                await self.behavior_engine.stop()
+                logger.info("Stopped behavior engine")
+
+            # Cancel init task if still running
+            if (
+                hasattr(self, "_init_task")
+                and self._init_task
+                and not self._init_task.done()
+            ):
+                self._init_task.cancel()
+                logger.info("Cancelled pending initialization task")
+
+        except Exception as e:
+            logger.warning(f"Error during cleanup: {e}")
 
 
 async def setup(bot: commands.Bot):
