@@ -610,6 +610,14 @@ Topics:"""
         if not self.proactive_enabled:
             return
 
+        # Skip if ambient mode is explicitly disabled
+        if not Config.AMBIENT_MODE_ENABLED:
+            return
+
+        # Skip if channel is not in allowed ambient channels (if specified)
+        if Config.AMBIENT_CHANNELS and channel_id not in Config.AMBIENT_CHANNELS:
+            return
+
         now = datetime.now()
         silence_duration = (now - state.last_message_time).total_seconds()
 
@@ -894,6 +902,10 @@ Respond with ONLY one word: YES or NO"""
         - Checks for interesting topics to ask follow-up questions
         - Respects curiosity level and cooldowns
         """
+        # 0. Check channel restrictions
+        if Config.AMBIENT_CHANNELS and message.channel.id not in Config.AMBIENT_CHANNELS:
+            return None
+
         # 1. Check cooldown for proactive engagement
         if (
             datetime.now() - state.last_proactive_trigger
