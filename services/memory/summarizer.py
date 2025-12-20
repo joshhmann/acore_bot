@@ -1,6 +1,5 @@
 """Conversation summarization service with RAG storage for long-term memory."""
 import logging
-import asyncio
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional

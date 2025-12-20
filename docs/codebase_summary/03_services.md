@@ -34,6 +34,7 @@ services/
 ├── voice/                   # TTS, STT, RVC services
 ├── persona/                 # AI personality system
 ├── discord/                 # Discord-specific features
+├── analytics/               # Real-time dashboard and metrics (NEW)
 ├── interfaces/              # Service interface definitions
 ├── clients/                 # External API clients
 └── deprecated/              # Legacy code
@@ -506,11 +507,12 @@ class RAGService:
    - Preserves context across chunks
    - Metadata tracking per chunk
 
-3. **Keyword Fallback** (Lines 355-429)
+3. **Keyword Fallback** (Lines 399-520)
    - Stop word filtering
    - Fuzzy matching (plural handling)
    - Exact phrase boosting (2x)
    - Category boosting (5x)
+   - **NEW:** Category list filtering (persona-specific)
 
 4. **Document Management** (Lines 106-157, 483-515)
    - Async file loading
@@ -523,10 +525,31 @@ class RAGService:
    - 500-entry LRU limit
    - Prevents redundant encoding
 
+6. **Persona-Specific Filtering** (Lines 287-292, 506-514) - **NEW 2025-12-10**
+   - Characters can specify `rag_categories` to restrict document access
+   - Prevents cross-contamination (e.g., Jesus accessing Dagoth's gaming docs)
+   - Supports multiple categories with OR logic
+   - Debug logging for filtering operations
+   - Case-insensitive category matching
+
 **Search Methods**:
-- `search(query, top_k, category, boost_category)` - Main search interface
-- `get_context(query, max_length, category)` - Context extraction for prompts
+- `search(query, top_k, category, categories, boost_category)` - Main search interface
+  - **NEW:** `categories` parameter for list-based filtering
+  - Debug logging when filtering is applied
+- `get_context(query, max_length, category, categories, boost_category)` - Context extraction for prompts
 - Relevance threshold (0.5) to prevent low-quality results
+
+**Category Filtering Logic**:
+```python
+# Vector search uses ChromaDB where clause
+where_filter = {"category": {"$in": categories}}
+
+# Keyword search filters in-memory
+if categories:
+    categories_lower = [c.lower() for c in categories]
+    if doc["category"] not in categories_lower:
+        continue  # Skip documents outside allowed categories
+```
 
 **Statistics** (Lines 552-575):
 - Total documents and chunks
@@ -946,6 +969,253 @@ Tracks relationships and affinity between users and personas.
 - Relationship history
 - Pattern learning
 - User-specific memories
+
+### EvolutionSystem (NEW)
+
+**File**: `/root/acore_bot/services/persona/evolution.py`
+
+**Purpose**: Character progression system that unlocks new behaviors and capabilities through interaction milestones.
+
+**Initialization**: Lazy-loaded by `BehaviorEngine` when needed.
+
+**Architecture** (Lines 25-120):
+```python
+@dataclass
+class EvolutionMilestone:
+    milestone_id: str
+    name: str
+    description: str
+    requirements: Dict[str, Any]  # Messages, relationships, etc.
+    unlocks: List[str]  # New behaviors, responses, etc.
+    xp_reward: int
+    character_specific: Optional[str] = None
+
+@dataclass
+class CharacterEvolution:
+    character_id: str
+    current_level: int
+    total_xp: int
+    unlocked_milestones: List[str]
+    active_traits: List[str]
+    evolution_history: List[Dict]
+```
+
+**Core Evolution Mechanics**:
+
+#### 1. Experience System (Lines 150-250)
+- **Message XP**: Earn experience through meaningful conversations
+- **Quality over Quantity**: Longer, engaging conversations worth more XP
+- **Relationship Bonus**: Higher relationship levels multiply XP gains
+- **Topic Diversity**: Exploring different topics grants bonus XP
+- **Daily Limits**: Prevents grinding, encourages natural interaction
+
+#### 2. Milestone System (Lines 300-450)
+```python
+# Example Milestones
+milestones = [
+    {
+        "id": "first_friendship",
+        "name": "First Friend",
+        "description": "Build a meaningful relationship with a user",
+        "requirements": {"relationship_level": 60, "interactions": 50},
+        "unlocks": ["empathy_responses", "memory_recall"],
+        "xp_reward": 100
+    },
+    {
+        "id": "knowledge_seeker",
+        "name": "Knowledge Seeker",
+        "description": "Engage in 20 different topic discussions",
+        "requirements": {"unique_topics": 20, "conversation_depth": 3},
+        "unlocks": ["topic_expertise", "cross_reference"],
+        "xp_reward": 150
+    }
+]
+```
+
+#### 3. Trait Unlocks (Lines 500-650)
+- **Behavioral Traits**: New response patterns and mannerisms
+- **Knowledge Traits**: Access to specialized information
+- **Social Traits**: Enhanced relationship-building capabilities
+- **Emotional Traits**: Deeper emotional range and understanding
+
+**Trait Categories**:
+- **Communication**: Sarcasm, empathy, humor styles
+- **Knowledge**: Expertise areas, learning capabilities
+- **Social**: Banter skills, comfort levels, leadership
+- **Emotional**: Emotional range, empathy depth, mood stability
+
+#### 4. Character-Specific Evolution (Lines 700-850)
+Each character has unique evolution paths:
+
+**Dagoth Ur Evolution Path**:
+- **Level 1**: Standard divine responses
+- **Level 5**: Unlocks philosophical depth
+- **Level 10**: Gains mentorship capabilities
+- **Level 15**: Develops wisdom and guidance traits
+
+**Scav Evolution Path**:
+- **Level 1**: Basic scavenger slang
+- **Level 5**: Unlocks advanced Tarkov knowledge
+- **Level 10**: Gains storytelling abilities
+- **Level 15**: Develops protective instincts
+
+#### 5. Evolution Persistence (Lines 900-1000)
+- **Auto-Save**: Evolution progress saved every 5 minutes
+- **Backup System**: Daily backups to prevent data loss
+- **Migration Support**: Export/import evolution data
+- **Reset Capability**: Optional character reset (with confirmation)
+
+**Analytics Integration**:
+- **Evolution Tracking**: Monitor character progression rates
+- **Milestone Analytics**: Most/least completed milestones
+- **Trait Usage**: Track which unlocked traits are used most
+- **Engagement Metrics**: Evolution impact on user engagement
+
+**Configuration**:
+```python
+# Evolution System Settings
+EVOLUTION_ENABLED=true
+XP_PER_MESSAGE_BASE=1
+XP_MULTIPLIER_RELATIONSHIP=1.5
+MAX_DAILY_XP=100
+MILESTONE_NOTIFICATIONS=true
+EVOLUTION_SAVE_INTERVAL=300  # 5 minutes
+```
+
+**Web Dashboard Integration**:
+- Character evolution trees visualization
+- Progress tracking with interactive charts
+- Milestone completion analytics
+- Trait unlock history
+
+---
+
+## Analytics Services (NEW)
+
+Real-time monitoring and dashboard services for production insights.
+
+### AnalyticsDashboard
+
+**File**: `/root/acore_bot/services/analytics/dashboard.py`
+
+**Purpose**: FastAPI-based real-time dashboard for monitoring bot performance, persona interactions, and system health.
+
+**Note**: Initialized in `main.py` to run as a separate server process.
+
+**Architecture** (Lines 25-150):
+```python
+class AnalyticsDashboard:
+    def __init__(self, host, port, api_key=None):
+        self.app = FastAPI(title="Acore Bot Analytics")
+        self.host = host
+        self.port = port
+        self.api_key = api_key
+        self.metrics_service = None  # Injected by ServiceFactory
+        self.persona_system = None   # Injected by ServiceFactory
+```
+
+**Core Features**:
+
+#### 1. Real-Time Metrics WebSocket (Lines 200-280)
+- **Live Updates**: WebSocket endpoint `/ws/metrics` streams real-time data
+- **Persona Analytics**: Individual character statistics, interaction counts
+- **Performance Metrics**: Response times, token usage, error rates
+- **System Health**: Memory usage, CPU, service status
+- **User Analytics**: Active users, message rates, engagement patterns
+
+#### 2. REST API Endpoints (Lines 100-199)
+```python
+# Main dashboard UI
+@app.get("/")
+async def dashboard():
+    # Serves interactive React-based dashboard
+
+# JSON metrics endpoints
+@app.get("/api/metrics")
+async def get_metrics():
+    # Returns current metrics as JSON
+
+# Health check endpoint
+@app.get("/api/health")
+async def health_check():
+    # Service health status
+
+# Persona-specific analytics
+@app.get("/api/personas/{persona_id}")
+async def get_persona_analytics(persona_id: str):
+    # Individual character statistics
+
+# Historical data
+@app.get("/api/history/{metric}")
+async def get_historical_data(metric: str, days: int = 7):
+    # Time-series data for charts
+```
+
+#### 3. Dashboard Features
+- **Interactive Charts**: D3.js-powered visualizations
+- **Real-Time Updates**: WebSocket-powered live data streams
+- **Custom Time Ranges**: Filter data by date/time
+- **Export Capabilities**: Download metrics as CSV/JSON
+- **Alert System**: Configurable thresholds with notifications
+- **Multi-Server Support**: Track metrics across multiple Discord servers
+
+#### 4. Persona Analytics (Lines 300-400)
+```python
+# Per-Persona Metrics
+persona_stats = {
+    "dagoth_ur": {
+        "message_count": 1234,
+        "avg_response_time": 2.3,
+        "user_satisfaction": 4.7,
+        "top_topics": ["morrowind", "philosophy", "divinity"],
+        "relationship_levels": {"user123": 85, "user456": 62},
+        "emotional_state": "confident",
+        "active_channels": ["general", "gaming"],
+        "peak_hours": [20, 21, 22]  # 8-10 PM
+    }
+}
+```
+
+#### 5. Security & Authentication (Lines 50-99)
+- **API Key Protection**: Optional API key for sensitive endpoints
+- **CORS Configuration**: Cross-origin requests for dashboard frontend
+- **Rate Limiting**: Prevent API abuse (100 requests/minute)
+- **Request Logging**: Audit trail for analytics access
+
+**WebSocket Message Format**:
+```json
+{
+    "type": "metrics_update",
+    "timestamp": "2025-12-12T10:30:00Z",
+    "data": {
+        "active_users": 45,
+        "messages_per_minute": 12.5,
+        "avg_response_time_ms": 1850,
+        "error_rate": 0.02,
+        "personas": {
+            "dagoth_ur": {"messages": 23, "sentiment": 0.3},
+            "scav": {"messages": 17, "sentiment": -0.1}
+        }
+    }
+}
+```
+
+**Configuration**:
+```python
+# Analytics Dashboard Settings
+ANALYTICS_ENABLED=true
+ANALYTICS_HOST=localhost
+ANALYTICS_PORT=8000
+ANALYTICS_API_KEY=your_secure_key_here
+ANALYTICS_CORS_ORIGINS=["http://localhost:3000"]
+METRICS_RETENTION_DAYS=30
+```
+
+**Deployment**:
+- **Standalone Mode**: Runs alongside bot in same process
+- **Docker Support**: Containerized deployment available
+- **Reverse Proxy**: Nginx configuration for production
+- **SSL/TLS**: HTTPS support for secure dashboard access
 
 ---
 

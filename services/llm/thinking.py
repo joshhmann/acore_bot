@@ -1,6 +1,5 @@
 """Thinking Service - Cheap/fast LLM for internal decisions."""
 import logging
-from typing import Optional
 from config import Config
 
 logger = logging.getLogger(__name__)

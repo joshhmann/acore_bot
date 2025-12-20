@@ -84,12 +84,12 @@ class VoiceIntegration:
             # Play audio with explicit FFmpeg options for proper conversion
             # Log detailed audio file info
             file_size = os.path.getsize(audio_file) if os.path.exists(audio_file) else 0
-            logger.info(f"=== AUDIO PLAYBACK DEBUG ===")
+            logger.info("=== AUDIO PLAYBACK DEBUG ===")
             logger.info(f"File path: {audio_file}")
             logger.info(f"File size: {file_size} bytes")
             logger.info(f"File extension: {audio_file.suffix}")
             logger.info(
-                f"FFmpeg options: -vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo"
+                "FFmpeg options: -vn -af aresample=48000,aformat=sample_fmts=s16:channel_layouts=stereo"
             )
 
             # Probe audio file properties

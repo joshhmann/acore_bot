@@ -215,25 +215,25 @@ def test_round_trip():
     
     success = True
     if discord_version != expected_discord:
-        print(f"✗ FAIL: Discord version incorrect")
+        print("✗ FAIL: Discord version incorrect")
         print(f"  Expected: '{expected_discord}'")
         success = False
     else:
-        print(f"✓ PASS: Discord version correct")
+        print("✓ PASS: Discord version correct")
     
     if tts_version != expected_tts:
-        print(f"✗ FAIL: TTS version incorrect")
+        print("✗ FAIL: TTS version incorrect")
         print(f"  Expected: '{expected_tts}'")
         success = False
     else:
-        print(f"✓ PASS: TTS version correct")
+        print("✓ PASS: TTS version correct")
     
     if tts_from_discord != expected_tts:
-        print(f"✗ FAIL: TTS from Discord version incorrect")
+        print("✗ FAIL: TTS from Discord version incorrect")
         print(f"  Expected: '{expected_tts}'")
         success = False
     else:
-        print(f"✓ PASS: TTS from Discord version correct")
+        print("✓ PASS: TTS from Discord version correct")
     
     print()
     return success

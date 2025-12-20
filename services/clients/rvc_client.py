@@ -387,7 +387,7 @@ class RVCHTTPClient(RVCInterface):
                             import traceback
                             logger.error(f"Traceback: {traceback.format_exc()}")
                     else:
-                        logger.error(f"No output file path in response")
+                        logger.error("No output file path in response")
                 else:
                     logger.error(f"Unexpected result format: {result}")
 

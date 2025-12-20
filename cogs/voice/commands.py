@@ -4,13 +4,10 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 import logging
-from typing import Optional
 import uuid
-import asyncio
 
 from config import Config
-from services.voice.commands import VoiceCommandParser, CommandType
-from utils.helpers import format_error, format_success, format_info
+from utils.helpers import format_error, format_success
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +152,7 @@ class VoiceCommands(commands.Cog):
                 await interaction.followup.send("⚠️ Already listening.", ephemeral=True)
                 return
 
-            voice_client = self.manager.get_voice_client(guild_id)
+            self.manager.get_voice_client(guild_id)
 
             # Start listening (callbacks are handled in VoiceCog for simplicity or can be passed)
             # For this refactor, we'll let VoiceCog handle the callbacks logic

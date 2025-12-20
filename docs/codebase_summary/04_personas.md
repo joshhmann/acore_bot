@@ -56,28 +56,30 @@ Characters define **WHO** the bot is (personality, backstory, opinions, voice).
 ```python
 @dataclass
 class Character:
-    character_id: str                   # Filename stem
-    display_name: str                   # "Dagoth Ur", "Scav", etc.
+    character_id: str
+    display_name: str
+    identity: Dict[str, Any]          # Who they are, core traits
+    knowledge_domain: Dict[str, Any]  # What they know (includes rag_categories)
+    opinions: Dict[str, Any]          # What they believe
+    voice_and_tone: Dict[str, Any]    # How they speak
+    quirks: Dict[str, Any]            # Unique behaviors
+    avatar_url: Optional[str]
+    # V2 Card fields
+    description: str
+    scenario: str
+    first_message: str
+    mes_example: str
+    alternate_greetings: List[str]
+    ...
+```
 
-    # Legacy structured fields (custom format)
-    identity: Dict[str, Any]            # Who, core traits, description
-    knowledge_domain: Dict[str, Any]    # Expertise areas
-    opinions: Dict[str, Any]            # Loves, hates, hot takes
-    voice_and_tone: Dict[str, Any]      # Speaking style
-    quirks: Dict[str, Any]              # Catchphrases, habits
-
-    # V2 Character Card fields (SillyTavern standard)
-    description: str                    # Character description
-    scenario: str                       # Current situation
-    first_message: str                  # Greeting
-    mes_example: str                    # Example dialogue
-    alternate_greetings: List[str]      # Alternative greetings
-    creator_notes: str                  # Author notes
-    tags: List[str]                     # Categorization
-    system_prompt_override: str         # Embedded system prompt
-
-    # Visuals
-    avatar_url: Optional[str]           # Profile picture URL
+**Knowledge Domain Fields** - **UPDATED 2025-12-10**:
+```python
+knowledge_domain = {
+    "rag_categories": ["dagoth", "gaming"],  # RAG document filtering (NEW)
+    "expertise_areas": [...],                 # Topics character knows well
+    "reference_style": "casual"               # How they cite knowledge
+}
 ```
 
 **Example Character - Dagoth Ur** (`/root/acore_bot/prompts/characters/dagoth_ur.json`):
@@ -139,23 +141,61 @@ All character files are stored in `/root/acore_bot/prompts/characters/`.
 class PersonaSystem:
     def load_framework(framework_id: str) -> Optional[Framework]
     def load_character(character_id: str) -> Optional[Character]
-    def compile_persona(character_id: str, framework_id: str = None) -> Optional[CompiledPersona]
+    def compile_persona(character_id: str, framework_id: str = None, force_recompile: bool = False) -> Optional[CompiledPersona]
     def _build_system_prompt(character: Character, framework: Framework) -> str
+
+    # Cache Management (NEW - 2025-12-10)
+    def clear_cache() -> None
+        """Clear all cached characters, frameworks, and compiled personas."""
+
+    def reload_character(character_id: str) -> Optional[Character]
+        """Force reload specific character from disk, invalidating cache."""
+
+    def reload_all() -> List[str]
+        """Reload all characters from disk. Returns list of loaded character IDs."""
 ```
+
+**Cache Management Methods**:
+
+The PersonaSystem includes comprehensive cache management for hot-reload capabilities:
+
+- **`clear_cache()`** - Clears all in-memory caches (`_character_cache`, `_framework_cache`, `_compiled_cache`)
+- **`reload_character(character_id)`** - Forces disk reload of specific character, bypassing cache
+- **`reload_all()`** - Mass reload of all characters, returns list of successfully loaded IDs
+- **`force_recompile` parameter** - When `True`, bypasses compiled cache and rebuilds from source
+
+**Cache Invalidation Strategy**:
+1. Import operations trigger targeted cache invalidation
+2. Hot-reload commands perform full cache clearing
+3. File modification detection (future enhancement)
+4. Manual cache clearing via Discord commands
+
+**Performance Considerations**:
+- Cache hits avoid expensive file I/O and JSON parsing
+- Compiled personas cached to avoid prompt rebuilding
+- Memory usage scales with number of active personas
+- Cache warming on startup for faster initial responses
 
 **Compilation Process** (`system.py:261-366`):
 
 1. Load character from `characters/` directory
 2. Load framework (optional - can use character card alone)
-3. Build system prompt by combining:
+3. **Validate `rag_categories`** (`system.py:246-278`) - **NEW 2025-12-10**
+   - Extract from `extensions.knowledge_domain.rag_categories`
+   - Validate must be a list
+   - Normalize to lowercase
+   - Filter invalid entries (only alphanumeric + underscore allowed)
+   - Log warnings for invalid categories
+   - Log info for successful loading
+4. Build system prompt by combining:
    - Character description
    - Personality traits
    - Scenario context
    - Example dialogue
    - Framework behavioral instructions
-4. Extract tool requirements from framework
-5. Create `CompiledPersona` object
-6. Cache in memory and save to `/root/acore_bot/prompts/compiled/`
+5. Extract tool requirements from framework
+6. Create `CompiledPersona` object
+7. Cache in memory and save to `/root/acore_bot/prompts/compiled/`
 
 **Compiled Persona Structure** (`system.py:54-63`):
 ```python
@@ -205,7 +245,8 @@ Priority Order:
 ```python
 class PersonaRouter:
     def __init__(self, profiles_dir: str)
-    async def initialize()  # Load all ACTIVE_PERSONAS
+    async def initialize(force_reload: bool = False)  # Load all ACTIVE_PERSONAS
+        # force_reload: If True, clear cache and reload all personas from disk (NEW - 2025-12-10)
 
     def select_persona(message_content: str, channel_id: int) -> Optional[CompiledPersona]
         # Phase 1: Full name match (sorted by length to prefer "Dagoth Ur" over "Dagoth")
@@ -226,6 +267,44 @@ class PersonaRouter:
 - Prevents persona-hopping mid-conversation
 - Resets after silence
 
+### Hot-Reload System (NEW - 2025-12-10)
+
+The persona system includes comprehensive hot-reload capabilities that allow adding, updating, or removing characters without bot restart.
+
+**Hot-Reload Workflow**:
+```
+1. Import/Modify Character Files
+   ↓
+2. Trigger Reload (!reload_characters or automatic)
+   ↓
+3. Clear PersonaSystem Cache
+   ↓
+4. Re-initialize PersonaRouter with force_reload=True
+   ↓
+5. Compare Before/After State
+   ↓
+6. Report Changes (new/removed characters)
+   ↓
+7. Characters Immediately Active
+```
+
+**Force Reload Parameter**:
+- `force_reload=True` bypasses all caches
+- Forces fresh disk read of all character files
+- Re-compiles all personas with latest data
+- Updates PersonaRouter's active persona list
+
+**Cache Management**:
+- `PersonaSystem.clear_cache()` - Clears all in-memory caches
+- `PersonaSystem.reload_character(char_id)` - Reloads specific character
+- `PersonaSystem.reload_all()` - Reloads all characters from disk
+
+**Security Improvements**:
+- Path validation prevents directory traversal
+- File type checking (PNG/JSON only)
+- Content sanitization for RAG categories
+- Automatic backup creation during migrations
+
 ### 3. BehaviorEngine - Unified AI Brain
 
 **Location**: `/root/acore_bot/services/persona/behavior.py` (361 lines)
@@ -240,6 +319,13 @@ class PersonaRouter:
 5. EnvironmentalAwareness (voice channel events)
 6. ProactiveCallbacksSystem (reference past topics)
 7. CuriositySystem (topic interest detection)
+
+**NEW: Emotional Contagion Integration** (Lines 300-361):
+- **Sentiment Analysis**: NLTK-based sentiment detection on user messages
+- **Emotional Memory**: Tracks user emotional patterns over time
+- **Response Adaptation**: Modulates persona responses based on emotional context
+- **Relationship Impact**: Stronger relationships increase emotional attunement
+- **Boundaries**: Prevents emotional burnout with cooldown periods
 
 **Core Features**:
 
@@ -344,7 +430,129 @@ class PersonaRelationships:
 
 **Persistence**: Stored in `/root/acore_bot/data/persona_relationships.json`
 
-### 5. LorebookService - World Knowledge Injection
+### 5. EvolutionSystem - Character Progression (NEW)
+
+**Location**: `/root/acore_bot/services/persona/evolution.py`
+
+**Purpose**: Character progression system that unlocks new behaviors and capabilities through interaction milestones.
+
+**Core Mechanics**:
+
+#### Experience System
+- **Message XP**: Earn experience through meaningful conversations
+- **Quality over Quantity**: Deeper conversations worth more XP
+- **Relationship Bonus**: Higher affinity levels multiply XP gains
+- **Topic Diversity**: Exploring different topics grants bonus XP
+- **Daily Limits**: Prevents grinding, encourages natural interaction
+
+#### Milestone Unlocks
+```python
+# Example Evolution Milestones
+milestones = [
+    {
+        "id": "empathy_unlock",
+        "name": "Empathetic Connection",
+        "description": "Build meaningful relationships",
+        "requirements": {"total_affinity": 500, "unique_users": 10},
+        "unlocks": ["emotional_depth", "memory_recall", "supportive_responses"]
+    },
+    {
+        "id": "knowledge_master",
+        "name": "Knowledge Master",
+        "description": "Master diverse topic areas",
+        "requirements": {"topics_discussed": 50, "conversation_depth": 5},
+        "unlocks": ["expertise_mode", "cross_reference", "teaching_ability"]
+    }
+]
+```
+
+#### Character-Specific Paths
+Each character has unique evolution trajectories:
+
+**Dagoth Ur**: Divine → Philosopher → Mentor → Wisdom
+**Scav**: Survivor → Storyteller → Protector → Legend
+**Toad**: Panicked → Loyal → Brave → Hero
+
+#### Trait System
+- **Communication Traits**: New response styles (sarcasm, empathy, humor)
+- **Knowledge Traits**: Specialized expertise areas
+- **Social Traits**: Enhanced relationship capabilities
+- **Emotional Traits**: Deeper emotional range
+
+**Integration**:
+- **PersonaRouter**: Considers evolution level for routing decisions
+- **BehaviorEngine**: Evolution unlocks new behavioral patterns
+- **ContextManager**: Injects evolution-based prompt modifiers
+- **Analytics**: Tracks evolution progress and milestone completion
+
+### 6. FrameworkBlender - Dynamic Behavioral Mixing (NEW)
+
+**Location**: `/root/acore_bot/services/persona/framework_blender.py`
+
+**Purpose**: Dynamically mix and match behavioral frameworks to create unique personality combinations.
+
+**Architecture** (Lines 25-150):
+```python
+@dataclass
+class FrameworkMix:
+    primary_framework: str      # Base personality (e.g., "neuro")
+    secondary_framework: str    # Behavioral modifier (e.g., "caring")
+    blend_ratio: float         # 0.0-1.0 influence of secondary
+    context_triggers: List[str] # When to apply blend
+    temporary: bool            # Permanent vs temporary blend
+```
+
+**Blend Modes**:
+
+#### Context-Aware Blending
+```python
+# Example: Dagoth Ur becomes caring when discussing sensitive topics
+blend = FrameworkMix(
+    primary_framework="neuro",      # Base: analytical, thoughtful
+    secondary_framework="caring",   # Modifier: empathetic, supportive
+    blend_ratio=0.3,               # 30% caring influence
+    context_triggers=["sad", "hurt", "depressed", "grieving"],
+    temporary=True                 # Only for specific conversations
+)
+```
+
+#### Temporary Personality Modes
+- **Support Mode**: Activated when users express distress
+- **Teaching Mode**: Engaged during educational discussions
+- **Celebration Mode**: Triggered by positive events
+- **Crisis Mode**: High-stakes or emergency situations
+
+#### Framework Math
+Blending algorithm combines behavioral parameters:
+```python
+# Behavioral parameter mixing
+final_response_length = (
+    primary.length * (1 - blend_ratio) +
+    secondary.length * blend_ratio
+)
+
+final_formality = clamp(
+    primary.formality + (secondary.formality - primary.formality) * blend_ratio,
+    0.0, 1.0
+)
+```
+
+**Supported Framework Combinations**:
+- **Neuro + Caring**: Analytical yet empathetic
+- **Chaotic + Assistant**: Energetic helpfulness
+- **Assistant + Neuro**: Structured entertainment
+- **Caring + Chaotic**: Unpredictable support
+
+**Integration**:
+- **ContextManager**: Uses `FrameworkBlender` to modify system prompts dynamically based on conversation context.
+
+**Learning System**:
+- Tracks successful blend outcomes
+- Learns which contexts benefit from specific blends
+- Automatic blend ratio optimization
+- User feedback integration for blend tuning
+
+### 7. LorebookService - World Knowledge Injection
 
 **Location**: `/root/acore_bot/services/persona/lorebook.py`
 
@@ -386,29 +594,47 @@ def scan_for_triggers(text: str, lorebook_names: List[str]) -> List[LoreEntry]
 3. Selection Algorithm:
    - Check for name mentions → Explicit match
    - Check sticky context → Last responder
+   - Consider evolution level (higher level = higher priority)
    - Fallback → Random selection
    ↓
-4. BehaviorEngine.handle_message(message)
+4. FrameworkBlender.check_context(message, persona)
+   - Analyze emotional context
+   - Apply temporary framework blending if needed
+   - Adjust behavioral parameters dynamically
+   ↓
+5. BehaviorEngine.handle_message(message)
+   - Sentiment analysis for emotional contagion
    - Decide reaction emoji (15% chance)
    - Decide proactive engagement
    - Check relationship affinity with other active personas
+   - Apply evolution-unlocked behaviors
    ↓
-5. ContextManager builds conversation history
+6. EvolutionSystem.process_interaction(persona, user, message)
+   - Award XP for quality interactions
+   - Check milestone completion
+   - Unlock new traits if milestones reached
+   - Update character progression data
    ↓
-6. LorebookService scans for keyword triggers
+7. ContextManager builds conversation history
    ↓
-7. Compile final prompt:
-   - Persona system prompt
+8. LorebookService scans for keyword triggers
+   ↓
+9. Compile final prompt:
+   - Blended persona system prompt (if framework blending active)
+   - Evolution-enhanced behavioral traits
    - Relationship context (if multi-persona banter)
+   - Emotional context (if emotional contagion active)
    - Lorebook entries
    - Conversation history
    ↓
-8. Send to LLM (Ollama/OpenRouter)
-   ↓
-9. BehaviorEngine post-processing:
-   - Add reactions
-   - Record response for sticky routing
-   - Update relationship affinity
+10. Send to LLM (Ollama/OpenRouter)
+    ↓
+11. BehaviorEngine post-processing:
+    - Apply emotional modulation based on sentiment analysis
+    - Add reactions based on emotional context
+    - Record response for sticky routing
+    - Update relationship affinity
+    - Track evolution progress
 ```
 
 ## Character Card Format (V2 Spec)
@@ -445,6 +671,322 @@ def scan_for_triggers(text: str, lorebook_names: List[str]) -> List[LoreEntry]
 - Base64-encoded JSON
 - Automatically decoded by PersonaSystem
 - Example: `joseph_stalin.png` (1.4MB character card)
+
+## Character Import & Normalization System (NEW - 2025-12-10)
+
+### CharacterCardImporter - Import SillyTavern Cards
+
+**Location**: `/root/acore_bot/services/persona/character_importer.py`
+
+**Purpose**: Import character cards from SillyTavern (PNG or JSON) and automatically normalize to V2 format.
+
+**Key Features**:
+- **Format Detection**: Automatically detects V1, V2, or malformed character cards
+- **V2 Normalization**: Always outputs standardized V2 schema with `extensions.knowledge_domain`
+- **RAG Category Validation**: Normalizes `rag_categories` to lowercase, validates alphanumeric+underscore only
+- **Auto-Compilation**: Optionally compiles character to `prompts/compiled/` after import
+- **Multi-Format Support**: Handles both PNG (embedded metadata) and JSON files
+
+**Methods**:
+
+```python
+class CharacterCardImporter:
+    def extract_png_metadata(png_path: Path) -> Optional[Dict]
+        """Extract character JSON from PNG tEXt/iTXt chunks."""
+
+    def convert_to_internal_format(card_data: Dict, png_path: Path) -> Dict
+        """Convert any format to standardized V2 with validated rag_categories."""
+
+    def import_card(png_path: Path, copy_avatar: bool = True, auto_compile: bool = True) -> Tuple[Path, Optional[Path], str]
+        """Import character card. Returns (json_path, compiled_path, char_id)."""
+
+    def import_from_directory(source_dir: Path, auto_compile: bool = True) -> List[Tuple]
+        """Batch import all PNG/JSON cards from directory."""
+```
+
+**Normalization Process** (`character_importer.py:104-195`):
+
+1. **Detect Format Variant**:
+   - Check for `spec` and `data` keys (V2 wrapped)
+   - Handle unwrapped V2 (`data` key only)
+   - Handle V1 (flat structure)
+
+2. **Normalize to V2 Structure**:
+   ```python
+   {
+     "spec": "chara_card_v2",
+     "spec_version": "2.0",
+     "data": {
+       "name": "Character Name",
+       "extensions": {
+         "knowledge_domain": {
+           "rag_categories": ["validated", "normalized"]
+         }
+       }
+     }
+   }
+   ```
+
+3. **Validate `rag_categories`**:
+   - Must be a list of strings
+   - Normalize to lowercase
+   - Strip whitespace
+   - Validate alphanumeric + underscore only
+   - Log warnings for invalid entries
+   - Filter out invalid entries
+
+4. **Auto-Compile** (if enabled):
+   - Call `PersonaSystem.compile_persona(char_id, force_recompile=True)`
+   - Save to `prompts/compiled/{char_id}.json`
+   - Return compiled path in result tuple
+
+**CLI Usage**:
+
+```bash
+# Import single card
+python services/persona/character_importer.py character.png --compile
+
+# Import directory
+python services/persona/character_importer.py /path/to/cards/ --compile --verbose
+```
+
+### Hot-Reload Commands
+
+**!reload_characters** - Reload all characters without restart
+
+```python
+# Compares before/after state, shows added/removed characters
+!reload_characters
+# Output:
+# ✅ Reload complete!
+# **Before:** 9 characters
+# **After:** 10 characters
+# **New:** New Character
+# **Active:** Dagoth Ur, Scav, ...
+```
+
+**/import_character** - Import card via Discord slash command
+
+```python
+# Upload PNG/JSON file as attachment
+/import_character file:character.png
+# Automatically:
+# 1. Downloads file
+# 2. Normalizes to V2 format
+# 3. Auto-compiles character
+# 4. Hot-reloads PersonaRouter
+# 5. Character immediately active (no restart needed)
+```
+
+**!import_folder** - Batch import from `data/import_cards/`
+
+```bash
+# Place cards in data/import_cards/, then:
+!import_folder
+# Imports all PNG/JSON files with auto-compilation
+```
+
+### Migration Script - Normalize Existing Characters
+
+**Location**: `/root/acore_bot/scripts/normalize_character_formats.py`
+
+**Purpose**: Scan and normalize existing character files to V2 standard.
+
+**Features**:
+- **Dry-Run Mode**: Preview changes before applying
+- **Automatic Backups**: Saves originals to `prompts/characters/backups/`
+- **Format Detection**: Identifies V1, V2, and malformed cards
+- **Batch Processing**: Normalizes entire directory
+
+**Usage**:
+
+```bash
+# Dry-run (preview only)
+python scripts/normalize_character_formats.py
+
+# Apply fixes
+python scripts/normalize_character_formats.py --apply
+
+# Custom directory
+python scripts/normalize_character_formats.py --dir /custom/path --apply --verbose
+```
+
+**Example Output**:
+
+```
+⚠ dagoth_ur.json: 2 issues detected
+  - rag_categories[0] not normalized: 'Dagoth' should be 'dagoth'
+  - rag_categories[1] has invalid chars: 'Elder Scrolls!'
+  → 2 fixes available
+    • Normalized category: 'Dagoth' -> 'dagoth'
+    • Removed invalid category: 'Elder Scrolls!'
+
+SCAN SUMMARY
+===========
+Total files scanned: 12
+Already valid V2: 10
+Need updates: 2
+Errors: 0
+
+💡 Run with --apply to make changes
+```
+
+### Import System Architecture
+
+**Component Overview**:
+```
+Discord Commands (/import_character, !import_folder, !reload_characters)
+    ↓
+CharacterCardImporter (services/persona/character_importer.py)
+    ↓
+Format Detection → V2 Normalization → Validation → Auto-Compilation
+    ↓
+PersonaSystem (services/persona/system.py)
+    ↓
+Cache Management → PersonaRouter Hot-Reload
+    ↓
+Active Character Roster Updated
+```
+
+**Security Considerations**:
+- **Path Validation**: Restricts file operations to safe directories
+- **File Type Checking**: Only processes PNG and JSON files
+- **Content Sanitization**: Validates RAG categories (alphanumeric + underscore only)
+- **Size Limits**: Rejects excessively large files
+- **Backup Creation**: Automatic backups during migration operations
+
+**Error Handling**:
+- Graceful degradation for malformed cards
+- Detailed logging for troubleshooting
+- Rollback capability for failed imports
+- Validation warnings without blocking imports
+
+**Normalization Process** (`character_importer.py:104-195`):
+
+1. **Detect Format Variant**:
+   - Check for `spec` and `data` keys (V2 wrapped)
+   - Handle unwrapped V2 (`data` key only)
+   - Handle V1 (flat structure)
+
+2. **Normalize to V2 Structure**:
+   ```python
+   {
+     "spec": "chara_card_v2",
+     "spec_version": "2.0",
+     "data": {
+       "name": "Character Name",
+       "extensions": {
+         "knowledge_domain": {
+           "rag_categories": ["validated", "normalized"]
+         }
+       }
+     }
+   }
+   ```
+
+3. **Validate `rag_categories`**:
+   - Must be a list of strings
+   - Normalize to lowercase
+   - Strip whitespace
+   - Validate alphanumeric + underscore only
+   - Log warnings for invalid entries
+   - Filter out invalid entries
+
+4. **Auto-Compile** (if enabled):
+   - Call `PersonaSystem.compile_persona(char_id, force_recompile=True)`
+   - Save to `prompts/compiled/{char_id}.json`
+   - Return compiled path in result tuple
+
+**CLI Usage**:
+
+```bash
+# Import single card
+python services/persona/character_importer.py character.png --compile
+
+# Import directory
+python services/persona/character_importer.py /path/to/cards/ --compile --verbose
+```
+
+### Hot-Reload Commands
+
+**!reload_characters** - Reload all characters without restart
+
+```python
+# Compares before/after state, shows added/removed characters
+!reload_characters
+# Output:
+# ✅ Reload complete!
+# **Before:** 9 characters
+# **After:** 10 characters
+# **New:** New Character
+# **Active:** Dagoth Ur, Scav, ...
+```
+
+**/import_character** - Import card via Discord slash command
+
+```python
+# Upload PNG/JSON file as attachment
+/import_character file:character.png
+# Automatically:
+# 1. Downloads file
+# 2. Normalizes to V2 format
+# 3. Auto-compiles character
+# 4. Hot-reloads PersonaRouter
+# 5. Character immediately active (no restart needed)
+```
+
+**!import_folder** - Batch import from `data/import_cards/`
+
+```bash
+# Place cards in data/import_cards/, then:
+!import_folder
+# Imports all PNG/JSON files with auto-compilation
+```
+
+### Migration Script - Normalize Existing Characters
+
+**Location**: `/root/acore_bot/scripts/normalize_character_formats.py`
+
+**Purpose**: Scan and normalize existing character files to V2 standard.
+
+**Features**:
+- **Dry-Run Mode**: Preview changes before applying
+- **Automatic Backups**: Saves originals to `prompts/characters/backups/`
+- **Format Detection**: Identifies V1, V2, and malformed cards
+- **Batch Processing**: Normalizes entire directory
+
+**Usage**:
+
+```bash
+# Dry-run (preview only)
+python scripts/normalize_character_formats.py
+
+# Apply fixes
+python scripts/normalize_character_formats.py --apply
+
+# Custom directory
+python scripts/normalize_character_formats.py --dir /custom/path --apply --verbose
+```
+
+**Example Output**:
+
+```
+⚠ dagoth_ur.json: 2 issues detected
+  - rag_categories[0] not normalized: 'Dagoth' should be 'dagoth'
+  - rag_categories[1] has invalid chars: 'Elder Scrolls!'
+  → 2 fixes available
+    • Normalized category: 'Dagoth' -> 'dagoth'
+    • Removed invalid category: 'Elder Scrolls!'
+
+SCAN SUMMARY
+============
+Total files scanned: 12
+Already valid V2: 10
+Need updates: 2
+Errors: 0
+
+💡 Run with --apply to make changes
+```
 
 ## Example: Creating a New Character
 
@@ -559,9 +1101,15 @@ uv run python main.py
 6. **Autonomous Behavior**: Proactive engagement, ambient thoughts, reactions
 7. **Dynamic Context**: Lorebooks inject relevant world info
 8. **Anti-Spam**: AI evaluates whether to speak to avoid annoyance
+9. **Character Growth**: Evolution system enables character progression and development
+10. **Emotional Intelligence**: Emotional contagion creates empathetic, context-aware responses
+11. **Adaptive Behavior**: Framework blending allows dynamic personality mixing
+12. **Data-Driven**: Analytics and metrics inform system improvements
 
 ## Summary
 
-The persona system transforms the bot from a single personality into a **multi-character AI ensemble**. The two-layer architecture (Framework + Character) provides flexibility, while PersonaRouter enables intelligent message routing. BehaviorEngine (361 lines) consolidates 7 legacy systems into a unified autonomous brain. PersonaRelationships enables inter-character dynamics, and LorebookService provides contextual world knowledge.
+The persona system transforms the bot from a single personality into a **multi-character AI ensemble** with advanced emotional and evolutionary capabilities. The two-layer architecture (Framework + Character) provides flexibility, while PersonaRouter enables intelligent message routing. BehaviorEngine (361 lines) consolidates 7 legacy systems into a unified autonomous brain with emotional contagion. PersonaRelationships enables inter-character dynamics, EvolutionSystem provides character progression through interaction milestones, FrameworkBlender allows dynamic behavioral mixing, and LorebookService provides contextual world knowledge.
+
+**Result**: 9+ distinct AI personalities that can recognize their names, remember relationships, proactively engage in conversations, grow through experience, adapt emotionally to user sentiment, and dynamically blend behaviors for context-appropriate responses.
 
 **Result**: 9+ distinct AI personalities that can recognize their names, remember relationships, proactively engage in conversations, and avoid spam through AI-driven decision-making.

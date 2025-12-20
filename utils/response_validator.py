@@ -23,7 +23,7 @@ class ResponseValidator:
         # Get actual current time
         now = datetime.now()
         correct_time_12h = now.strftime('%I:%M %p').lstrip('0')  # Remove leading zero
-        correct_time_24h = now.strftime('%H:%M')
+        now.strftime('%H:%M')
         
         # Pattern to match times like "2:47 AM", "11:30 PM", etc.
         time_pattern = r'\b(\d{1,2}):(\d{2})\s*(AM|PM|am|pm)\b'

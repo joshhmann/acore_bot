@@ -1,4 +1,5 @@
 """Voice client connection and lifecycle management."""
+
 import discord
 from discord.ext import voice_recv
 import logging
@@ -18,10 +19,14 @@ class VoiceManager:
             bot: Discord bot instance
         """
         self.bot = bot
-        self.voice_clients: Dict[int, discord.VoiceClient] = {}  # guild_id -> voice_client
+        self.voice_clients: Dict[
+            int, discord.VoiceClient
+        ] = {}  # guild_id -> voice_client
         self.voice_clients_lock = asyncio.Lock()  # Protect from race conditions
 
-    async def join_channel(self, channel: discord.VoiceChannel, guild_id: int) -> Optional[discord.VoiceClient]:
+    async def join_channel(
+        self, channel: discord.VoiceChannel, guild_id: int
+    ) -> Optional[discord.VoiceClient]:
         """Join a voice channel.
 
         Args:
@@ -79,9 +84,23 @@ class VoiceManager:
             guild_id: Guild ID
 
         Returns:
-            Voice client if connected, None otherwise
+            Voice client if connected and valid, None otherwise
         """
-        return self.voice_clients.get(guild_id)
+        voice_client = self.voice_clients.get(guild_id)
+        if voice_client and not voice_client.is_connected():
+            # Clean up stale voice client
+            logger.warning(
+                f"Found stale voice client for guild {guild_id}, cleaning up"
+            )
+
+            async def cleanup_stale():
+                async with self.voice_clients_lock:
+                    if guild_id in self.voice_clients:
+                        del self.voice_clients[guild_id]
+
+            asyncio.create_task(cleanup_stale())
+            return None
+        return voice_client
 
     def is_connected(self, guild_id: int) -> bool:
         """Check if connected to voice in a guild.
@@ -112,7 +131,9 @@ class VoiceManager:
                     del self.voice_clients[guild_id]
                     logger.info(f"Cleaned up voice client for guild {guild_id}")
                 except Exception as e:
-                    logger.error(f"Error cleaning up voice client for guild {guild_id}: {e}")
+                    logger.error(
+                        f"Error cleaning up voice client for guild {guild_id}: {e}"
+                    )
 
     async def cleanup_all(self):
         """Clean up all voice clients on shutdown."""
