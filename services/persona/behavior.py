@@ -5,6 +5,7 @@ environmental awareness, callbacks, and curiosity into a single system.
 """
 
 import logging
+import re
 import random
 import asyncio
 from datetime import datetime
@@ -125,6 +126,29 @@ class BehaviorEngine:
             Config.PROACTIVE_COOLDOWN
         )  # Seconds between proactive engagements
 
+        # T27: Local NLP Topic Detection
+        self.topic_embeddings = {}
+        self.topic_patterns = {
+            # Gaming topics
+            "gaming": r"\b(games?|gaming|play(ed|ing)?|gameplay|fps|rpg|mmo|steam|epic|nintendo|playstation|xbox)\b",
+            "technology": r"\b(tech|software|hardware|computer|programming|code|app|phone|device|ai|machine learning)\b",
+            "movies": r"\b(movie|film|cinema|watch(ed|ing)?|netflix|hbo|disney\+|stream|director|actor)\b",
+            "music": r"\b(music|song|album|artist|band|concert|listen|spotify|apple music|playlist)\b",
+            "sports": r"\b(sport|game|match|team|player|score|win|lose|championship|league|football|basketball|baseball)\b",
+            "food": r"\b(food|eat|cooking|recipe|restaurant|meal|breakfast|lunch|dinner|delicious|taste)\b",
+            "travel": r"\b(travel|trip|vacation|flight|hotel|visit|country|city|tour|destination)\b",
+            "work": r"\b(work|job|career|office|boss|colleague|meeting|project|deadline|salary|hire)\b",
+            "school": r"\b(school|college|university|class|study|exam|homework|degree|professor|student)\b",
+            "health": r"\b(health|doctor|hospital|medicine|exercise|fitness|diet|sick|pain|treatment)\b",
+            "relationships": r"\b(relationship|dating|love|friend|family|married|single|breakup|divorce)\b",
+            "money": r"\b(money|cash|dollar|price|cost|expensive|cheap|buy|sell|invest|budget)\b",
+            "weather": r"\b(weather|rain|snow|sunny|cold|hot|temperature|climate|forecast)\b",
+            "pets": r"\b(pet|dog|cat|animal|puppy|kitten|vet|leash|toy|treat)\b",
+            "books": r"\b(book|novel|read|reading|author|story|chapter|library|literature)\b",
+            "politics": r"\b(politics|government|election|president|policy|vote|democrat|republican|congress)\b",
+            "religion": r"\b(god|church|religion|pray|faith|bible|jesus|christian|muslim|islam)\b",
+        }
+
         # Background task
         self._running = False
         self._task = None
@@ -149,6 +173,10 @@ class BehaviorEngine:
 
             self.evolution_tracker = PersonaEvolutionTracker()
             logger.info("PersonaEvolutionTracker initialized")
+
+        # T27: Pre-compute topic embeddings for semantic matching
+        if self.lorebook_service:
+            self._precompute_topic_embeddings()
 
         self._task = asyncio.create_task(self._tick_loop())
         logger.info("Behavior Engine started")
@@ -176,11 +204,33 @@ class BehaviorEngine:
         """Update the active persona."""
         self.current_persona = persona
 
+    def _precompute_topic_embeddings(self):
+        """Pre-compute embeddings for defined topics using LorebookService."""
+        try:
+            logger.info("Pre-computing topic embeddings for BehaviorEngine...")
+            for topic, pattern in self.topic_patterns.items():
+                # Extract keywords from regex pattern to create a rich semantic description
+                # Remove regex syntax to get raw words
+                clean_pattern = pattern.replace(r"\b", "").replace("(", " ").replace(")", " ").replace("|", " ")
+                # Remove common regex chars
+                clean_pattern = clean_pattern.replace("?", "").replace("*", "").replace("+", "")
+
+                # Combine topic name with keywords
+                # "technology tech software hardware..."
+                description = f"{topic} {clean_pattern}"
+
+                # Clean up whitespace
+                description = " ".join(description.split())
+
+                self.topic_embeddings[topic] = self.lorebook_service.get_embedding(description)
+                logger.debug(f"Computed embedding for '{topic}' using description: '{description}'")
+            logger.info(f"Pre-computed {len(self.topic_embeddings)} topic embeddings")
+        except Exception as e:
+            logger.error(f"Failed to pre-compute topic embeddings: {e}")
+
     async def _analyze_message_topics(self, message: str) -> List[str]:
         """
-        Analyze message content to extract topics using lightweight keyword matching.
-
-        Performance target: < 50ms topic detection
+        Analyze message content to extract topics using hybrid regex + semantic NLP matching.
 
         Args:
             message: The message content to analyze
@@ -188,42 +238,38 @@ class BehaviorEngine:
         Returns:
             List of detected topics (lowercase, deduplicated)
         """
-        import re
         from typing import Set
 
         # Convert to lowercase for matching
         content = message.lower()
 
-        # Common topic indicators and patterns
-        topic_patterns = {
-            # Gaming topics
-            "gaming": r"\b(games?|gaming|play(ed|ing)?|gameplay|fps|rpg|mmo|steam|epic|nintendo|playstation|xbox)\b",
-            "technology": r"\b(tech|software|hardware|computer|programming|code|app|phone|device|ai|machine learning)\b",
-            "movies": r"\b(movie|film|cinema|watch(ed|ing)?|netflix|hbo|disney\+|stream|director|actor)\b",
-            "music": r"\b(music|song|album|artist|band|concert|listen|spotify|apple music|playlist)\b",
-            "sports": r"\b(sport|game|match|team|player|score|win|lose|championship|league|football|basketball|baseball)\b",
-            "food": r"\b(food|eat|cooking|recipe|restaurant|meal|breakfast|lunch|dinner|delicious|taste)\b",
-            "travel": r"\b(travel|trip|vacation|flight|hotel|visit|country|city|tour|destination)\b",
-            "work": r"\b(work|job|career|office|boss|colleague|meeting|project|deadline|salary|hire)\b",
-            "school": r"\b(school|college|university|class|study|exam|homework|degree|professor|student)\b",
-            "health": r"\b(health|doctor|hospital|medicine|exercise|fitness|diet|sick|pain|treatment)\b",
-            "relationships": r"\b(relationship|dating|love|friend|family|married|single|breakup|divorce)\b",
-            "money": r"\b(money|cash|dollar|price|cost|expensive|cheap|buy|sell|invest|budget)\b",
-            "weather": r"\b(weather|rain|snow|sunny|cold|hot|temperature|climate|forecast)\b",
-            "pets": r"\b(pet|dog|cat|animal|puppy|kitten|vet|leash|toy|treat)\b",
-            "books": r"\b(book|novel|read|reading|author|story|chapter|library|literature)\b",
-            "politics": r"\b(politics|government|election|president|policy|vote|democrat|republican|congress)\b",
-            "religion": r"\b(god|church|religion|pray|faith|bible|jesus|christian|muslim|islam)\b",
-        }
-
         detected_topics: Set[str] = set()
 
-        # Check each pattern
-        for topic, pattern in topic_patterns.items():
+        # 1. Fast Path: Regex Matching
+        for topic, pattern in self.topic_patterns.items():
             if re.search(pattern, content, re.IGNORECASE):
                 detected_topics.add(topic)
 
-        # Use ThinkingService if available for more sophisticated detection
+        # 2. Smart Path: Semantic Matching (Local NLP)
+        # Use sentence-transformers via LorebookService if available
+        if self.lorebook_service and self.topic_embeddings:
+            try:
+                # Similarity threshold (tunable)
+                # Lowered to 0.35 to catch more subtle semantic matches like "neural network" -> "technology"
+                semantic_threshold = 0.35
+
+                for topic, embedding in self.topic_embeddings.items():
+                    if topic in detected_topics:
+                        continue  # Skip if already found via regex
+
+                    similarity = self.lorebook_service.compute_similarity(message, embedding)
+                    if similarity > semantic_threshold:
+                        detected_topics.add(topic)
+                        logger.debug(f"Semantic topic detected: {topic} (score: {similarity:.2f})")
+            except Exception as e:
+                logger.debug(f"Semantic topic analysis failed: {e}")
+
+        # 3. Fallback: ThinkingService (if available and few topics found)
         if self.thinking_service and len(detected_topics) < 3:
             try:
                 prompt = f"""Extract 1-3 main topics from this message. Respond with comma-separated topics only.
@@ -246,7 +292,7 @@ Topics:"""
 
                 # Only add topics that match our predefined categories
                 for topic in llm_topics:
-                    if topic in topic_patterns:
+                    if topic in self.topic_patterns:
                         detected_topics.add(topic)
 
             except Exception as e:
