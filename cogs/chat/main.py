@@ -1109,84 +1109,50 @@ class ChatCog(commands.Cog):
                             bot_response=response,
                         )
                     )
-            # 1. Start Timing & Setup
-            start_time = time.time()
 
-            # 2. Persona Selection (Moved to top)
-            # selected_persona already set above
-
-            display_name = selected_persona.character.display_name
-            avatar_url = selected_persona.character.avatar_url
-
-            # 3. Context Management
-            # Build conversation context (history + summary + RAG)
-            # Build conversation context (history + summary + RAG)
-            context_result = await self.context_router.get_context(
-                channel=channel, user=user, message_content=message_content
-            )
-            history = context_result.history
-
-            # Use Context Manager to build optimized LLM input
-            # We construct a dummy/wrapped persona object if needed, or use the selected one
-            context = await self.context_manager.build_context(
-                persona=selected_persona,
-                history=history,
-                model_name=self.ollama.get_model_name(),
-                lore_entries=[],  # TODO: scan lore if needed
-                rag_content="",  # TODO: fetch RAG if needed
-                user_context="",  # TODO: fetch user profile if needed
-                llm_service=self.ollama,
+            # Post-Processing & Sending
+            # If streaming was enabled and utilized, the message is already sent via _stream_to_discord in _generate_response
+            # We only need to manually send if streaming was NOT used (e.g. standard generation or vision/tools without stream)
+            was_streamed = Config.RESPONSE_STREAMING_ENABLED and not (
+                recent_image_url or self.agentic_tools
             )
 
-            # Add user message to context if not already there (ContextManager typically handles history+current)
-            # But ContextManager.build_context expects 'history' which includes previous messages.
-            # We need to append the current message OR rely on `build_context` taking `user_message`.
-            # The signature of `build_context` above only took `history`.
-            # Let's check `services/core/context.py` if needed.
-            # For robustness, let's manually ensure current message is at end of `context` list if missing.
-            if not context or context[-1]["role"] != "user":
-                context.append({"role": "user", "content": message_content})
+            if not was_streamed:
+                display_name = selected_persona.character.display_name
+                avatar_url = selected_persona.character.avatar_url
 
-            # 4. Generate Response
-            response = await self._llm_chat(
-                messages=context,
-                system_prompt=None,  # System prompt is inside context[0]
-            )
+                discord_response, tts_response = self._prepare_response_content(
+                    response, channel
+                )
 
-            # 5. Post-Processing & Sending
-            # 5. Post-Processing & Sending
-            discord_response, tts_response = self._prepare_response_content(
-                response, channel
-            )
-
-            # Send via Webhook (Spoofing) or Fallback
-            sent_via_webhook = False
-            if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
-                try:
-                    webhooks = await channel.webhooks()
-                    webhook = next(
-                        (w for w in webhooks if w.name == "PersonaBot_Proxy"), None
-                    )
-                    if not webhook:
-                        webhook = await channel.create_webhook(name="PersonaBot_Proxy")
-
-                    chunks = await chunk_message(discord_response)
-                    for chunk in chunks:
-                        await webhook.send(
-                            content=chunk,
-                            username=display_name,
-                            avatar_url=avatar_url,
-                            wait=True,
+                # Send via Webhook (Spoofing) or Fallback
+                sent_via_webhook = False
+                if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
+                    try:
+                        webhooks = await channel.webhooks()
+                        webhook = next(
+                            (w for w in webhooks if w.name == "PersonaBot_Proxy"), None
                         )
-                    sent_via_webhook = True
-                except Exception as e:
-                    logger.warning(f"Webhook failed: {e}")
+                        if not webhook:
+                            webhook = await channel.create_webhook(name="PersonaBot_Proxy")
 
-            if not sent_via_webhook:
-                prefix = f"**[{display_name}]**: "
-                chunks = await chunk_message(prefix + discord_response)
-                for chunk in chunks:
-                    await channel.send(chunk)
+                        chunks = await chunk_message(discord_response)
+                        for chunk in chunks:
+                            await webhook.send(
+                                content=chunk,
+                                username=display_name,
+                                avatar_url=avatar_url,
+                                wait=True,
+                            )
+                        sent_via_webhook = True
+                    except Exception as e:
+                        logger.warning(f"Webhook failed: {e}")
+
+                if not sent_via_webhook:
+                    prefix = f"**[{display_name}]**: "
+                    chunks = await chunk_message(prefix + discord_response)
+                    for chunk in chunks:
+                        await channel.send(chunk)
 
             # 6. Record Interaction Details (Metrics & Learning)
             await self._record_interaction(
