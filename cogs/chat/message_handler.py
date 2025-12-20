@@ -543,7 +543,8 @@ JSON only:"""
                             f"Responding due to recent conversation context ({time_since.seconds}s ago)"
                         )
 
-        if not should_respond and Config.AMBIENT_CHANNELS:
+        # 7. Ambient Mode check (Legacy/Random)
+        if not should_respond and Config.AMBIENT_CHANNELS and Config.AMBIENT_MODE_ENABLED:
             if message.channel.id in Config.AMBIENT_CHANNELS:
                 # Check global response chance (e.g. 1/6)
                 if random.random() < Config.GLOBAL_RESPONSE_CHANCE:
@@ -556,7 +557,7 @@ JSON only:"""
                         )
 
         # 8. AI-powered message detection for ambient channels
-        if not should_respond and Config.AMBIENT_CHANNELS:
+        if not should_respond and Config.AMBIENT_CHANNELS and Config.AMBIENT_MODE_ENABLED:
             if message.channel.id in Config.AMBIENT_CHANNELS:
                 try:
                     persona_name = "Dagoth Ur"
