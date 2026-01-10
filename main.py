@@ -181,7 +181,7 @@ class OllamaBot(commands.Bot):
             )
             logger.info("Loaded VoiceCog")
 
-        # Load Event Listeners
+        # Load Extensions Cogs
         from cogs.event_listeners import EventListenersCog
 
         await self.add_cog(EventListenersCog(self))
