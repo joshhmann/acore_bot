@@ -28,9 +28,6 @@ from services.core.factory import ServiceFactory
 from services.interfaces.llm_interface import LLMInterface
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
-from cogs.music import MusicCog
-from cogs.reminders import RemindersCog
-from cogs.notes import NotesCog
 
 # Setup logging with structured JSON support
 from utils.logging_config import (
@@ -183,37 +180,6 @@ class OllamaBot(commands.Bot):
                 )
             )
             logger.info("Loaded VoiceCog")
-        else:
-            logger.warning("TTS service not available - VoiceCog not loaded")
-
-        # Load MusicCog
-        await self.add_cog(MusicCog(self))
-        logger.info("Loaded MusicCog")
-
-        # Load Feature Cogs
-        if self.services.get("reminders"):
-            await self.add_cog(RemindersCog(self, self.services["reminders"]))
-
-        if self.services.get("notes"):
-            await self.add_cog(NotesCog(self, self.services["notes"]))
-
-        # Load Modular Extensions
-        extensions = [
-            "cogs.memory_commands",
-            "cogs.character_commands",
-            "cogs.profile_commands",
-            "cogs.search_commands",
-            "cogs.help",
-            "cogs.system",
-        ]
-
-        for ext in extensions:
-            try:
-                await self.load_extension(ext)
-                logger.info(f"Loaded extension: {ext}")
-            except Exception as e:
-                logger.error(f"Failed to load extension {ext}: {e}")
-                # Continue loading other extensions instead of crashing
 
         # Load Event Listeners
         from cogs.event_listeners import EventListenersCog
