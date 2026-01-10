@@ -543,7 +543,7 @@ JSON only:"""
                             f"Responding due to recent conversation context ({time_since.seconds}s ago)"
                         )
 
-        if not should_respond and Config.AMBIENT_CHANNELS:
+        if not should_respond and Config.AMBIENT_CHANNELS and not is_persona_message:
             if message.channel.id in Config.AMBIENT_CHANNELS:
                 # Check global response chance (e.g. 1/6)
                 if random.random() < Config.GLOBAL_RESPONSE_CHANCE:
@@ -556,12 +556,14 @@ JSON only:"""
                         )
 
         # 8. AI-powered message detection for ambient channels
-        if not should_respond and Config.AMBIENT_CHANNELS:
+        if not should_respond and Config.AMBIENT_CHANNELS and not is_persona_message:
             if message.channel.id in Config.AMBIENT_CHANNELS:
                 try:
                     persona_name = "Dagoth Ur"
                     if self.cog.current_persona:
-                        persona_name = self.cog.current_persona.name
+                        persona_name = getattr(
+                            self.cog.current_persona, "display_name", None
+                        ) or getattr(self.cog.current_persona, "name", "Dagoth Ur")
 
                     prompt = f"""Message: "{message.content}"
 
@@ -605,9 +607,13 @@ Answer ONLY "yes" or "no"."""
             add_context_data("user_id", message.author.id)
             add_context_data("channel_id", message.channel.id)
             if hasattr(self.cog, "current_persona") and self.cog.current_persona:
-                add_context_data(
-                    "persona_id", getattr(self.cog.current_persona, "id", "unknown")
-                )
+                # Handle various persona object types (Character, CompiledPersona, or legacy dict)
+                p_id = getattr(self.cog.current_persona, "character_id", None)
+                if not p_id:
+                    p_id = getattr(self.cog.current_persona, "persona_id", None)
+                if not p_id:
+                    p_id = getattr(self.cog.current_persona, "id", "unknown")
+                add_context_data("persona_id", p_id)
 
             # Use structured logging for better observability
             log_with_context(

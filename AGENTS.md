@@ -1,142 +1,81 @@
-# AI Assistant Instructions
+# PROJECT KNOWLEDGE BASE
 
-**IMPORTANT: Copy or merge this file into your project's CLAUDE.md file to activate agent personas.**
+**Generated:** 2025-01-07 09:53:40 PM
+**Commit:** 94a0ed2
+**Branch:** master
 
-## 🚨 MANDATORY PERSONA SELECTION
+## OVERVIEW
 
-**CRITICAL: You MUST adopt one of the specialized personas before proceeding with any work.**
+Discord bot with multi-agent AI persona system, voice capabilities, and sophisticated memory/relationship tracking.
 
-**BEFORE DOING ANYTHING ELSE**, you must read and adopt one of these personas:
+## STRUCTURE
 
-1. **Developer Agent** - Read `.promptx/personas/agent-developer.md` - For coding, debugging, and implementation tasks
-2. **Code Reviewer Agent** - Read `.promptx/personas/agent-code-reviewer.md` - For reviewing code changes and quality assurance
-3. **Rebaser Agent** - Read `.promptx/personas/agent-rebaser.md` - For cleaning git history and rebasing changes
-4. **Merger Agent** - Read `.promptx/personas/agent-merger.md` - For merging code across branches
-5. **Multiplan Manager Agent** - Read `.promptx/personas/agent-multiplan-manager.md` - For orchestrating parallel work and creating plans
-6. **Production Readiness Agent** - Read `.promptx/personas/agent-prod-warden.md` - For final deployment safety checks and dependency validation
-
-**DO NOT PROCEED WITHOUT SELECTING A PERSONA.** Each persona has specific rules, workflows, and tools that you MUST follow exactly.
-
-## How to Choose Your Persona
-
-- **Asked to write code, fix bugs, or implement features?** → Use Developer Agent
-- **Asked to review code changes?** → Use Code Reviewer Agent  
-- **Asked to clean git history or rebase changes?** → Use Rebaser Agent
-- **Asked to merge branches or consolidate work?** → Use Merger Agent
-- **Asked to coordinate multiple tasks, build plans, or manage parallel work?** → Use Multiplan Manager Agent
-- **Asked to verify if code is safe to deploy/ship?** → Use Production Readiness Agent
-
-## Project Context
-
-This project uses:
-- **Language/Framework**: **Python (3.11+)** using **discord.py** for the bot interface and **Ollama/Kokoro** for AI/Voice services.
-- **Build Tool**: **`uv`** for dependency management and execution.
-- **Testing**: **`pytest`** via `uv run pytest`.
-- **Architecture**: **Component-based Bot** structure with core logic in `main.py`, commands in `cogs/`, and integrations in `services/`.
-
-## Core Principles (All Personas)
-
-1. **READ FIRST**: Always read at least 1500 lines to understand context fully
-2. **DELETE MORE THAN YOU ADD**: Complexity compounds into disasters
-3. **FOLLOW EXISTING PATTERNS**: Don't invent new approaches
-4. **BUILD AND TEST**: Run your build and test commands after changes
-5. **COMMIT FREQUENTLY**: Every 5-10 minutes for meaningful progress
-
-## File Structure Reference
-
-acore_bot/ ├── main.py # Bot entry point ├── config.py # Configuration management ├── cogs/ # Discord commands/cogs │ ├── chat.py
-
-│ └── voice.py
-
-├── services/ # External API integrations (Ollama, Kokoro) │ ├── ollama.py
-
-│ └── kokoro_tts.py
-
-├── utils/ # Helper functions ├── prompts/ # Persona prompt files (.txt) ├── tests/ # Test scripts └── CLAUDE.md # This file
-
-
-## Common Commands (All Personas)
-
-```bash
-# Install dependencies
-uv sync
-
-# Run project locally
-uv run python main.py
-
-# Run tests
-uv run pytest                    # Run all tests
-uv run pytest tests/unit/        # Run unit tests only
-uv run pytest -k test_name        # Run specific test
-uv run pytest -v                  # Verbose output
-uv run pytest --cov=             # Run with coverage
-
-# Performance testing
-./scripts/run_all_tests.sh        # Interactive test menu
-uv run python scripts/test_optimizations.py  # Quick validation (no API)
-uv run python scripts/test_pipeline_timing.py  # Pipeline timing (API calls)
-
-# Deploy locally (Systemd)
-sudo ./install_service.sh
+```
+./
+├── main.py                    # Bot entry point
+├── config.py                  # Configuration management
+├── cogs/                      # Discord extensions (commands, voice)
+├── services/                  # Core business logic (LLM, persona, memory)
+├── utils/                     # Helper utilities
+├── prompts/                   # Character definitions and frameworks
+├── tests/                     # Tiered testing system
+├── scripts/                   # Performance and migration scripts
+└── docs/                      # Comprehensive documentation
 ```
 
-## Code Style Guidelines
+## WHERE TO LOOK
 
-### Imports & Formatting
-- Use `uv run python -m ruff check .` for linting (if ruff is added)
-- Standard library imports first, then third-party, then local imports
-- Use `from typing import Optional, Dict, List` for type hints
-- Maximum line length: 100 characters
+| Task | Location | Notes |
+|------|----------|-------|
+| Bot startup | `main.py` | Discord.py client initialization |
+| Add Discord command | `cogs/chat/commands.py` | Slash commands |
+| Service architecture | `services/core/factory.py` | Factory pattern |
+| Persona behavior | `services/persona/behavior.py` | AI personality engine |
+| Voice features | `services/voice/` | TTS/STT/RVC pipeline |
+| Testing | `tests/conftest.py` | Extensive mocking fixtures |
+| Performance | `scripts/` | Benchmarking tools |
 
-### Naming Conventions
-- Classes: `PascalCase` (e.g., `ChatHistoryManager`)
-- Functions/variables: `snake_case` (e.g., `get_history_file`)
-- Constants: `UPPER_SNAKE_CASE` (e.g., `DISCORD_TOKEN`)
-- Private methods: prefix with `_` (e.g., `_cache_cleanup`)
+## CONVENTIONS
 
-### Error Handling
-- Use specific exception types (`ValueError`, `KeyError`, etc.)
-- Log errors with `logger.error()` before raising
-- Use `try/except` blocks for external API calls
-- Return `Optional[T]` for functions that may not return a value
+**Factory Pattern**: All services via `ServiceFactory` in `services/core/`
+**Async First**: Discord interactions must be async
+**Tiered Testing**: 4 levels (unit/integration/e2e/slow) with 70% coverage minimum
+**Persona System**: JSON character definitions with relationship tracking
+**No Runtime Data**: User data belongs in `~/.acore_bot/`, not git
 
-### Async/Await
-- All Discord interactions and external API calls must be async
-- Use `async def` for coroutine functions
-- Use `await` for async operations
-- Use `asyncio.gather()` for concurrent operations
+## ANTI-PATTERNS (THIS PROJECT)
 
-### Documentation
-- Module docstrings at top of every file
-- Class docstrings explaining purpose and usage
-- Method docstrings with Args/Returns sections
-- Use `"""Triple quotes"""` for docstrings
+**Never import from `services/deprecated/`** - Legacy code, replaced by BehaviorEngine
+**Never commit runtime data** - `data/`, `logs/`, `.venv/` belong in gitignore
+**Never break character** - Roleplaying rules enforced in response validation
+**Never sync calls in async context** - All Discord/external calls must be async
+**Never guess facts** - Use tools: time, calculate, convert, search
 
-## Documentation Strategy
+## UNIQUE STYLES
 
-**CRITICAL RULE: STOP CREATING NEW DOC FILES.**
-We avoid clutter ("a ton of docs laying around") by updating central, living documentation.
+**Multi-Agent Routing**: Bot selects persona based on context/mentions
+**Relationship Evolution**: Characters build affinity (0-100) over time
+**Memory Isolation**: Each persona maintains separate memories
+**Voice Conversion**: RVC for character voice transformation
+**Analytics Dashboard**: Real-time metrics web UI
 
-1.  **Do NOT create new implementation summary files** (e.g., `T05_Implementation_Summary.md`) for every small task.
-2.  **Update Existing Docs**:
-    *   **Features**: Update files in `docs/features/` with new details.
-    *   **Status**: Update `docs/STATUS.md` to reflect progress.
-    *   **Reports**: Only use `docs/reports/` for immutable snapshots (reviews, major checkpoints).
-3.  **Temporary Files**: If you create a plan (`.agent/plan.md`), **DELETE IT** when the task is done.
-4.  **Code is Documentation**: Prioritize excellent docstrings and type hints over external markdown files.
+## COMMANDS
 
+```bash
+# Development
+uv sync                              # Install dependencies  
+uv run python main.py                # Run bot
+uv run pytest                        # Run tests
+uv run python scripts/test_runner.sh # Tiered testing
 
-# CRITICAL REMINDER
-You CANNOT proceed without adopting a persona. Each persona has:
+# Production
+sudo ./install_service.sh            # Systemd service
+sudo systemctl status discordbot      # Check status
+```
 
-Specific workflows and rules
+## NOTES
 
-Required tools and commands  
-
-Success criteria and verification steps
-
-Commit and progress requirements
-
-Choose your persona now and follow its instructions exactly.
-
-Generated by promptx - Agent personas are in .promptx/personas/
+**AI Agents**: Must adopt persona from `.promptx/personas/` before working
+**Performance**: <5ms overhead per message for all persona features
+**Migration**: Legacy .txt persona files auto-convert to JSON
+**Monitoring**: Analytics dashboard at `http://localhost:8080` when enabled

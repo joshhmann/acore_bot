@@ -278,8 +278,77 @@ class ChatCog(commands.Cog):
 
         return response
 
+    async def _stream_to_webhook(
+        self, content_iterator, webhook, username, avatar_url, guild
+    ):
+        """Stream content from an iterator to a Discord webhook."""
+        response = ""
+        last_update = time.time()
+        message = None
+
+        # Send initial placeholder message
+        try:
+            message = await webhook.send(
+                content="*typing...*",  # Simple text placeholder
+                username=username,
+                avatar_url=avatar_url,
+                wait=True,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send initial webhook stream message: {e}")
+            # Fallback
+            async for chunk in content_iterator:
+                response += chunk
+            return response
+
+        # Iterate stream and update
+        first_update_complete = False
+        async for chunk in content_iterator:
+            response += chunk
+            current_time = time.time()
+
+            # Force faster first update to replace placeholder
+            should_force_update = not first_update_complete and len(response) > 20
+
+            if should_force_update or (
+                current_time - last_update >= Config.STREAM_UPDATE_INTERVAL
+            ):
+                if message:
+                    display_text = (
+                        self.helpers.restore_mentions(response, guild)
+                        if guild
+                        else response
+                    )
+                    if not display_text:
+                        continue
+                    try:
+                        await message.edit(content=display_text[:2000])
+                        first_update_complete = True
+                    except Exception:
+                        pass
+                last_update = current_time
+
+        # Final update
+        if message:
+            display_text = (
+                self.helpers.restore_mentions(response, guild) if guild else response
+            )
+            try:
+                final_content = display_text[:2000] if display_text else "..."
+                await message.edit(content=final_content)
+            except Exception:
+                pass
+
+        return response
+
     async def _generate_response(
-        self, final_messages, channel, interaction, optimal_max_tokens, recent_image_url
+        self,
+        final_messages,
+        channel,
+        interaction,
+        optimal_max_tokens,
+        recent_image_url,
+        webhook_data=None,
     ):
         """Generate response using available strategies (Vision, Agentic, Streaming, Standard)."""
         response = ""
@@ -375,9 +444,20 @@ class ChatCog(commands.Cog):
                     text_stream = multiplexer.create_consumer()
                     tts_stream = multiplexer.create_consumer()
 
+                    # Determine text handler
+                    if webhook_data:
+                        webhook, username, avatar_url = webhook_data
+                        text_handler = self._stream_to_webhook(
+                            text_stream, webhook, username, avatar_url, guild
+                        )
+                    else:
+                        text_handler = self._stream_to_discord(
+                            text_stream, interaction, guild
+                        )
+
                     # Parallel Execution
                     results = await asyncio.gather(
-                        self._stream_to_discord(text_stream, interaction, guild),
+                        text_handler,
                         streaming_tts.process_stream(
                             tts_stream, voice_client, speed=kokoro_speed, rate=edge_rate
                         ),
@@ -389,7 +469,14 @@ class ChatCog(commands.Cog):
             stream = self.ollama.chat_stream(
                 final_messages, system_prompt=None, max_tokens=optimal_max_tokens
             )
-            response = await self._stream_to_discord(stream, interaction, guild)
+
+            if webhook_data:
+                webhook, username, avatar_url = webhook_data
+                response = await self._stream_to_webhook(
+                    stream, webhook, username, avatar_url, guild
+                )
+            else:
+                response = await self._stream_to_discord(stream, interaction, guild)
             return response
 
         # 4. Standard Non-Streaming
@@ -1028,6 +1115,33 @@ class ChatCog(commands.Cog):
                 final_messages, self.ollama.get_model_name()
             )
 
+            # Prepare Persona/Webhook Info EARLY
+            display_name = selected_persona.character.display_name
+            avatar_url = selected_persona.character.avatar_url
+
+            # Check for Webhook (for streaming)
+            webhook_data = None
+            webhook = None
+            if (
+                isinstance(channel, (discord.TextChannel, discord.VoiceChannel))
+                and not interaction
+            ):
+                # Try to get/create webhook if we might stream
+                if Config.RESPONSE_STREAMING_ENABLED:
+                    try:
+                        webhooks = await channel.webhooks()
+                        webhook = next(
+                            (w for w in webhooks if w.name == "PersonaBot_Proxy"), None
+                        )
+                        if not webhook:
+                            webhook = await channel.create_webhook(
+                                name="PersonaBot_Proxy"
+                            )
+
+                        webhook_data = (webhook, display_name, avatar_url)
+                    except Exception as e:
+                        logger.warning(f"Failed to prepare webhook for streaming: {e}")
+
             # 4. Generate Response
             response = await self._generate_response(
                 final_messages,
@@ -1035,6 +1149,7 @@ class ChatCog(commands.Cog):
                 interaction,
                 optimal_max_tokens,
                 recent_image_url,
+                webhook_data=webhook_data,
             )
 
             # Validate and clean response (remove thinking tags, fix hallucinations)
@@ -1060,6 +1175,30 @@ class ChatCog(commands.Cog):
                 # No guild context (DMs), use original response
                 discord_response = response
                 tts_response = response
+
+            # Save conversation to persistent history
+            # This ensures multi-turn conversations maintain proper context
+            if Config.CHAT_HISTORY_ENABLED:
+                try:
+                    # Save user message (only once per interaction)
+                    await self.history.add_message(
+                        channel_id,
+                        "user",
+                        message_content,
+                        username=user.display_name,
+                        user_id=user.id,
+                    )
+                    # Save assistant response
+                    await self.history.add_message(
+                        channel_id,
+                        "assistant",
+                        discord_response,
+                        username=selected_persona.character.display_name,
+                        user_id=self.bot.user.id,
+                    )
+                except Exception as e:
+                    # Don't fail the entire response if history saving fails
+                    logger.warning(f"Failed to save conversation history: {e}")
 
             # Update mood based on interaction
             # BehaviorEngine handles mood updates
@@ -1115,8 +1254,8 @@ class ChatCog(commands.Cog):
             # 2. Persona Selection (Moved to top)
             # selected_persona already set above
 
-            display_name = selected_persona.character.display_name
-            avatar_url = selected_persona.character.avatar_url
+            # 2. Persona Selection (Moved to top)
+            # selected_persona already set above
 
             # 3. Context Management
             # Build conversation context (history + summary + RAG)
@@ -1160,15 +1299,27 @@ class ChatCog(commands.Cog):
             )
 
             # Send via Webhook (Spoofing) or Fallback
-            sent_via_webhook = False
-            if isinstance(channel, (discord.TextChannel, discord.VoiceChannel)):
+            # Send via Webhook (Spoofing) or Fallback
+            # If streamed, it's already sent (partially).
+            # We assume streaming handled the main response.
+            streaming_used = (
+                webhook_data is not None
+            ) and Config.RESPONSE_STREAMING_ENABLED
+            sent_via_webhook = streaming_used
+
+            if not sent_via_webhook and isinstance(
+                channel, (discord.TextChannel, discord.VoiceChannel)
+            ):
                 try:
-                    webhooks = await channel.webhooks()
-                    webhook = next(
-                        (w for w in webhooks if w.name == "PersonaBot_Proxy"), None
-                    )
                     if not webhook:
-                        webhook = await channel.create_webhook(name="PersonaBot_Proxy")
+                        webhooks = await channel.webhooks()
+                        webhook = next(
+                            (w for w in webhooks if w.name == "PersonaBot_Proxy"), None
+                        )
+                        if not webhook:
+                            webhook = await channel.create_webhook(
+                                name="PersonaBot_Proxy"
+                            )
 
                     chunks = await chunk_message(discord_response)
                     for chunk in chunks:
