@@ -84,9 +84,16 @@ class Config:
         for x in os.getenv("AUTO_REPLY_CHANNELS", "").split(",")
         if x.strip()
     ]
+    NAME_TRIGGER_CHANNELS: List[int] = [
+        int(x.strip())
+        for x in os.getenv("NAME_TRIGGER_CHANNELS", "").split(",")
+        if x.strip()
+    ]  # Channel IDs where bot responds to persona name mentions (empty = all channels)
     AUTO_REPLY_WITH_VOICE: bool = (
         os.getenv("AUTO_REPLY_WITH_VOICE", "true").lower() == "true"
     )
+    BOT_MODE: str = os.getenv("BOT_MODE", "hybrid").lower()
+    BOT_MODE_CHOICES = ["roleplay", "assistant", "hybrid"]
 
     # Conversation Session Settings
     CONVERSATION_TIMEOUT: int = int(

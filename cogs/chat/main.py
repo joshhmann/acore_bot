@@ -56,7 +56,6 @@ class ChatCog(commands.Cog):
         persona_system: Optional[Any] = None,
         compiled_persona: Optional[Any] = None,
         llm_fallback: Optional[Any] = None,
-        persona_relationships: Optional[Any] = None,
     ) -> None:
         """Initialize chat cog."""
         self.bot = bot
@@ -72,9 +71,6 @@ class ChatCog(commands.Cog):
         self.rag = rag
         self.conversation_manager = conversation_manager
         self.compiled_persona = compiled_persona  # For compiled/default persona logic
-        self.persona_relationships = (
-            persona_relationships  # Persona-to-persona affinity
-        )
 
         # Behavior Engine (Unified AI Brain) - Will be initialized in _async_init
         self.behavior_engine = None
@@ -128,10 +124,6 @@ class ChatCog(commands.Cog):
 
             # 4. Initialize Persona Router (Loads Characters)
             await self.persona_router.initialize()
-
-            # 4b. Initialize Persona Relationships (Affinity between characters)
-            if self.persona_relationships:
-                await self.persona_relationships.initialize()
 
             # 5. Set Initial Persona (Sync Legacy & Router)
             # Try to set Dagoth Ur as default, or first available
@@ -1416,30 +1408,7 @@ class ChatCog(commands.Cog):
         if self.persona_router and selected_persona:
             self.persona_router.record_response(channel_id, selected_persona)
 
-        # 2. Persona Relationships (Banter Affinity)
-        # Only record if original message was from a persona (webhook)
-        if (
-            original_message
-            and original_message.webhook_id
-            and self.persona_relationships
-            and selected_persona
-        ):
-            speaker_name = original_message.author.display_name
-            responder_name = selected_persona.character.display_name
-
-            # Record interaction (increases affinity by 2)
-            self._create_background_task(
-                self.persona_relationships.record_interaction(
-                    speaker=speaker_name,
-                    responder=responder_name,
-                    affinity_change=2,
-                    memory=None,  # Could extract memorable moment with LLM later
-                )
-            )
-            # Save relationships in background
-            self._create_background_task(self.persona_relationships.save())
-
-        # 3. Voice Reply (Environmental)
+        # 2. Voice Reply (Environmental)
         # We need the tts_response. Re-clean it or pass it?
         # Clean response for TTS again (fast enough) or re-calc.
         # Ideally we should pass tts_response, but let's re-clean for now to keep signature simple or pass it in.

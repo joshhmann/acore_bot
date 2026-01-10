@@ -362,9 +362,19 @@ JSON only:"""
 
             # Check if any character name is mentioned in message
             if any(name in content_lower for name in bot_names):
-                should_respond = True
-                response_reason = "name_trigger"
-                suggested_style = "direct"
+                if Config.NAME_TRIGGER_CHANNELS:
+                    if message.channel.id in Config.NAME_TRIGGER_CHANNELS:
+                        should_respond = True
+                        response_reason = "name_trigger"
+                        suggested_style = "direct"
+                    else:
+                        logger.debug(
+                            f"Name trigger blocked - channel {message.channel.id} not in NAME_TRIGGER_CHANNELS"
+                        )
+                else:
+                    should_respond = True
+                    response_reason = "name_trigger"
+                    suggested_style = "direct"
 
                 # If multiple personas mentioned, set up multi-persona interaction
                 if len(mentioned_personas) > 1:
@@ -506,27 +516,9 @@ JSON only:"""
                 if time_since < timedelta(minutes=5):
                     # MODIFIED: If it's a persona message, only respond if specifically triggered or rare banter
                     if is_persona_message:
-                        # Auto-banter with AFFINITY-BASED probability
-                        # Characters who interact more have higher chance to respond to each other
+                        # Auto-banter with FIXED probability (5%)
+                        # Characters respond to each other occasionally
                         banter_chance = 0.05  # Base 5% chance
-
-                        # Get affinity-based chance if persona_relationships available
-                        if self.cog.persona_relationships and self.cog.current_persona:
-                            current_name = getattr(
-                                self.cog.current_persona, "display_name", None
-                            )
-                            if hasattr(self.cog.current_persona, "character"):
-                                current_name = (
-                                    self.cog.current_persona.character.display_name
-                                )
-
-                            speaker_name = message.author.display_name
-                            if current_name and speaker_name:
-                                banter_chance = (
-                                    self.cog.persona_relationships.get_banter_chance(
-                                        current_name, speaker_name, base_chance=0.05
-                                    )
-                                )
 
                         if random.random() < banter_chance:
                             should_respond = True
@@ -543,8 +535,36 @@ JSON only:"""
                             f"Responding due to recent conversation context ({time_since.seconds}s ago)"
                         )
 
-        if not should_respond and Config.AMBIENT_CHANNELS and not is_persona_message:
-            if message.channel.id in Config.AMBIENT_CHANNELS:
+        if not should_respond and Config.AUTO_REPLY_ENABLED and not is_persona_message:
+            if Config.AUTO_REPLY_CHANNELS:
+                if message.channel.id in Config.AUTO_REPLY_CHANNELS:
+                    if random.random() < Config.GLOBAL_RESPONSE_CHANCE:
+                        if len(message.content.strip()) >= 3:
+                            should_respond = True
+                            response_reason = "auto_reply_channel"
+                            suggested_style = "casual"
+                            logger.info(
+                                f"Auto-replying in configured channel: {message.channel.name} (Chance Hit)"
+                            )
+            else:
+                if random.random() < Config.GLOBAL_RESPONSE_CHANCE:
+                    if len(message.content.strip()) >= 3:
+                        should_respond = True
+                        response_reason = "auto_reply_global"
+                        suggested_style = "casual"
+                        logger.info(
+                            f"Auto-replying globally (all channels): {message.channel.name} (Chance Hit)"
+                        )
+
+        if (
+            not should_respond
+            and Config.AMBIENT_MODE_ENABLED
+            and not is_persona_message
+        ):
+            if (
+                not Config.AMBIENT_CHANNELS
+                or message.channel.id in Config.AMBIENT_CHANNELS
+            ):
                 # Check global response chance (e.g. 1/6)
                 if random.random() < Config.GLOBAL_RESPONSE_CHANCE:
                     if len(message.content.strip()) >= 3:
@@ -552,12 +572,19 @@ JSON only:"""
                         response_reason = "ambient_channel"
                         suggested_style = "casual"
                         logger.info(
-                            f"Responding in always-respond channel: {message.channel.name} (Chance Hit)"
+                            f"Responding in ambient channel: {message.channel.name} (Chance Hit)"
                         )
 
         # 8. AI-powered message detection for ambient channels
-        if not should_respond and Config.AMBIENT_CHANNELS and not is_persona_message:
-            if message.channel.id in Config.AMBIENT_CHANNELS:
+        if (
+            not should_respond
+            and Config.AMBIENT_MODE_ENABLED
+            and not is_persona_message
+        ):
+            if (
+                not Config.AMBIENT_CHANNELS
+                or message.channel.id in Config.AMBIENT_CHANNELS
+            ):
                 try:
                     persona_name = "Dagoth Ur"
                     if self.cog.current_persona:

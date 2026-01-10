@@ -21,7 +21,6 @@ from services.memory.conversation import MultiTurnConversationManager
 
 # Persona domain
 from services.persona.system import PersonaSystem
-from services.persona.relationships import PersonaRelationships
 
 # Discord domain
 from services.discord.profiles import UserProfileService
@@ -249,7 +248,6 @@ class ServiceFactory:
         self.services["persona_system"] = None
         self.services["compiled_persona"] = None
         self.services["tool_system"] = None
-        self.services["persona_relationships"] = PersonaRelationships()
 
         if Config.USE_PERSONA_SYSTEM:
             try:

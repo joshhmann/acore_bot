@@ -109,6 +109,23 @@ class PersonaSystem:
 
         logger.info("Persona system initialized")
 
+    def _parse_examples(self, mes_example: str) -> str:
+        """Parse <START> tagged examples from character card."""
+        if not mes_example:
+            return ""
+
+        # Split by <START> tags
+        pattern = r"<START>(.*?)(?=<START>|$)"
+        matches = []
+        import re
+
+        for i, match in enumerate(re.finditer(pattern, mes_example, re.DOTALL)):
+            example = match.group(1).strip()
+            if example:
+                matches.append(f"=== EXAMPLE {i + 1} ===\n{example}")
+
+        return "\n\n".join(matches) if matches else f"=== EXAMPLES ===\n{mes_example}"
+
     def clear_cache(self):
         """Clear all cached characters, frameworks, and compiled personas."""
         self.characters.clear()
@@ -553,8 +570,7 @@ class PersonaSystem:
 === SCENARIO ===
 {character.scenario}
 
-=== EXAMPLES OF DIALOGUE ===
-{character.mes_example}
+{self._parse_examples(character.mes_example)}
 
 === INSTRUCTIONS ===
 {framework.prompt_template}
@@ -573,12 +589,14 @@ class PersonaSystem:
 
 === SCENARIO ===
 {character.scenario}
-"""
+ """
         # Add example dialogue if provided
         if character.mes_example:
-            prompt += f"""
-=== EXAMPLE DIALOGUE ===
-{character.mes_example}
+            parsed_examples = self._parse_examples(character.mes_example)
+            if parsed_examples:
+                prompt += f"""
+
+{parsed_examples}
 """
 
         # Add response_style if in legacy character

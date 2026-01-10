@@ -91,7 +91,6 @@ class BehaviorEngine:
         context_manager: ContextManager,
         lorebook_service: Optional[LorebookService] = None,
         thinking_service=None,
-        evolution_tracker=None,
     ):
         self.bot = bot
         self.ollama = ollama
@@ -105,11 +104,6 @@ class BehaviorEngine:
 
         # T11: Adaptive Ambient Timing - Channel Activity Profiler
         self.channel_profiler = None  # Will be initialized in start() method
-
-        # T13: Character Evolution System
-        self.evolution_tracker = (
-            evolution_tracker  # Will be initialized in start() if None
-        )
 
         # Configuration (from Config)
 
@@ -142,13 +136,6 @@ class BehaviorEngine:
         # For now, create a simple stub - will be replaced with proper import
         self.channel_profiler = None
         logger.info("Channel Activity Profiler disabled (import issue)")
-
-        # T13: Initialize Evolution Tracker
-        if self.evolution_tracker is None:
-            from services.persona.evolution import PersonaEvolutionTracker
-
-            self.evolution_tracker = PersonaEvolutionTracker()
-            logger.info("PersonaEvolutionTracker initialized")
 
         self._task = asyncio.create_task(self._tick_loop())
         logger.info("Behavior Engine started")
@@ -341,47 +328,6 @@ Topics:"""
 
         # 2. T9: Analyze Message Topics
         topics = await self._analyze_message_topics(message.content)
-
-        # T15: Check for conflict triggers in persona interactions
-        if message.webhook_id and self.current_persona:
-            # Message from another persona - check for conflicts
-            persona_relationships = getattr(self.bot, "persona_relationships", None)
-            if persona_relationships:
-                current_name = self.current_persona.character.display_name
-                speaker_name = message.author.display_name
-
-                # Check if message contains conflict trigger
-                conflict_trigger = persona_relationships.detect_conflict_trigger(
-                    current_name, speaker_name, message.content, topics
-                )
-
-                if conflict_trigger:
-                    # Escalate conflict
-                    persona_relationships.escalate_conflict(
-                        current_name, speaker_name, conflict_trigger
-                    )
-                    logger.info(
-                        f"Conflict triggered between {current_name} and {speaker_name}: {conflict_trigger}"
-                    )
-
-        # T13: Track interaction for character evolution
-        if self.evolution_tracker and self.current_persona:
-            try:
-                evolution_event = await self.evolution_tracker.track_message(
-                    persona_id=self.current_persona.persona_id,
-                    user_id=str(message.author.id),
-                    topics=topics,
-                    conversation_turn=state.message_count,
-                )
-
-                # If milestone achieved, log it (could send notification in future)
-                if evolution_event:
-                    logger.info(
-                        f"🎉 Evolution milestone: {self.current_persona.character.display_name} "
-                        f"reached {evolution_event['milestone']} messages!"
-                    )
-            except Exception as e:
-                logger.error(f"Failed to track evolution: {e}")
 
         # 3. Analyze Conversation Context (T3: Context-Aware Response Length)
         from cogs.chat.helpers import ChatHelpers

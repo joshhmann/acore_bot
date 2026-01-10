@@ -71,13 +71,13 @@ class ContextManager:
 
     def _get_contagion_prompt_modifier(self, modifier: str, intensity: float) -> str:
         """Generate emotional contagion prompt modifier based on user sentiment.
-        
+
         T21-T22: Emotional Contagion System
-        
+
         Args:
             modifier: Type of contagion (empathetic, enthusiastic, balanced)
             intensity: Strength of contagion effect (0.0-1.0)
-            
+
         Returns:
             Prompt text to inject into system prompt
         """
@@ -85,22 +85,40 @@ class ContextManager:
             # User is consistently sad/frustrated - be more supportive
             base_text = "\n\n[EMOTIONAL GUIDANCE]\nThe user has been expressing sadness or frustration recently. "
             if intensity > 0.7:
-                return base_text + "Be especially gentle, supportive, and understanding in your responses. Offer empathy and encouragement."
+                return (
+                    base_text
+                    + "Be especially gentle, supportive, and understanding in your responses. Offer empathy and encouragement."
+                )
             elif intensity > 0.5:
-                return base_text + "Be more compassionate and supportive in your responses. Show understanding of their situation."
+                return (
+                    base_text
+                    + "Be more compassionate and supportive in your responses. Show understanding of their situation."
+                )
             else:
-                return base_text + "Be somewhat more gentle and understanding in your responses."
-                
+                return (
+                    base_text
+                    + "Be somewhat more gentle and understanding in your responses."
+                )
+
         elif modifier == "enthusiastic":
             # User is consistently happy/excited - match their energy
             base_text = "\n\n[EMOTIONAL GUIDANCE]\nThe user has been expressing happiness and energy recently. "
             if intensity > 0.7:
-                return base_text + "Match their enthusiasm with energetic, positive, and engaging responses. Share their excitement!"
+                return (
+                    base_text
+                    + "Match their enthusiasm with energetic, positive, and engaging responses. Share their excitement!"
+                )
             elif intensity > 0.5:
-                return base_text + "Be more upbeat and energetic in your responses. Share in their positive mood."
+                return (
+                    base_text
+                    + "Be more upbeat and energetic in your responses. Share in their positive mood."
+                )
             else:
-                return base_text + "Be slightly more cheerful and positive in your responses."
-                
+                return (
+                    base_text
+                    + "Be slightly more cheerful and positive in your responses."
+                )
+
         else:  # balanced
             return ""  # No modifier needed for balanced state
 
@@ -185,8 +203,9 @@ class ContextManager:
                 # Lazy load blender
                 if not self.framework_blender:
                     from services.persona.framework_blender import FrameworkBlender
+
                     self.framework_blender = FrameworkBlender()
-                
+
                 # Check context via last user message
                 last_user_msg = None
                 # Use history to find last user message (skip recent system messages)
@@ -194,81 +213,36 @@ class ContextManager:
                     if m.get("role") == "user":
                         last_user_msg = m.get("content", "")
                         break
-                
+
                 if last_user_msg:
                     context = self.framework_blender.detect_context(last_user_msg)
                     if context:
                         # Check rules for this context
                         rules = persona.blend_data.get("rules", [])
                         cached_prompts = persona.blend_data.get("cached_prompts", {})
-                        
+
                         for rule in rules:
                             if rule.get("context") == context:
                                 target_fw_id = rule.get("framework")
                                 target_prompt = cached_prompts.get(target_fw_id)
-                                
+
                                 if target_prompt:
                                     weight = rule.get("weight", 1.0)
-                                    full_system_content = self.framework_blender.blend_framework(
-                                        full_system_content,
-                                        target_prompt,
-                                        context,
-                                        weight
+                                    full_system_content = (
+                                        self.framework_blender.blend_framework(
+                                            full_system_content,
+                                            target_prompt,
+                                            context,
+                                            weight,
+                                        )
                                     )
                                     logger.debug(
                                         f"Framework Blending: Applied {target_fw_id} for context {context} "
                                         f"(weight: {weight})"
                                     )
-                                    break # Only apply one blend rule priority
+                                    break  # Only apply one blend rule priority
             except Exception as e:
                 logger.error(f"Error applying framework blending: {e}")
-
-        # T13: Add Character Evolution modifier
-        try:
-            from services.persona.evolution import PersonaEvolutionTracker
-
-            # Try to get evolution tracker from global state (set by BehaviorEngine)
-            # For now, we'll create a temporary instance to check evolution state
-            evolution_tracker = PersonaEvolutionTracker()
-            evolution_modifier = evolution_tracker.get_evolution_prompt_modifier(
-                persona.persona_id
-            )
-            if evolution_modifier:
-                full_system_content += f"\n{evolution_modifier}"
-                logger.debug(f"Applied evolution modifier for {persona.persona_id}")
-        except Exception as e:
-            logger.debug(f"Evolution modifier not applied: {e}")
-
-        # T15: Add Conflict modifiers for persona interactions
-        try:
-            # Check if we have PersonaRelationships available
-            # This would typically be passed through the LLM service or context
-            # For now, check if available on bot instance
-            if llm_service and hasattr(llm_service, "bot"):
-                persona_relationships = getattr(
-                    llm_service.bot, "persona_relationships", None
-                )
-                if persona_relationships:
-                    # Check recent history for other persona messages
-                    for msg in reversed(history[-5:]):  # Check last 5 messages
-                        msg_username = msg.get("username") or msg.get("name", "")
-                        if (
-                            msg_username
-                            and msg_username != persona.character.display_name
-                        ):
-                            # Found another persona in history - check for conflict
-                            conflict_mod = persona_relationships.get_conflict_modifier(
-                                persona.character.display_name, msg_username
-                            )
-                            if conflict_mod["in_conflict"]:
-                                full_system_content += conflict_mod["prompt_modifier"]
-                                logger.debug(
-                                    f"Applied conflict modifier: {persona.character.display_name} vs {msg_username} "
-                                    f"(severity: {conflict_mod['severity']:.2f})"
-                                )
-                                break  # Only apply one conflict modifier
-        except Exception as e:
-            logger.debug(f"Conflict modifier not applied: {e}")
 
         # T21-T22: Add Emotional Contagion modifier
         # This adjusts the bot's emotional tone based on user sentiment trends
@@ -286,8 +260,7 @@ class ContextManager:
                         for channel_id, state in behavior_engine.states.items():
                             if state.contagion_active:
                                 contagion_text = self._get_contagion_prompt_modifier(
-                                    state.contagion_modifier,
-                                    state.contagion_intensity
+                                    state.contagion_modifier, state.contagion_intensity
                                 )
                                 if contagion_text:
                                     full_system_content += contagion_text
@@ -361,5 +334,20 @@ class ContextManager:
 
         # Re-reverse to get chronological order
         final_messages.extend(reversed(history_to_include))
+
+        # Token Budget Monitoring
+        total_context_text = "\n".join([m.get("content", "") for m in final_messages])
+        estimated_tokens = count_tokens(total_context_text)
+        budget_info = check_token_budget(estimated_tokens)
+
+        if budget_info.get("warning"):
+            warning_level = budget_info.get("warning_level", "info")
+            logger.warning(budget_info["warning"])
+
+            if warning_level == "critical":
+                logger.error(
+                    f"Context budget critically low: {budget_info['tokens_used']}/{budget_info['tokens_remaining'] + budget_info['tokens_used']} tokens "
+                    f"({budget_info['percentage_used']:.1f}% used)"
+                )
 
         return final_messages
