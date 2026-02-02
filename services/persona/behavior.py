@@ -8,7 +8,7 @@ import logging
 import random
 import asyncio
 from datetime import datetime
-from typing import Dict, List, Optional, Any, Set
+from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
 
@@ -18,6 +18,8 @@ from config import Config
 from services.llm.ollama import OllamaService
 from services.core.context import ContextManager
 from services.persona.lorebook import LorebookService
+from services.persona.rl.service import RLService
+from services.persona.rl.types import RLAction, RLState
 
 logger = logging.getLogger(__name__)
 
@@ -91,16 +93,24 @@ class BehaviorEngine:
         context_manager: ContextManager,
         lorebook_service: Optional[LorebookService] = None,
         thinking_service=None,
+        rl_service: Optional[RLService] = None,
     ):
         self.bot = bot
         self.ollama = ollama
         self.context_manager = context_manager
         self.lorebook_service = lorebook_service
         self.thinking_service = thinking_service  # Cheap/fast LLM for decisions
+        self.rl_service = rl_service
+        self.rl_enabled = rl_service.enabled if rl_service else False
 
         # State tracking
         self.states: Dict[int, BehaviorState] = defaultdict(BehaviorState)
         self.voice_states: Dict[int, Dict] = {}  # guild_id -> voice state info
+
+        # RL Context: (channel_id, user_id) -> (prev_action, prev_state, prev_sentiment, timestamp)
+        self.reward_context: Dict[
+            Tuple[int, int], Tuple[RLAction, RLState, float, datetime]
+        ] = {}
 
         # T11: Adaptive Ambient Timing - Channel Activity Profiler
         self.channel_profiler = None  # Will be initialized in start() method
@@ -162,6 +172,26 @@ class BehaviorEngine:
     def set_persona(self, persona):
         """Update the active persona."""
         self.current_persona = persona
+
+    def _bin_sentiment(self, score: float) -> int:
+        """Bin sentiment score (-1.0 to 1.0) into discrete levels 0-4.
+
+        Bins:
+        0: Very Negative (-1.0 to -0.6)
+        1: Negative (-0.6 to -0.2)
+        2: Neutral (-0.2 to 0.2)
+        3: Positive (0.2 to 0.6)
+        4: Very Positive (0.6 to 1.0)
+        """
+        if score < -0.6:
+            return 0
+        if score < -0.2:
+            return 1
+        if score < 0.2:
+            return 2
+        if score < 0.6:
+            return 3
+        return 4
 
     async def _analyze_message_topics(self, message: str) -> List[str]:
         """
@@ -336,6 +366,129 @@ Topics:"""
             message.content,
             history=[],  # TODO: Could pass recent history for deeper analysis
         )
+
+        if self.rl_enabled and self.rl_service:
+            ctx_key = (message.channel.id, message.author.id)
+            last_ctx = self.reward_context.get(ctx_key)
+            now = datetime.now()
+
+            if last_ctx:
+                last_time = last_ctx[-1]
+                if (now - last_time).total_seconds() < 5.0:
+                    return None
+
+            current_sentiment = (
+                state.sentiment_history[-1] if state.sentiment_history else 0.0
+            )
+            sentiment_bin = self._bin_sentiment(current_sentiment)
+
+            time_bin = 4
+            if last_ctx:
+                time_diff = (now - last_ctx[-1]).total_seconds()
+                if time_diff < 10:
+                    time_bin = 0
+                elif time_diff < 30:
+                    time_bin = 1
+                elif time_diff < 60:
+                    time_bin = 2
+                elif time_diff < 300:
+                    time_bin = 3
+
+            count_bin = 0
+            if state.message_count > 50:
+                count_bin = 3
+            elif state.message_count > 20:
+                count_bin = 2
+            elif state.message_count > 5:
+                count_bin = 1
+
+            rl_state = (sentiment_bin, time_bin, count_bin)
+
+            if last_ctx:
+                prev_action, prev_state, prev_sentiment, _ = last_ctx
+
+                reward = await self.rl_service.calculate_reward(
+                    message.channel.id,
+                    message.author.id,
+                    message,
+                    state,
+                    prev_action,
+                    prev_sentiment,
+                )
+
+                await self.rl_service.update_agent(
+                    message.channel.id,
+                    message.author.id,
+                    prev_state,
+                    prev_action,
+                    reward,
+                    rl_state,
+                )
+
+            action, _ = await self.rl_service.get_action(
+                message.channel.id, message.author.id, rl_state
+            )
+
+            result = None
+            if action == RLAction.WAIT:
+                result = None
+            elif action == RLAction.REACT:
+                reaction = await self._decide_reaction(message, state)
+                if reaction:
+                    result = {
+                        "should_respond": False,
+                        "reaction": reaction,
+                        "reply": None,
+                        "reason": "rl_react",
+                        "mood": state.mood_state,
+                        "mood_intensity": state.mood_intensity,
+                        "context_type": context_type,
+                        "topics": topics,
+                    }
+            elif action == RLAction.ENGAGE:
+                reply = await self._decide_proactive_engagement(
+                    message, state, topics, force=False
+                )
+                if reply:
+                    result = {
+                        "should_respond": True,
+                        "reaction": None,
+                        "reply": reply,
+                        "reason": "rl_engage",
+                        "mood": state.mood_state,
+                        "mood_intensity": state.mood_intensity,
+                        "context_type": context_type,
+                        "topics": topics,
+                    }
+            elif action == RLAction.INITIATE:
+                reply = await self._decide_proactive_engagement(
+                    message, state, topics, force=True
+                )
+                if reply:
+                    result = {
+                        "should_respond": True,
+                        "reaction": None,
+                        "reply": reply,
+                        "reason": "rl_initiate",
+                        "mood": state.mood_state,
+                        "mood_intensity": state.mood_intensity,
+                        "context_type": context_type,
+                        "topics": topics,
+                    }
+
+            self.reward_context[ctx_key] = (action, rl_state, current_sentiment, now)
+
+            if random.random() < 0.05:
+                cutoff = now.timestamp() - 3600
+                keys_to_remove = [
+                    k
+                    for k, v in self.reward_context.items()
+                    if v[-1].timestamp() < cutoff
+                ]
+                for k in keys_to_remove:
+                    del self.reward_context[k]
+
+            return result
 
         # 4. Decision: React?
         reaction_emoji = await self._decide_reaction(message, state)
@@ -826,6 +979,7 @@ Respond with ONLY one word: YES or NO"""
         message: discord.Message,
         state: BehaviorState,
         topics: Optional[List[str]] = None,
+        force: bool = False,
     ) -> Optional[str]:
         """
         Decide whether to jump into a conversation or ask a follow-up question.
@@ -842,14 +996,16 @@ Respond with ONLY one word: YES or NO"""
         """
         # 1. Check cooldown for proactive engagement
         if (
-            datetime.now() - state.last_proactive_trigger
-        ).total_seconds() < self.proactive_cooldown:
+            not force
+            and (datetime.now() - state.last_proactive_trigger).total_seconds()
+            < self.proactive_cooldown
+        ):
             return None
 
         # T9: Check topic-based engagement first (highest priority)
         if topics:
             topic_decision = await self._should_engage_by_topics(topics)
-            if topic_decision["should_engage"] is False:
+            if topic_decision["should_engage"] is False and not force:
                 # Strong topic avoidance - skip engagement entirely
                 logger.debug(f"Topic avoidance: {topic_decision['reason']}")
                 return None
@@ -886,7 +1042,7 @@ Respond with ONLY one word: YES or NO"""
 
         # Random check with combined adjustment
         base_chance = 0.3  # 30% base chance
-        if random.random() > (base_chance + total_modifier):
+        if not force and random.random() > (base_chance + total_modifier):
             return None
 
         # 3. Check Interest (LLM Fast Path)

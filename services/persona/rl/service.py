@@ -3,7 +3,7 @@
 import asyncio
 import logging
 from pathlib import Path
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple, Optional, Any
 from collections import OrderedDict
 
 from .types import RLAction, RLState
@@ -107,6 +107,21 @@ class RLService:
                 return RLAction.WAIT, None
 
             return action, None
+
+    async def calculate_reward(
+        self,
+        channel_id: int,
+        user_id: int,
+        message: Any,
+        state: Any,
+        prev_action: RLAction,
+        prev_sentiment: float,
+    ) -> float:
+        """Calculate reward for the previous action.
+
+        Note: Actual logic to be implemented in Task 4.
+        """
+        return 0.0
 
     async def update_agent(
         self,
