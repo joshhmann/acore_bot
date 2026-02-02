@@ -107,9 +107,9 @@ class BehaviorEngine:
         self.states: Dict[int, BehaviorState] = defaultdict(BehaviorState)
         self.voice_states: Dict[int, Dict] = {}  # guild_id -> voice state info
 
-        # RL Context: (channel_id, user_id) -> (prev_action, prev_state, prev_sentiment, timestamp)
+        # RL Context: (channel_id, user_id) -> (prev_action, prev_state, prev_sentiment, prev_affinity, timestamp)
         self.reward_context: Dict[
-            Tuple[int, int], Tuple[RLAction, RLState, float, datetime]
+            Tuple[int, int], Tuple[RLAction, RLState, float, float, datetime]
         ] = {}
 
         # T11: Adaptive Ambient Timing - Channel Activity Profiler
@@ -404,8 +404,37 @@ Topics:"""
 
             rl_state = (sentiment_bin, time_bin, count_bin)
 
+            # Fetch current affinity
+            current_affinity = 0.0
+            chat_cog = self.bot.get_cog("ChatCog")
+            if chat_cog and hasattr(chat_cog, "user_profiles"):
+                try:
+                    profile = await chat_cog.user_profiles.load_profile(
+                        message.author.id
+                    )
+                    current_affinity = profile.get("affection", {}).get("level", 0.0)
+                except Exception as e:
+                    logger.warning(f"Failed to load profile for affinity: {e}")
+
             if last_ctx:
-                prev_action, prev_state, prev_sentiment, _ = last_ctx
+                # Handle migration/backward compatibility for reward context
+                if len(last_ctx) == 4:
+                    prev_action, prev_state, prev_sentiment, last_time = last_ctx
+                    prev_affinity = current_affinity  # Assume no change if no history
+                else:
+                    (
+                        prev_action,
+                        prev_state,
+                        prev_sentiment,
+                        prev_affinity,
+                        last_time,
+                    ) = last_ctx
+
+                # Calculate latency
+                latency = (now - last_time).total_seconds()
+
+                # Calculate affinity delta
+                affinity_delta = current_affinity - prev_affinity
 
                 reward = await self.rl_service.calculate_reward(
                     message.channel.id,
@@ -414,6 +443,8 @@ Topics:"""
                     state,
                     prev_action,
                     prev_sentiment,
+                    latency=latency,
+                    affinity_delta=affinity_delta,
                 )
 
                 await self.rl_service.update_agent(
@@ -476,7 +507,13 @@ Topics:"""
                         "topics": topics,
                     }
 
-            self.reward_context[ctx_key] = (action, rl_state, current_sentiment, now)
+            self.reward_context[ctx_key] = (
+                action,
+                rl_state,
+                current_sentiment,
+                current_affinity,
+                now,
+            )
 
             if random.random() < 0.05:
                 cutoff = now.timestamp() - 3600

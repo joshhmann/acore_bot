@@ -116,12 +116,51 @@ class RLService:
         state: Any,
         prev_action: RLAction,
         prev_sentiment: float,
+        latency: float = 0.0,
+        affinity_delta: float = 0.0,
     ) -> float:
-        """Calculate reward for the previous action.
+        r"""Calculate reward for the previous action.
 
-        Note: Actual logic to be implemented in Task 4.
+        Logic:
+          - Base reward: current_sentiment * 1.0
+          - Affinity reward: math.tanh(affinity_delta * 0.1) * 5.0
+          - Speed bonus: 0.5 if latency < RL_REWARD_SPEED_THRESHOLD
+          - Penalty 1: -2.0 if user message matches regex r'\b(?:stop|shut\s*up|quiet)\b'
+          - Penalty 2: -0.5 if previous_action == RLAction.WAIT AND current_sentiment < -0.3
+          - Clamp reward: [-10.0, 10.0]
         """
-        return 0.0
+        import math
+        import re
+        from .constants import RL_REWARD_SPEED_THRESHOLD
+
+        # Extract current sentiment from state
+        # state is expected to be BehaviorState
+        current_sentiment = 0.0
+        if hasattr(state, "sentiment_history") and state.sentiment_history:
+            current_sentiment = state.sentiment_history[-1]
+
+        reward = current_sentiment * 1.0
+
+        # Affinity reward
+        reward += math.tanh(affinity_delta * 0.1) * 5.0
+
+        # Speed bonus
+        if latency < RL_REWARD_SPEED_THRESHOLD:
+            reward += 0.5
+
+        # Penalty 1: Stop words
+        if hasattr(message, "content"):
+            if re.search(
+                r"\b(?:stop|shut\s*up|quiet)\b", message.content, re.IGNORECASE
+            ):
+                reward -= 2.0
+
+        # Penalty 2: Wait action with negative sentiment
+        if prev_action == RLAction.WAIT and current_sentiment < -0.3:
+            reward -= 0.5
+
+        # Clamp reward
+        return max(-10.0, min(10.0, reward))
 
     async def update_agent(
         self,
