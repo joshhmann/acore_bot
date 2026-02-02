@@ -28,6 +28,7 @@ from services.core.factory import ServiceFactory
 from services.interfaces.llm_interface import LLMInterface
 from cogs.chat import ChatCog
 from cogs.voice import VoiceCog
+from cogs.rl_commands import RLCommands
 
 # Setup logging with structured JSON support
 from utils.logging_config import (
@@ -180,10 +181,9 @@ class OllamaBot(commands.Bot):
             )
             logger.info("Loaded VoiceCog")
 
-        # Load Extensions Cogs
-        from cogs.event_listeners import EventListenersCog
-
-        await self.add_cog(EventListenersCog(self))
+        # Load RL Commands
+        await self.add_cog(RLCommands(self))
+        logger.info("Loaded RLCommands")
 
         # Sync commands (only if connected)
         try:
@@ -276,6 +276,14 @@ class OllamaBot(commands.Bot):
                 logger.error(f"Failed to start metrics auto-save: {e}")
         else:
             logger.info("Metrics auto-save disabled via config")
+
+        # Start agent manager services
+        if self.services.get("agent_manager"):
+            try:
+                self.services["agent_manager"].start()
+                logger.info("Agent manager started")
+            except Exception as e:
+                logger.error(f"Failed to start agent manager: {e}")
 
         logger.info("Bot is ready!")
 
