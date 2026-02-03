@@ -271,6 +271,329 @@
             color: #999;
             font-size: 13px;
         }
+
+        /* Navigation Tabs */
+        .nav-tabs {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 30px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 0;
+        }
+
+        .nav-tab {
+            padding: 12px 24px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.3s;
+        }
+
+        .nav-tab:hover {
+            color: #667eea;
+        }
+
+        .nav-tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Configuration Styles */
+        .config-section {
+            background: #fff;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 20px;
+        }
+
+        .config-section h2 {
+            color: #667eea;
+            font-size: 20px;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .config-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .config-category {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+        }
+
+        .config-category h3 {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #667eea;
+            margin-bottom: 15px;
+        }
+
+        .config-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .config-item:last-child {
+            border-bottom: none;
+        }
+
+        .config-key {
+            font-size: 14px;
+            color: #333;
+        }
+
+        .config-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .config-value.enabled { color: #4caf50; }
+        .config-value.disabled { color: #f44336; }
+
+        /* Provider Cards */
+        .provider-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .provider-card {
+            background: #f8f9fa;
+            border: 2px solid transparent;
+            border-radius: 10px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .provider-card:hover {
+            border-color: #667eea;
+        }
+
+        .provider-card.selected {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .provider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .provider-name {
+            font-size: 16px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .provider-status {
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        .provider-status.online { background: #4caf50; color: white; }
+        .provider-status.offline { background: #f44336; color: white; }
+        .provider-status.configured { background: #ff9800; color: white; }
+
+        .provider-description {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 15px;
+        }
+
+        .provider-features {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .feature-tag {
+            background: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            color: #666;
+            border: 1px solid #e0e0e0;
+        }
+
+        /* Toggle Switch */
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .toggle {
+            position: relative;
+            width: 50px;
+            height: 26px;
+            background: #e0e0e0;
+            border-radius: 13px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .toggle.active { background: #667eea; }
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .toggle.active::after { transform: translateX(24px); }
+
+        /* API Keys */
+        .api-key-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .api-key-item {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+        }
+
+        .api-key-label {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .api-key-value {
+            font-size: 14px;
+            font-family: monospace;
+            color: #333;
+        }
+
+        .api-key-value.masked { color: #999; }
+
+        /* Logs */
+        .log-viewer {
+            background: #1e1e1e;
+            border-radius: 8px;
+            padding: 20px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Consolas', monospace;
+            font-size: 12px;
+            line-height: 1.5;
+            color: #d4d4d4;
+        }
+
+        .log-entry { padding: 2px 0; }
+        .log-entry.error { color: #f14c4c; }
+        .log-entry.warn { color: #cca700; }
+        .log-entry.info { color: #3794ff; }
+        .log-entry.debug { color: #6a9955; }
+
+        /* Buttons */
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-primary { background: #667eea; color: white; }
+        .btn-primary:hover { background: #764ba2; }
+        .btn-secondary { background: #f8f9fa; color: #333; border: 1px solid #e0e0e0; }
+        .btn-secondary:hover { background: #e0e0e0; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            right: 30px;
+            background: #333;
+            color: white;
+            padding: 15px 25px;
+            border-radius: 8px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .toast.show { transform: translateY(0); opacity: 1; }
+        .toast.success { background: #4caf50; }
+        .toast.error { background: #f44336; }
+
+        .action-buttons {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .error-message {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            color: #c62828;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            color: #999;
+            font-size: 13px;
+        }
     </style>
 </head>
 <body>
@@ -291,49 +614,180 @@
                 <span style="font-size: 13px; color: #666;">Last Updated: <strong id="last-update">Never</strong></span>
             </div>
         </div>
-        
-        <div class="metrics-grid">
-            <div class="metric-card">
-                <h3>Uptime</h3>
-                <div class="value" id="uptime">--</div>
-                <div class="change">Since last restart</div>
-            </div>
-            <div class="metric-card">
-                <h3>Messages Processed</h3>
-                <div class="value" id="messages">0</div>
-                <div class="change">Total conversations</div>
-            </div>
-            <div class="metric-card">
-                <h3>Active Users</h3>
-                <div class="value" id="users">0</div>
-                <div class="change">Currently engaged</div>
-            </div>
-            <div class="metric-card">
-                <h3>Avg Response Time</h3>
-                <div class="value" id="response-time">0ms</div>
-                <div class="change">LLM generation speed</div>
-            </div>
-        </div>
-        
-        <div class="charts-grid">
-            <div class="chart-card">
-                <h2>📊 Message Volume Over Time</h2>
-                <div class="chart-container">
-                    <canvas id="messageChart"></canvas>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="overview">📊 Overview</button>
+            <button class="nav-tab" data-tab="rl">🧠 RL Learning</button>
+            <button class="nav-tab" data-tab="config">⚙️ Configuration</button>
+            <button class="nav-tab" data-tab="providers">🎨 Image Providers</button>
+            <button class="nav-tab" data-tab="features">✨ Features</button>
+            <button class="nav-tab" data-tab="personas">🎭 Personas</button>
+            <button class="nav-tab" data-tab="logs">📋 Logs</button>
+        </nav>
+
+        <!-- Overview Tab -->
+        <div id="overview" class="tab-content active">
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>Uptime</h3>
+                    <div class="value" id="uptime">--</div>
+                    <div class="change">Since last restart</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Messages Processed</h3>
+                    <div class="value" id="messages">0</div>
+                    <div class="change">Total conversations</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Active Users</h3>
+                    <div class="value" id="users">0</div>
+                    <div class="change">Currently engaged</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Avg Response Time</h3>
+                    <div class="value" id="response-time">0ms</div>
+                    <div class="change">LLM generation speed</div>
                 </div>
             </div>
-            <div class="chart-card">
-                <h2>⚡ Performance Metrics</h2>
-                <div class="chart-container">
-                    <canvas id="performanceChart"></canvas>
+            
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h2>📊 Message Volume Over Time</h2>
+                    <div class="chart-container">
+                        <canvas id="messageChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <h2>⚡ Performance Metrics</h2>
+                    <div class="chart-container">
+                        <canvas id="performanceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="personas-section">
+                <h2>🎭 Active Personas</h2>
+                <div id="personas-list" class="personas-grid">
+                    <div class="loading">Loading persona data...</div>
                 </div>
             </div>
         </div>
-        
-        <div class="personas-section">
-            <h2>🎭 Active Personas</h2>
-            <div id="personas-list" class="personas-grid">
-                <div class="loading">Loading persona data...</div>
+
+        <!-- RL Learning Tab -->
+        <div id="rl" class="tab-content">
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>RL Status</h3>
+                    <div class="value" id="rl-status">--</div>
+                    <div class="change">Learning system state</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Active Agents</h3>
+                    <div class="value" id="rl-agents">0</div>
+                    <div class="change">User/channel pairs</div>
+                </div>
+                <div class="metric-card">
+                    <h3>States Learned</h3>
+                    <div class="value" id="rl-states">0</div>
+                    <div class="change">Unique situations</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Avg Epsilon</h3>
+                    <div class="value" id="rl-epsilon">0.00</div>
+                    <div class="change">Exploration rate</div>
+                </div>
+            </div>
+            
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <h2>📈 Q-Value Distribution</h2>
+                    <div class="chart-container">
+                        <canvas id="rlQChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <h2>🎯 Top Learned States</h2>
+                    <div class="chart-container">
+                        <canvas id="rlStatesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="personas-section">
+                <h2>🧠 RL Learning Details</h2>
+                <div id="rl-details" class="personas-grid">
+                    <div class="loading">Loading RL data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Configuration Tab -->
+        <div id="config" class="tab-content">
+            <div class="config-section">
+                <h2>🔑 API Keys & Connections</h2>
+                <div class="api-key-grid" id="api-keys">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h2>⚙️ All Configuration</h2>
+                <div class="config-grid" id="all-config">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="action-buttons">
+                <button class="btn btn-primary" onclick="regenerateEnv()">🔄 Regenerate .env File</button>
+                <button class="btn btn-secondary" onclick="refreshConfig()">📋 Refresh</button>
+            </div>
+        </div>
+
+        <!-- Image Providers Tab -->
+        <div id="providers" class="tab-content">
+            <div class="config-section">
+                <h2>🎨 Image Generation Providers</h2>
+                <p style="color: #666; margin-bottom: 20px;">
+                    Select an image generation provider. Click a card to switch.
+                </p>
+                <div class="provider-grid" id="provider-grid">
+                    <div class="loading">Loading providers...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Features Tab -->
+        <div id="features" class="tab-content">
+            <div class="config-section">
+                <h2>✨ Feature Toggles</h2>
+                <div class="config-grid" id="feature-toggles">
+                    <div class="loading">Loading features...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Personas Tab -->
+        <div id="personas" class="tab-content">
+            <div class="config-section">
+                <h2>🎭 Active Personas</h2>
+                <div class="personas-grid" id="personas-list-tab">
+                    <div class="loading">Loading personas...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div id="logs" class="tab-content">
+            <div class="config-section">
+                <h2>📋 Recent Logs</h2>
+                <div class="action-buttons" style="margin-bottom: 20px;">
+                    <button class="btn btn-primary" onclick="refreshLogs()">🔄 Refresh</button>
+                    <button class="btn btn-secondary" onclick="clearLogs()">🗑️ Clear</button>
+                </div>
+                <div class="log-viewer" id="log-viewer">
+                    <div class="loading">Loading logs...</div>
+                </div>
             </div>
         </div>
         
@@ -357,6 +811,8 @@
         let performanceHistory = [];
         let messageChart = null;
         let performanceChart = null;
+        let rlQChart = null;
+        let rlStatesChart = null;
         
         // Initialize Charts
         function initCharts() {
@@ -411,6 +867,55 @@
                     },
                     scales: {
                         y: { beginAtZero: true, max: 100 }
+                    }
+                }
+            });
+            
+            // RL Q-Value Distribution Chart
+            const rlQCtx = document.getElementById('rlQChart').getContext('2d');
+            rlQChart = new Chart(rlQCtx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['WAIT', 'REACT', 'ENGAGE', 'INITIATE'],
+                    datasets: [{
+                        data: [10, 10, 10, 10],
+                        backgroundColor: [
+                            'rgba(158, 158, 158, 0.8)',
+                            'rgba(102, 126, 234, 0.8)',
+                            'rgba(76, 175, 80, 0.8)',
+                            'rgba(255, 152, 0, 0.8)'
+                        ]
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom' }
+                    }
+                }
+            });
+            
+            // RL Top States Chart
+            const rlStatesCtx = document.getElementById('rlStatesChart').getContext('2d');
+            rlStatesChart = new Chart(rlStatesCtx, {
+                type: 'bar',
+                data: {
+                    labels: [],
+                    datasets: [{
+                        label: 'Max Q-Value',
+                        data: [],
+                        backgroundColor: 'rgba(102, 126, 234, 0.8)'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: { beginAtZero: true }
                     }
                 }
             });
@@ -485,6 +990,91 @@
             if (data.personas && data.personas.active_personas) {
                 updatePersonas(data.personas.active_personas);
             }
+            
+            // Update RL metrics
+            if (data.rl) {
+                updateRLMetrics(data.rl);
+            }
+        }
+        
+        // Update RL Metrics
+        function updateRLMetrics(rl) {
+            // Update status card
+            const statusEl = document.getElementById('rl-status');
+            if (rl.enabled) {
+                statusEl.textContent = 'Enabled';
+                statusEl.style.color = '#4caf50';
+            } else {
+                statusEl.textContent = 'Disabled';
+                statusEl.style.color = '#f44336';
+            }
+            
+            // Update metrics
+            document.getElementById('rl-agents').textContent = rl.total_agents || 0;
+            document.getElementById('rl-states').textContent = rl.total_states || 0;
+            document.getElementById('rl-epsilon').textContent = (rl.avg_epsilon || 0).toFixed(4);
+            
+            // Update Q-Value chart (show average Q per action)
+            if (rl.top_states && rl.top_states.length > 0) {
+                const actionQs = { 'WAIT': [], 'REACT': [], 'ENGAGE': [], 'INITIATE': [] };
+                rl.top_states.forEach(state => {
+                    Object.entries(state.action_values).forEach(([action, q]) => {
+                        if (actionQs[action]) actionQs[action].push(q);
+                    });
+                });
+                
+                const avgQs = Object.values(actionQs).map(qs => 
+                    qs.length > 0 ? qs.reduce((a, b) => a + b, 0) / qs.length : 10
+                );
+                
+                rlQChart.data.datasets[0].data = avgQs;
+                rlQChart.update();
+                
+                // Update top states chart
+                const top5 = rl.top_states.slice(0, 5);
+                rlStatesChart.data.labels = top5.map(s => 
+                    `[${s.state.join(',')}] ${s.best_action}`
+                );
+                rlStatesChart.data.datasets[0].data = top5.map(s => s.max_q);
+                rlStatesChart.update();
+                
+                // Update details grid
+                const detailsEl = document.getElementById('rl-details');
+                detailsEl.innerHTML = top5.map((state, i) => `
+                    <div class="persona-card">
+                        <div class="persona-header">
+                            <span class="persona-name">State ${state.state.join(':')}</span>
+                            <span class="persona-id">Rank #${i + 1}</span>
+                        </div>
+                        <div class="mood-badge mood-happy">Best: ${state.best_action}</div>
+                        <div class="persona-stats">
+                            <div class="persona-stat">
+                                <div class="persona-stat-label">Max Q</div>
+                                <div class="persona-stat-value">${state.max_q.toFixed(2)}</div>
+                            </div>
+                            <div class="persona-stat">
+                                <div class="persona-stat-label">WAIT</div>
+                                <div class="persona-stat-value">${(state.action_values.WAIT || 0).toFixed(1)}</div>
+                            </div>
+                            <div class="persona-stat">
+                                <div class="persona-stat-label">REACT</div>
+                                <div class="persona-stat-value">${(state.action_values.REACT || 0).toFixed(1)}</div>
+                            </div>
+                            <div class="persona-stat">
+                                <div class="persona-stat-label">ENGAGE</div>
+                                <div class="persona-stat-value">${(state.action_values.ENGAGE || 0).toFixed(1)}</div>
+                            </div>
+                            <div class="persona-stat">
+                                <div class="persona-stat-label">INITIATE</div>
+                                <div class="persona-stat-value">${(state.action_values.INITIATE || 0).toFixed(1)}</div>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                document.getElementById('rl-details').innerHTML = 
+                    '<div class="loading">No learning data yet. Interact with the bot to start learning!</div>';
+            }
         }
         
         // Update Message Chart
@@ -532,7 +1122,306 @@
         document.addEventListener('DOMContentLoaded', () => {
             initCharts();
             connect();
+            setupTabs();
+            loadConfig();
+            loadProviders();
+            loadLogs();
         });
+
+        // Tab Navigation
+        function setupTabs() {
+            document.querySelectorAll('.nav-tab').forEach(tab => {
+                tab.addEventListener('click', () => {
+                    document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active'));
+                    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+                    tab.classList.add('active');
+                    document.getElementById(tab.dataset.tab).classList.add('active');
+                });
+            });
+        }
+
+        // ============ Configuration Management ============
+
+        async function loadConfig() {
+            try {
+                const response = await fetch(`${window.location.origin}/api/config`, {
+                    headers: { 'X-API-Key': API_KEY }
+                });
+                if (response.ok) {
+                    configData = await response.json();
+                    renderConfig();
+                }
+            } catch (error) {
+                console.error('Failed to load config:', error);
+            }
+        }
+
+        function renderConfig() {
+            if (!configData) return;
+
+            // API Keys
+            const apiKeysHtml = Object.entries(configData.api_keys_status || {}).map(([key, data]) => `
+                <div class="api-key-item">
+                    <div class="api-key-label">${key}</div>
+                    <div class="api-key-value ${data.masked ? 'masked' : ''}">${data.value || 'Not set'}</div>
+                </div>
+            `).join('');
+            document.getElementById('api-keys').innerHTML = apiKeysHtml || '<div class="loading">No API keys configured</div>';
+
+            // All Config
+            let allConfigHtml = '';
+            for (const [category, items] of Object.entries(configData.categories || {})) {
+                allConfigHtml += `
+                    <div class="config-category">
+                        <h3>${category}</h3>
+                        ${Object.entries(items).map(([key, value]) => `
+                            <div class="config-item">
+                                <span class="config-key">${key}</span>
+                                <span class="config-value ${value === true ? 'enabled' : value === false ? 'disabled' : ''}">${value}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            document.getElementById('all-config').innerHTML = allConfigHtml;
+
+            // Feature Toggles
+            renderFeatureToggles();
+        }
+
+        function renderFeatureToggles() {
+            const features = [
+                { key: 'IMAGE_GENERATION_ENABLED', label: 'Image Generation', category: 'Image Generation' },
+                { key: 'RAG_HYBRID_SEARCH_ENABLED', label: 'RAG Hybrid Search', category: 'RAG & Memory' },
+                { key: 'AGENT_ROUTING_ENABLED', label: 'Agent Routing', category: 'Agents' },
+                { key: 'USE_FUNCTION_CALLING', label: 'Function Calling', category: 'Agents' },
+                { key: 'RVC_ENABLED', label: 'Voice RVC', category: 'Voice' },
+            ];
+
+            const togglesHtml = features.map(f => {
+                let value = false;
+                if (configData?.categories?.[f.category]) {
+                    value = configData.categories[f.category][f.key];
+                }
+                return `
+                    <div class="config-category">
+                        <h3>${f.category}</h3>
+                        <div class="config-item">
+                            <span class="config-key">${f.label}</span>
+                            <div class="toggle-container">
+                                <div class="toggle ${value ? 'active' : ''}"
+                                     onclick="toggleFeature('${f.key}', ${!value})"
+                                     id="toggle-${f.key}"></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            document.getElementById('feature-toggles').innerHTML = togglesHtml;
+        }
+
+        async function loadProviders() {
+            try {
+                const response = await fetch(`${window.location.origin}/api/config/providers/image`, {
+                    headers: { 'X-API-Key': API_KEY }
+                });
+                if (response.ok) {
+                    providerData = await response.json();
+                    renderProviders();
+                }
+            } catch (error) {
+                console.error('Failed to load providers:', error);
+                document.getElementById('provider-grid').innerHTML = '<div class="loading">Failed to load providers</div>';
+            }
+        }
+
+        function renderProviders() {
+            if (!providerData?.providers) return;
+
+            const providersHtml = Object.entries(providerData.providers).map(([id, provider]) => `
+                <div class="provider-card ${providerData.current_provider === id ? 'selected' : ''}"
+                     onclick="selectProvider('${id}')"
+                     id="provider-${id}">
+                    <div class="provider-header">
+                        <span class="provider-name">${provider.name}</span>
+                        <span class="provider-status ${provider.configured ? 'online' : 'offline'}">
+                            ${provider.configured ? 'Configured' : 'Not Set'}
+                        </span>
+                    </div>
+                    <div class="provider-description">${provider.description}</div>
+                    <div class="provider-features">
+                        ${provider.features.map(f => `<span class="feature-tag">${f}</span>`).join('')}
+                    </div>
+                </div>
+            `).join('');
+            document.getElementById('provider-grid').innerHTML = providersHtml;
+        }
+
+        async function selectProvider(providerId) {
+            try {
+                const response = await fetch(`${window.location.origin}/api/config/image-provider`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': API_KEY
+                    },
+                    body: JSON.stringify({ provider: providerId })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(`Provider changed to ${providerId}`, 'success');
+                    loadProviders();
+                } else {
+                    showToast(result.error || 'Failed to change provider', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to change provider', 'error');
+            }
+        }
+
+        async function toggleFeature(feature, enabled) {
+            try {
+                const response = await fetch(`${window.location.origin}/api/config/toggle`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-API-Key': API_KEY
+                    },
+                    body: JSON.stringify({ feature, enabled })
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast(`${feature} ${enabled ? 'enabled' : 'disabled'}`, 'success');
+                    loadConfig();
+                } else {
+                    showToast(result.error || 'Failed to toggle feature', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to toggle feature', 'error');
+            }
+        }
+
+        async function regenerateEnv() {
+            if (!confirm('This will backup and regenerate your .env file. Continue?')) return;
+            try {
+                const response = await fetch(`${window.location.origin}/api/config/regenerate-env`, {
+                    method: 'POST',
+                    headers: { 'X-API-Key': API_KEY }
+                });
+                const result = await response.json();
+                if (result.success) {
+                    showToast('.env file regenerated', 'success');
+                } else {
+                    showToast(result.error || 'Failed to regenerate', 'error');
+                }
+            } catch (error) {
+                showToast('Failed to regenerate .env', 'error');
+            }
+        }
+
+        function refreshConfig() {
+            loadConfig();
+            showToast('Configuration refreshed', 'success');
+        }
+
+        // ============ Logs ============
+
+        async function loadLogs() {
+            try {
+                const response = await fetch(`${window.location.origin}/api/logs?lines=100`, {
+                    headers: { 'X-API-Key': API_KEY }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    renderLogs(data.logs || []);
+                }
+            } catch (error) {
+                console.error('Failed to load logs:', error);
+                document.getElementById('log-viewer').innerHTML = '<div class="loading">Failed to load logs</div>';
+            }
+        }
+
+        function renderLogs(logs) {
+            const html = logs.map(line => {
+                let className = '';
+                if (line.includes('ERROR')) className = 'error';
+                else if (line.includes('WARN')) className = 'warn';
+                else if (line.includes('INFO')) className = 'info';
+                else if (line.includes('DEBUG')) className = 'debug';
+                return `<div class="log-entry ${className}">${escapeHtml(line)}</div>`;
+            }).join('');
+            document.getElementById('log-viewer').innerHTML = html || '<div class="loading">No logs available</div>';
+        }
+
+        function refreshLogs() {
+            loadLogs();
+            showToast('Logs refreshed', 'success');
+        }
+
+        function clearLogs() {
+            document.getElementById('log-viewer').innerHTML = '<div class="loading">Logs cleared</div>';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            if (!toast) {
+                const newToast = document.createElement('div');
+                newToast.id = 'toast';
+                newToast.className = `toast ${type} show`;
+                newToast.textContent = message;
+                document.body.appendChild(newToast);
+                setTimeout(() => newToast.remove(), 3000);
+            } else {
+                toast.textContent = message;
+                toast.className = `toast ${type} show`;
+                setTimeout(() => toast.classList.remove('show'), 3000);
+            }
+        }
+
+        // Update Personas for both tabs
+        function updatePersonas(personas) {
+            const container = document.getElementById('personas-list');
+            const containerTab = document.getElementById('personas-list-tab');
+            
+            if (!personas || personas.length === 0) {
+                container.innerHTML = '<div class="loading">No active personas</div>';
+                if (containerTab) containerTab.innerHTML = '<div class="loading">No active personas</div>';
+                return;
+            }
+            
+            const html = personas.map(p => `
+                <div class="persona-card">
+                    <div class="persona-header">
+                        <span class="persona-name">${p.name || 'Unknown'}</span>
+                        <span class="persona-id">${p.id || 'N/A'}</span>
+                    </div>
+                    <div class="mood-badge mood-${p.mood || 'neutral'}">${p.mood || 'neutral'}</div>
+                    <div class="persona-stats">
+                        <div class="persona-stat">
+                            <div class="persona-stat-label">Messages</div>
+                            <div class="persona-stat-value">${p.message_count || 0}</div>
+                        </div>
+                        <div class="persona-stat">
+                            <div class="persona-stat-label">Stage</div>
+                            <div class="persona-stat-value">${p.evolution_stage || 0}</div>
+                        </div>
+                        <div class="persona-stat">
+                            <div class="persona-stat-label">Affinity</div>
+                            <div class="persona-stat-value">${p.affinity || '0.0'}</div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+            
+            container.innerHTML = html;
+            if (containerTab) containerTab.innerHTML = html;
+        }
     </script>
 </body>
 </html>
