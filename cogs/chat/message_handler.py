@@ -582,61 +582,6 @@ JSON only:"""
                             f"Auto-replying globally (all channels): {message.channel.name} (Chance Hit)"
                         )
 
-        if (
-            not should_respond
-            and Config.AMBIENT_MODE_ENABLED
-            and not is_persona_message
-        ):
-            if (
-                not Config.AMBIENT_CHANNELS
-                or message.channel.id in Config.AMBIENT_CHANNELS
-            ):
-                # Check global response chance (e.g. 1/6)
-                if random.random() < Config.GLOBAL_RESPONSE_CHANCE:
-                    if len(message.content.strip()) >= 3:
-                        should_respond = True
-                        response_reason = "ambient_channel"
-                        suggested_style = "casual"
-                        logger.info(
-                            f"Responding in ambient channel: {message.channel.name} (Chance Hit)"
-                        )
-
-        # 8. AI-powered message detection for ambient channels
-        if (
-            not should_respond
-            and Config.AMBIENT_MODE_ENABLED
-            and not is_persona_message
-        ):
-            if (
-                not Config.AMBIENT_CHANNELS
-                or message.channel.id in Config.AMBIENT_CHANNELS
-            ):
-                try:
-                    persona_name = "Dagoth Ur"
-                    if self.cog.current_persona:
-                        persona_name = getattr(
-                            self.cog.current_persona, "display_name", None
-                        ) or getattr(self.cog.current_persona, "name", "Dagoth Ur")
-
-                    prompt = f"""Message: "{message.content}"
-
-Is this message likely directed at {persona_name} or asking a question that {persona_name} should answer?
-Consider: questions, statements that seem to want a response, or conversational prompts.
-Answer ONLY "yes" or "no"."""
-
-                    # Use cog.ollama instead of bot.ollama
-                    response = await self.cog.ollama.generate(prompt)
-
-                    if "yes" in response.lower():
-                        should_respond = True
-                        response_reason = "ai_ambient_detection"
-                        suggested_style = "helpful"
-                        logger.info(
-                            f"AI detected message directed at bot: {message.content[:30]}..."
-                        )
-                except Exception as e:
-                    logger.debug(f"AI message detection failed: {e}")
-                    # Fallback
                     content_lower = message.content.lower()
                     if "?" in message.content or any(
                         content_lower.startswith(q)

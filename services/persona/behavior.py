@@ -118,12 +118,8 @@ class BehaviorEngine:
         # Configuration (from Config)
 
         self.reaction_chance = 0.15
-        self.ambient_interval_min = (
-            Config.AMBIENT_MIN_INTERVAL
-        )  # Default 600s, should be higher
-        self.ambient_chance = (
-            Config.AMBIENT_CHANCE
-        )  # Default 0.3, reduce to prevent spam
+        self.proactive_interval_min = 600
+        self.proactive_base_chance = 0.16
         self.proactive_enabled = Config.PROACTIVE_ENGAGEMENT_ENABLED
         self.proactive_cooldown = (
             Config.PROACTIVE_COOLDOWN
@@ -772,7 +768,7 @@ Topics:"""
 
             # T11: Apply adaptive cooldown multiplier
             adaptive_cooldown = (
-                self.ambient_interval_min * adaptive_thresholds["cooldown_multiplier"]
+                self.proactive_interval_min * adaptive_thresholds["cooldown_multiplier"]
             )
 
             # Only allow ambient message after adaptive cooldown

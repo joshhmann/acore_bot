@@ -29,16 +29,16 @@ Remove redundant features and consolidate overlapping systems to improve maintai
   - AMBIENT_CHANCE
 
 ### Task 1.3: Remove from services/persona/behavior.py
-- [ ] Remove `ambient_interval_min` and `ambient_chance` attributes
-- [ ] Remove ambient-related logic from `_tick_loop()` if present
+- [x] Remove `ambient_interval_min` and `ambient_chance` attributes
+- [x] Remove ambient-related logic from `_tick_loop()` if present
 
 ### Task 1.4: Remove from cogs/chat/message_handler.py
-- [ ] Remove ambient mode check (lines ~585-640)
-- [ ] Remove "ambient_channel" response reason
+- [x] Remove ambient mode check (lines ~585-640)
+- [x] Remove "ambient_channel" response reason
 
 ### Task 1.5: Update .env.example
-- [ ] Remove all AMBIENT_* environment variables
-- [ ] Add note: "Ambient mode removed - use Naturalness/Proactive instead"
+- [x] Remove all AMBIENT_* environment variables
+- [x] Add note: "Ambient mode removed - use Naturalness/Proactive instead"
 
 ---
 
