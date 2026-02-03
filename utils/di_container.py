@@ -264,6 +264,14 @@ def create_bot_services_container() -> DIContainer:
             engine=Config.TTS_ENGINE,
             kokoro_api_url=Config.KOKORO_API_URL,
             kokoro_voice=Config.KOKORO_VOICE,
+            kokoro_speed=Config.KOKORO_SPEED,
+            luxtts_api_url=Config.LUXTTS_API_URL,
+            luxtts_voice=Config.LUXTTS_VOICE,
+            luxtts_speed=Config.LUXTTS_SPEED,
+            qwen3tts_api_url=Config.QWEN3TTS_API_URL,
+            qwen3tts_voice=Config.QWEN3TTS_VOICE,
+            qwen3tts_speed=Config.QWEN3TTS_SPEED,
+            qwen3tts_language=Config.QWEN3TTS_LANGUAGE,
         ),
     )
 

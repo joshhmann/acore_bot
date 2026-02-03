@@ -1,45 +1,43 @@
-# PROJECT KNOWLEDGE BASE
+# SERVICES ARCHITECTURE
 
-**Generated:** 2025-01-07 09:53:40 PM
-**Parent:** ./AGENTS.md
+**Generated:** 2025-01-23 08:30:06 PM
 
 ## OVERVIEW
-
-Business logic services with factory pattern, async interfaces, and deprecated legacy cleanup.
+Core business logic layer with 21 services for LLM, persona, memory, and voice systems.
 
 ## STRUCTURE
-
 ```
 services/
-├── core/           # Service factory and context management
-├── llm/            # LLM interfaces and caching
-├── persona/          # Persona system, relationships, evolution
-├── voice/            # TTS, STT, and RVC processing
-├── memory/           # Conversation history and RAG
-├── interfaces/        # Abstract interfaces
-├── discord/          # Discord-specific services
-└── deprecated/        # Legacy code for migration reference
+├── agents/          # AI agent management
+├── analytics/       # Real-time metrics dashboard
+├── clients/         # External API clients
+├── core/           # Factory pattern and foundations
+├── discord/        # Discord-specific services
+├── interfaces/     # Abstract interfaces
+├── llm/            # LLM providers and caching
+├── memory/         # User profiles and RAG
+├── persona/        # Character behavior and relationships
+└── voice/          # TTS/STT/RVC pipeline
 ```
 
 ## WHERE TO LOOK
-
 | Task | Location | Notes |
 |------|----------|-------|
-| Add new service | `services/` + update factory.py | Factory pattern |
-| Implement async interface | `services/interfaces/` | Inherit from base |
-| Add persona behavior | `services/persona/behavior.py` | Extend behavior engine |
-| Modify caching layer | `services/llm/cache.py` | Token-aware caching |
-| Update voice pipeline | `services/voice/` | Multi-stage processing |
+| Service creation | `core/factory.py` | All services via ServiceFactory |
+| AI behavior | `persona/behavior.py` | Personality engine |
+| Character routing | `persona/router.py` | Dynamic persona selection |
+| Memory management | `memory/profiles.py` | User learning system |
+| Voice processing | `voice/` | TTS/STT/RVC pipeline |
 
 ## CONVENTIONS
+**Factory Pattern**: All services created via `ServiceFactory.get_service()`
+**Async Interfaces**: All service methods must be async/await
+**Dependency Injection**: Services declare dependencies in constructors
+**Error Handling**: Use service-specific exceptions with retry logic
+**Lifecycle Management**: Services implement startup/shutdown hooks
 
-**Factory Pattern**: All services initialized through `ServiceFactory` in `core/factory.py`
-**Async First**: All external service calls must be async - no sync blocking
-**Fallback Chain**: Services have 3-tier fallback (primary → secondary → deprecated)
-**Interface Segregation**: Abstract interfaces in `interfaces/`, concrete implementations in service dirs
-
-## ANTI-PATTERNS (THIS PROJECT)
-
-**Legacy Dependencies**: `deprecated/` exists for migration reference - never import from here
-**Sync Service Calls**: Blocking calls in async context forbidden
-**Direct Instantiation**: Use factory, not direct service construction
+## ANTI-PATTERNS
+**Never instantiate services directly** - Use ServiceFactory
+**Never sync calls in services** - All methods must be async
+**Never import services circularly** - Use interface abstractions
+**Never store state in service classes** - Use external storage

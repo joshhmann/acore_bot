@@ -28,6 +28,11 @@ class MessageHandler:
         self._processed_messages = {}
         self._multiagent_personas = {}  # message_id -> list of mentioned personas
         self._persona_other_personas = {}  # selected_persona -> list of other personas to mention
+        self._active_conversations = {}  # message_id -> conversation_id
+
+    def register_conversation_message(self, message_id: str, conversation_id: str):
+        """Mark a message as part of an orchestrated conversation."""
+        self._active_conversations[message_id] = conversation_id
 
     async def _track_interesting_topic(
         self, message: discord.Message, bot_response: str, conversation_history: list
@@ -390,6 +395,27 @@ JSON only:"""
                     logger.info(
                         f"Name trigger detected: '{message.content[:50]}...' mentioned a character name"
                     )
+
+        # LOOP PREVENTION BYPASS: Check if this message is part of an orchestrated conversation
+        # If so, skip the 50% decay and always respond
+        if is_persona_message and should_respond:
+            # Check if message has conversation flag (monkey-patched by orchestrator)
+            if (
+                hasattr(message, "_bot_conversation_id")
+                and message._bot_conversation_id
+            ):
+                logger.debug(
+                    f"Loop Prevention Bypass: Message part of conversation {message._bot_conversation_id}"
+                )
+                # Skip to response processing - bypass loop prevention
+                return await self._process_message(message)
+
+            # Check if this webhook message is registered in active conversations
+            if message.webhook_id and message.id in self._active_conversations:
+                logger.debug(
+                    f"Loop Prevention Bypass: Webhook message in active conversation {self._active_conversations[message.id]}"
+                )
+                return await self._process_message(message)
 
         # LOOP PREVENTION: If this is a persona message, apply strict chance decay
         # This runs AFTER name detection so personas can still respond to callouts

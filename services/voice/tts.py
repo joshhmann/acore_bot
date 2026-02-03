@@ -27,6 +27,20 @@ try:
 except ImportError:
     SUPERTONIC_AVAILABLE = False
 
+try:
+    from services.clients.luxtts_client import LuxTTSClient
+
+    LUXTTS_AVAILABLE = True
+except ImportError:
+    LUXTTS_AVAILABLE = False
+
+try:
+    from services.clients.qwen3tts_client import Qwen3TTSClient
+
+    QWEN3TTS_AVAILABLE = True
+except ImportError:
+    QWEN3TTS_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,17 +56,31 @@ class TTSService(TTSInterface):
         supertonic_voice: str = "M1",
         supertonic_steps: int = 5,
         supertonic_speed: float = 1.05,
+        luxtts_api_url: Optional[str] = None,
+        luxtts_voice: str = "default",
+        luxtts_speed: float = 1.0,
+        qwen3tts_api_url: Optional[str] = None,
+        qwen3tts_voice: str = "Vivian",
+        qwen3tts_speed: float = 1.0,
+        qwen3tts_language: str = "Auto",
     ):
         """Initialize TTS service.
 
         Args:
-            engine: TTS engine to use ("kokoro", "kokoro_api", or "supertonic")
+            engine: TTS engine to use ("kokoro", "kokoro_api", "supertonic", "luxtts", or "qwen3tts")
             kokoro_voice: Default Kokoro voice to use
             kokoro_speed: Kokoro speech speed multiplier
             kokoro_api_url: Kokoro-FastAPI URL (e.g., "http://localhost:8880")
             supertonic_voice: Default Supertonic voice (M1, M2, F1, F2)
             supertonic_steps: Supertonic denoising steps (higher = better quality)
             supertonic_speed: Supertonic speech speed multiplier
+            luxtts_api_url: LuxTTS API URL (e.g., "http://localhost:9999")
+            luxtts_voice: Default LuxTTS voice to use
+            luxtts_speed: LuxTTS speech speed multiplier
+            qwen3tts_api_url: Qwen3-TTS API URL (e.g., "http://localhost:8880")
+            qwen3tts_voice: Default Qwen3-TTS voice to use
+            qwen3tts_speed: Qwen3-TTS speech speed multiplier
+            qwen3tts_language: Default Qwen3-TTS language code
         """
         self.engine = engine.lower()
         self.kokoro_voice = kokoro_voice
@@ -61,6 +89,13 @@ class TTSService(TTSInterface):
         self.supertonic_voice = supertonic_voice
         self.supertonic_steps = supertonic_steps
         self.supertonic_speed = supertonic_speed
+        self.luxtts_api_url = luxtts_api_url
+        self.luxtts_voice = luxtts_voice
+        self.luxtts_speed = luxtts_speed
+        self.qwen3tts_api_url = qwen3tts_api_url
+        self.qwen3tts_voice = qwen3tts_voice
+        self.qwen3tts_speed = qwen3tts_speed
+        self.qwen3tts_language = qwen3tts_language
 
         # Initialize Kokoro API client if requested
         self.kokoro_api: Optional[KokoroAPIClient] = None
@@ -123,6 +158,41 @@ class TTSService(TTSInterface):
                     "Supertonic TTS module not found. Install with: pip install supertonic"
                 )
 
+        # Initialize LuxTTS client if requested
+        self.luxtts: Optional[LuxTTSClient] = None
+        if self.engine == "luxtts":
+            if LUXTTS_AVAILABLE and luxtts_api_url:
+                self.luxtts = LuxTTSClient(
+                    api_url=luxtts_api_url,
+                    default_voice=luxtts_voice,
+                    speed=luxtts_speed,
+                )
+                logger.info(
+                    f"LuxTTS client initialized (URL: {luxtts_api_url}, voice: {luxtts_voice})"
+                )
+            else:
+                raise RuntimeError(
+                    "LuxTTS client not available or URL not provided. Set LUXTTS_API_URL in config."
+                )
+
+        # Initialize Qwen3-TTS client if requested
+        self.qwen3tts: Optional[Qwen3TTSClient] = None
+        if self.engine == "qwen3tts":
+            if QWEN3TTS_AVAILABLE and qwen3tts_api_url:
+                self.qwen3tts = Qwen3TTSClient(
+                    api_url=qwen3tts_api_url,
+                    default_voice=qwen3tts_voice,
+                    speed=qwen3tts_speed,
+                    language=qwen3tts_language,
+                )
+                logger.info(
+                    f"Qwen3-TTS client initialized (URL: {qwen3tts_api_url}, voice: {qwen3tts_voice})"
+                )
+            else:
+                raise RuntimeError(
+                    "Qwen3-TTS client not available or URL not provided. Set QWEN3TTS_API_URL in config."
+                )
+
     def is_available(self) -> bool:
         """Check if TTS service is available.
 
@@ -135,6 +205,10 @@ class TTSService(TTSInterface):
             return self.kokoro is not None and self.kokoro.is_available()
         elif self.engine == "supertonic":
             return self.supertonic is not None and self.supertonic.is_available()
+        elif self.engine == "luxtts":
+            return self.luxtts is not None and self.luxtts.is_available()
+        elif self.engine == "qwen3tts":
+            return self.qwen3tts is not None and self.qwen3tts.is_available()
         return False
 
     async def list_voices(self) -> list:
@@ -151,13 +225,34 @@ class TTSService(TTSInterface):
         voices = []
         if self.engine == "kokoro_api" and self.kokoro_api:
             voice_names = self.kokoro_api.get_voices()
-            voices = [{"name": voice, "description": f"Kokoro API voice: {voice}"} for voice in voice_names]
+            voices = [
+                {"name": voice, "description": f"Kokoro API voice: {voice}"}
+                for voice in voice_names
+            ]
         elif self.engine == "kokoro" and self.kokoro:
             voice_names = self.kokoro.get_voices()
-            voices = [{"name": voice, "description": f"Kokoro voice: {voice}"} for voice in voice_names]
+            voices = [
+                {"name": voice, "description": f"Kokoro voice: {voice}"}
+                for voice in voice_names
+            ]
         elif self.engine == "supertonic" and self.supertonic:
             voice_names = self.supertonic.get_voices()
-            voices = [{"name": voice, "description": f"Supertonic voice: {voice}"} for voice in voice_names]
+            voices = [
+                {"name": voice, "description": f"Supertonic voice: {voice}"}
+                for voice in voice_names
+            ]
+        elif self.engine == "luxtts" and self.luxtts:
+            voice_names = self.luxtts.get_voices()
+            voices = [
+                {"name": voice, "description": f"LuxTTS voice: {voice}"}
+                for voice in voice_names
+            ]
+        elif self.engine == "qwen3tts" and self.qwen3tts:
+            voice_names = self.qwen3tts.get_voices()
+            voices = [
+                {"name": voice, "description": f"Qwen3-TTS voice: {voice}"}
+                for voice in voice_names
+            ]
         return voices
 
     async def list_voices(self) -> list:
@@ -190,6 +285,18 @@ class TTSService(TTSInterface):
                 {"name": voice, "description": f"Supertonic voice: {voice}"}
                 for voice in voice_names
             ]
+        elif self.engine == "luxtts" and self.luxtts:
+            voice_names = self.luxtts.get_voices()
+            voices = [
+                {"name": voice, "description": f"LuxTTS voice: {voice}"}
+                for voice in voice_names
+            ]
+        elif self.engine == "qwen3tts" and self.qwen3tts:
+            voice_names = self.qwen3tts.get_voices()
+            voices = [
+                {"name": voice, "description": f"Qwen3-TTS voice: {voice}"}
+                for voice in voice_names
+            ]
         return voices
 
     def get_voices(self) -> list[str]:
@@ -204,6 +311,10 @@ class TTSService(TTSInterface):
             return self.kokoro.get_voices()
         elif self.engine == "supertonic" and self.supertonic:
             return self.supertonic.get_voices()
+        elif self.engine == "luxtts" and self.luxtts:
+            return self.luxtts.get_voices()
+        elif self.engine == "qwen3tts" and self.qwen3tts:
+            return self.qwen3tts.get_voices()
         return []
 
     def voice_exists(self, voice: str) -> bool:
@@ -267,6 +378,22 @@ class TTSService(TTSInterface):
                 speed=speed or self.supertonic_speed,
                 steps=steps,
             )
+        elif self.engine == "luxtts" and self.luxtts:
+            return await self.luxtts.generate(
+                text=cleaned_text,
+                output_file=output_file,
+                voice=voice or self.luxtts_voice,
+                speed=speed or self.luxtts_speed,
+            )
+        elif self.engine == "qwen3tts" and self.qwen3tts:
+            language = kwargs.get("language", self.qwen3tts_language)
+            return await self.qwen3tts.generate(
+                text=cleaned_text,
+                output_file=output_file,
+                voice=voice or self.qwen3tts_voice,
+                speed=speed or self.qwen3tts_speed,
+                language=language,
+            )
         else:
             raise RuntimeError(f"TTS engine '{self.engine}' is not available")
 
@@ -329,6 +456,19 @@ class TTSService(TTSInterface):
                 steps=steps,
             ):
                 yield chunk
+        elif (
+            self.engine == "qwen3tts"
+            and self.qwen3tts
+            and hasattr(self.qwen3tts, "generate_stream")
+        ):
+            language = kwargs.get("language", self.qwen3tts_language)
+            async for chunk in self.qwen3tts.generate_stream(
+                text=cleaned_text,
+                voice=voice or self.qwen3tts_voice,
+                speed=speed or self.qwen3tts_speed,
+                language=language,
+            ):
+                yield chunk
         else:
             # Fallback to regular generation and yield entire file
             import tempfile
@@ -362,6 +502,10 @@ class TTSService(TTSInterface):
             speed = speed or self.kokoro_speed
         elif self.engine == "supertonic" and self.supertonic:
             speed = speed or self.supertonic_speed
+        elif self.engine == "luxtts" and self.luxtts:
+            speed = speed or self.luxtts_speed
+        elif self.engine == "qwen3tts" and self.qwen3tts:
+            speed = speed or self.qwen3tts_speed
         else:
             speed = speed or 1.0
 
@@ -377,6 +521,8 @@ class TTSService(TTSInterface):
 
         Closes aiohttp sessions in:
         - Kokoro API client (if using kokoro_api engine)
+        - LuxTTS client (if using luxtts engine)
+        - Qwen3-TTS client (if using qwen3tts engine)
         """
         if self.kokoro_api and hasattr(self.kokoro_api, "close"):
             try:
@@ -384,3 +530,17 @@ class TTSService(TTSInterface):
                 logger.debug("Kokoro API client session closed")
             except Exception as e:
                 logger.error(f"Error closing Kokoro API session: {e}")
+
+        if self.luxtts and hasattr(self.luxtts, "close"):
+            try:
+                await self.luxtts.close()
+                logger.debug("LuxTTS client session closed")
+            except Exception as e:
+                logger.error(f"Error closing LuxTTS session: {e}")
+
+        if self.qwen3tts and hasattr(self.qwen3tts, "close"):
+            try:
+                await self.qwen3tts.close()
+                logger.debug("Qwen3-TTS client session closed")
+            except Exception as e:
+                logger.error(f"Error closing Qwen3-TTS session: {e}")

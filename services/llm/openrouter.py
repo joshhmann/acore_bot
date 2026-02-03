@@ -5,7 +5,7 @@ import asyncio
 import logging
 import json
 import time
-from typing import List, Dict, Optional, AsyncGenerator
+from typing import List, Dict, Optional, AsyncGenerator, Any
 
 from config import Config
 from services.llm.cache import LLMCache
@@ -65,18 +65,15 @@ class OpenRouterService(LLMInterface):
         self.stream_timeout = stream_timeout
         self.session: Optional[aiohttp.ClientSession] = None
 
-        # Performance metrics tracking (with reset mechanism)
-        self.last_response_time = 0.0  # seconds
-        self.last_tps = 0.0  # tokens per second
+        self.last_response_time = 0.0
+        self.last_tps = 0.0
         self.total_requests = 0
         self.total_tokens_generated = 0
         self.average_response_time = 0.0
         self._metrics_start_time = time.time()
 
-        # Model context length (fetched from API)
         self.context_length: Optional[int] = None
 
-        # Initialize LLM response cache
         self.cache = LLMCache(
             max_size=Config.LLM_CACHE_MAX_SIZE,
             ttl_seconds=Config.LLM_CACHE_TTL_SECONDS,
@@ -94,7 +91,7 @@ class OpenRouterService(LLMInterface):
                     "Content-Type": "application/json",
                 }
             )
-            
+
             # Fetch model context limit
             await self._fetch_model_info()
 
@@ -421,7 +418,9 @@ class OpenRouterService(LLMInterface):
             logger.error(f"OpenRouter streaming request failed: {e}")
             raise Exception(f"Failed to connect to OpenRouter: {e}")
 
-    async def generate(self, prompt: str, system_prompt: Optional[str] = None, **kwargs) -> str:
+    async def generate(
+        self, prompt: str, system_prompt: Optional[str] = None, **kwargs
+    ) -> str:
         """Generate a response from a single prompt."""
         messages = [{"role": "user", "content": prompt}]
         return await self.chat(messages, system_prompt=system_prompt, **kwargs)
@@ -518,7 +517,9 @@ class OpenRouterService(LLMInterface):
                     for model_data in data.get("data", []):
                         if model_data.get("id") == self.model:
                             self.context_length = model_data.get("context_length")
-                            logger.info(f"Fetched context limit for {self.model}: {self.context_length}")
+                            logger.info(
+                                f"Fetched context limit for {self.model}: {self.context_length}"
+                            )
                             return
                     logger.warning(f"Model {self.model} not found in OpenRouter API")
         except Exception as e:
@@ -616,3 +617,252 @@ class OpenRouterService(LLMInterface):
             Model name
         """
         return self.model
+
+    async def chat_with_functions(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Send a chat request with function calling support.
+
+        Args:
+            messages: List of message dicts with 'role' and 'content'.
+                      Can also include 'tool_calls' and 'tool' role messages.
+            tools: List of tool definitions in OpenAI format
+            tool_choice: How to handle tool use ("auto", "none", or specific tool)
+            system_prompt: Optional system prompt
+            temperature: Optional temperature override
+            max_tokens: Optional max tokens override
+
+        Returns:
+            Full API response dict including any tool calls
+        """
+        if not self.session:
+            await self.initialize()
+
+        messages = self._clean_messages(messages)
+
+        if system_prompt:
+            if messages and messages[0]["role"] == "system":
+                messages[0]["content"] = f"{system_prompt}\n\n{messages[0]['content']}"
+            else:
+                messages = [{"role": "system", "content": system_prompt}] + messages
+
+        actual_temp = temperature or self.temperature
+
+        if "amazon/nova" in self.model.lower() or "amazon-nova" in self.model.lower():
+            actual_temp = min(actual_temp, 1.0)
+
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "temperature": actual_temp,
+            "max_tokens": max_tokens or self.max_tokens,
+            "top_p": self.top_p,
+            "repetition_penalty": self.repeat_penalty,
+            "frequency_penalty": self.frequency_penalty,
+            "presence_penalty": self.presence_penalty,
+            "top_k": self.top_k,
+            "min_p": self.min_p,
+            "stop": ["\nUser:", "User:", "\nSystem:", "\n\nUser", "\n\nSystem"],
+        }
+
+        if tools:
+            payload["tools"] = tools
+
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+
+        start_time = time.time()
+
+        try:
+            url = f"{self.base_url}/chat/completions"
+            async with self.session.post(
+                url, json=payload, timeout=aiohttp.ClientTimeout(total=self.timeout)
+            ) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(
+                        f"OpenRouter API error ({resp.status}): {error_text}"
+                    )
+
+                data = await resp.json()
+
+                end_time = time.time()
+                response_time = end_time - start_time
+                self.last_response_time = response_time
+                self.total_requests += 1
+
+                usage = data.get("usage", {})
+                completion_tokens = usage.get("completion_tokens", 0)
+                total_tokens = usage.get("total_tokens", 0)
+                self.total_tokens_generated += completion_tokens
+
+                if response_time > 0 and completion_tokens > 0:
+                    self.last_tps = completion_tokens / response_time
+                else:
+                    self.last_tps = 0.0
+
+                if self.total_requests > 0:
+                    old_avg = self.average_response_time
+                    self.average_response_time = (
+                        old_avg * (self.total_requests - 1) + response_time
+                    ) / self.total_requests
+
+                logger.info(
+                    f"OpenRouter function call: {response_time:.2f}s | "
+                    f"Tokens: {completion_tokens} | "
+                    f"TPS: {self.last_tps:.1f}"
+                )
+
+                return data
+
+        except asyncio.TimeoutError:
+            elapsed = time.time() - start_time
+            logger.error(f"OpenRouter function call timed out after {elapsed:.1f}s")
+            raise Exception(
+                "OpenRouter request timed out - the API took too long to respond."
+            )
+        except aiohttp.ClientError as e:
+            logger.error(f"OpenRouter function call request failed: {e}")
+            raise Exception(f"Failed to connect to OpenRouter: {e}")
+        except (KeyError, json.JSONDecodeError) as e:
+            logger.error(f"Unexpected OpenRouter response format: {e}")
+            raise Exception("Invalid response from OpenRouter")
+
+    async def chat_stream_with_functions(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        tool_choice: Optional[str] = None,
+        system_prompt: Optional[str] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        """Stream chat responses with function calling support.
+
+        Args:
+            messages: List of message dicts
+            tools: List of tool definitions in OpenAI format
+            tool_choice: How to handle tool use
+            system_prompt: Optional system prompt
+            temperature: Optional temperature override
+            max_tokens: Optional max tokens override
+
+        Yields:
+            Response chunks as dicts (may include tool_calls)
+        """
+        if not self.session:
+            await self.initialize()
+
+        messages = self._clean_messages(messages)
+
+        if system_prompt:
+            if messages and messages[0]["role"] == "system":
+                messages[0]["content"] = f"{system_prompt}\n\n{messages[0]['content']}"
+            else:
+                messages = [{"role": "system", "content": system_prompt}] + messages
+
+        actual_temp = temperature or self.temperature
+
+        if "amazon/nova" in self.model.lower() or "amazon-nova" in self.model.lower():
+            actual_temp = min(actual_temp, 1.0)
+
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": True,
+            "temperature": actual_temp,
+            "max_tokens": max_tokens or self.max_tokens,
+            "top_p": self.top_p,
+            "repetition_penalty": self.repeat_penalty,
+            "frequency_penalty": self.frequency_penalty,
+            "presence_penalty": self.presence_penalty,
+            "top_k": self.top_k,
+            "min_p": self.min_p,
+            "stop": ["\nUser:", "User:", "\nSystem:", "\n\nUser", "\n\nSystem"],
+        }
+
+        if tools:
+            payload["tools"] = tools
+
+        if tool_choice:
+            payload["tool_choice"] = tool_choice
+
+        start_time = time.time()
+        first_token_time = None
+        token_count = 0
+
+        try:
+            url = f"{self.base_url}/chat/completions"
+            timeout = aiohttp.ClientTimeout(
+                total=None, sock_read=self.stream_timeout, connect=self.timeout
+            )
+            async with self.session.post(url, json=payload, timeout=timeout) as resp:
+                if resp.status != 200:
+                    error_text = await resp.text()
+                    raise Exception(
+                        f"OpenRouter API error ({resp.status}): {error_text}"
+                    )
+
+                async for line in resp.content:
+                    line = line.strip()
+                    if not line or line == b"data: [DONE]":
+                        continue
+
+                    if line.startswith(b"data: "):
+                        try:
+                            json_str = line[6:].decode("utf-8")
+                            chunk = json.loads(json_str)
+                            yield chunk
+
+                            if "choices" in chunk and len(chunk["choices"]) > 0:
+                                delta = chunk["choices"][0].get("delta", {})
+                                content = delta.get("content", "")
+                                if content:
+                                    if first_token_time is None:
+                                        first_token_time = time.time()
+                                        ttft = first_token_time - start_time
+                                        logger.debug(f"OpenRouter TTFT: {ttft:.2f}s")
+                                    token_count += len(content.split())
+                        except json.JSONDecodeError:
+                            continue
+
+                end_time = time.time()
+                total_time = end_time - start_time
+                self.last_response_time = total_time
+                self.total_requests += 1
+                self.total_tokens_generated += token_count
+
+                if total_time > 0 and token_count > 0:
+                    self.last_tps = token_count / total_time
+                else:
+                    self.last_tps = 0.0
+
+                if self.total_requests > 0:
+                    old_avg = self.average_response_time
+                    self.average_response_time = (
+                        old_avg * (self.total_requests - 1) + total_time
+                    ) / self.total_requests
+
+                logger.info(
+                    f"OpenRouter stream with functions: {total_time:.2f}s | "
+                    f"~{token_count} tokens | "
+                    f"TPS: {self.last_tps:.1f}"
+                )
+
+        except asyncio.TimeoutError:
+            logger.error(
+                f"OpenRouter streaming timeout after {time.time() - start_time:.1f}s"
+            )
+            raise Exception(
+                "OpenRouter request timed out - try reducing message length or switching models"
+            )
+        except aiohttp.ClientError as e:
+            logger.error(f"OpenRouter streaming request failed: {e}")
+            raise Exception(f"Failed to connect to OpenRouter: {e}")

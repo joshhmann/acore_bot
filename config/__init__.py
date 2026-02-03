@@ -62,7 +62,6 @@ from .features import (
     ConversationConfig,
     NaturalnessConfig,
     TimingConfig,
-    AmbientConfig,
     ProactiveConfig,
     AdaptiveTimingConfig,
     VisionConfig,
@@ -125,7 +124,6 @@ class Config:
     conversation = ConversationConfig()
     naturalness = NaturalnessConfig()
     timing = TimingConfig()
-    ambient = AmbientConfig()
     proactive = ProactiveConfig()
     adaptive_timing = AdaptiveTimingConfig()
     vision = VisionConfig()
@@ -399,14 +397,6 @@ class Config:
     NATURAL_TIMING_MAX_DELAY = timing.MAX_DELAY
     TYPING_INDICATOR_MIN_DELAY = timing.TYPING_MIN_DELAY
     TYPING_INDICATOR_MAX_DELAY = timing.TYPING_MAX_DELAY
-
-    # Ambient
-    AMBIENT_MODE_ENABLED = ambient.ENABLED
-    AMBIENT_CHANNELS = ambient.CHANNELS
-    AMBIENT_IGNORE_USERS = ambient.IGNORE_USERS
-    AMBIENT_LULL_TIMEOUT = ambient.LULL_TIMEOUT
-    AMBIENT_MIN_INTERVAL = ambient.MIN_INTERVAL
-    AMBIENT_CHANCE = ambient.CHANCE
 
     # Proactive
     PROACTIVE_ENGAGEMENT_ENABLED = proactive.ENABLED

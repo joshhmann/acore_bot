@@ -8,6 +8,7 @@ from utils.helpers import format_error, format_success
 
 logger = logging.getLogger(__name__)
 
+
 class ChatCommandHandler:
     def __init__(self, cog: commands.Cog):
         self.cog = cog
@@ -36,9 +37,10 @@ class ChatCommandHandler:
             if action == "status":
                 running = getattr(engine, "_running", False)
                 active_count = len(engine.states)
-                
+
                 embed = discord.Embed(
-                    title="🌙 Ambient Mode (Behavior Engine)", color=discord.Color.purple()
+                    title="🌙 Ambient Mode (Behavior Engine)",
+                    color=discord.Color.purple(),
                 )
                 embed.add_field(
                     name="Status",
@@ -56,7 +58,9 @@ class ChatCommandHandler:
                     inline=True,
                 )
                 embed.add_field(
-                    name="Min Interval", value=f"{engine.ambient_interval_min}s", inline=True
+                    name="Min Interval",
+                    value=f"{engine.ambient_interval_min}s",
+                    inline=True,
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -92,11 +96,11 @@ class ChatCommandHandler:
             channel_id = interaction.channel_id
             if await self.cog.session_manager.is_session_active(channel_id):
                 await self.cog.session_manager.end_session(channel_id)
-                
+
                 # Also clear the chat history to ensure a fresh start
                 if hasattr(self.cog, "history"):
                     await self.cog.history.clear_history(channel_id)
-                    
+
                 await interaction.response.send_message(
                     format_success(
                         "Conversation session ended & history cleared. Use @mention or `/chat` to start a new session."
@@ -104,9 +108,9 @@ class ChatCommandHandler:
                     ephemeral=True,
                 )
             else:
-            await interaction.response.send_message(
-                "No active conversation session in this channel.", ephemeral=True
-            )
+                await interaction.response.send_message(
+                    "No active conversation session in this channel.", ephemeral=True
+                )
         except Exception as e:
             logger.error(f"End session command failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)
@@ -118,7 +122,7 @@ class ChatCommandHandler:
             if new_mode.lower() not in Config.BOT_MODE_CHOICES:
                 await interaction.response.send_message(
                     f"❌ Invalid mode. Choose from: {', '.join(Config.BOT_MODE_CHOICES)}",
-                    ephemeral=True
+                    ephemeral=True,
                 )
                 return
 
@@ -127,33 +131,26 @@ class ChatCommandHandler:
             mode_descriptions = {
                 "roleplay": "🎭 Full character immersion - roleplay only",
                 "assistant": "🤖 Helpful AI assistant - utility focused",
-                "hybrid": "🎭 + 🤖 Balanced blend of roleplay and assistance"
+                "hybrid": "🎭 + 🤖 Balanced blend of roleplay and assistance",
             }
 
             embed = discord.Embed(
                 title=f"🔄 Bot Mode Changed",
                 description=mode_descriptions.get(new_mode.lower(), ""),
-                color=discord.Color.blue()
+                color=discord.Color.blue(),
             )
-            embed.add_field(
-                name="Current Mode",
-                value=new_mode.lower(),
-                inline=True
-            )
+            embed.add_field(name="Current Mode", value=new_mode.lower(), inline=True)
             embed.add_field(
                 name="Effect",
                 value="Context building adjusted based on mode",
-                inline=True
+                inline=True,
             )
 
             await interaction.response.send_message(embed=embed, ephemeral=True)
-            logger.info(f"Bot mode changed to {new_mode.lower()} by {interaction.user.display_name}")
+            logger.info(
+                f"Bot mode changed to {new_mode.lower()} by {interaction.user.display_name}"
+            )
 
         except Exception as e:
             logger.error(f"Mode command failed: {e}")
-            await interaction.response.send_message(format_error(e), ephemeral=True)
-
-    async def end_session(self, interaction: discord.Interaction):
-        try:
-            logger.error(f"End session failed: {e}")
             await interaction.response.send_message(format_error(e), ephemeral=True)

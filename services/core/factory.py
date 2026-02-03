@@ -21,9 +21,11 @@ from services.memory.conversation import MultiTurnConversationManager
 
 # Persona domain
 from services.persona.system import PersonaSystem
+from services.persona.rl import RLService
 
 # Discord domain
 from services.discord.profiles import UserProfileService
+from services.discord.web_search import WebSearchService
 
 # Core domain
 from services.core.metrics import MetricsService
@@ -134,6 +136,13 @@ class ServiceFactory:
             kokoro_voice=Config.KOKORO_VOICE,
             kokoro_speed=Config.KOKORO_SPEED,
             kokoro_api_url=Config.KOKORO_API_URL,
+            luxtts_api_url=Config.LUXTTS_API_URL,
+            luxtts_voice=Config.LUXTTS_VOICE,
+            luxtts_speed=Config.LUXTTS_SPEED,
+            qwen3tts_api_url=Config.QWEN3TTS_API_URL,
+            qwen3tts_voice=Config.QWEN3TTS_VOICE,
+            qwen3tts_speed=Config.QWEN3TTS_SPEED,
+            qwen3tts_language=Config.QWEN3TTS_LANGUAGE,
             supertonic_voice=Config.SUPERTONIC_VOICE,
             supertonic_steps=Config.SUPERTONIC_STEPS,
             supertonic_speed=Config.SUPERTONIC_SPEED,
@@ -234,11 +243,11 @@ class ServiceFactory:
         else:
             self.services["web_search"] = None
 
-        # Notes
-        if Config.NOTES_ENABLED:
-            self.services["notes"] = NotesService(self.bot)
-        else:
-            self.services["notes"] = None
+        # Notes (TODO: NotesService not yet implemented)
+        # if Config.NOTES_ENABLED:
+        #     self.services["notes"] = NotesService(self.bot)
+        # else:
+        #     self.services["notes"] = None
 
         # Conversation Manager
         self.services["conversation_manager"] = MultiTurnConversationManager()
@@ -268,3 +277,101 @@ class ServiceFactory:
                     )
             except Exception as e:
                 logger.error(f"Error initializing persona system: {e}")
+
+        # Initialize Agent Orchestration System
+        self._init_agents()
+
+        # Initialize Bot-to-Bot Conversation System
+        self._init_conversation_system()
+
+        # Initialize RL Service
+        self._init_rl_service()
+
+    def _init_rl_service(self):
+        """Initialize RL (Reinforcement Learning) Service."""
+        if Config.RL_ENABLED:
+            try:
+                rl_service = RLService(bot=self.bot, config=Config)
+                self.services["rl"] = rl_service
+                logger.info("RL Service initialized")
+            except Exception as e:
+                logger.error(f"Error initializing RL service: {e}")
+                self.services["rl"] = None
+        else:
+            self.services["rl"] = None
+            logger.info("RL Service disabled (RL_ENABLED=false)")
+
+    def _init_agents(self):
+        """Initialize agent orchestration system."""
+        from services.agents import AgentManager, RoutingStrategy
+
+        # Map config strategy string to enum
+        strategy_map = {
+            "highest_confidence": RoutingStrategy.HIGHEST_CONFIDENCE,
+            "round_robin": RoutingStrategy.ROUND_ROBIN,
+            "priority_based": RoutingStrategy.PRIORITY_BASED,
+            "fallback_chain": RoutingStrategy.FALLBACK_CHAIN,
+        }
+        routing_strategy = strategy_map.get(
+            Config.AGENT_ROUTING_STRATEGY.lower(),
+            RoutingStrategy.HIGHEST_CONFIDENCE,
+        )
+
+        agent_manager = AgentManager(
+            routing_strategy=routing_strategy,
+            min_confidence=Config.AGENT_MIN_CONFIDENCE,
+            health_check_interval=Config.AGENT_HEALTH_CHECK_INTERVAL,
+            enable_chaining=Config.AGENT_CHAINING_ENABLED,
+        )
+
+        # Get dependencies for agent initialization
+        web_search = self.services.get("web_search")
+        ollama = self.services.get("ollama")
+        conversation_manager = self.services.get("conversation_manager")
+
+        # Initialize agents with dependencies (chat_cog, behavior_engine set later)
+        agent_manager.initialize(
+            web_search_service=web_search,
+            llm_service=ollama,
+            chat_cog=None,
+            behavior_engine=None,
+            persona_router=None,
+            image_api_key=Config.IMAGE_GENERATION_API_KEY
+            if Config.IMAGE_GENERATION_ENABLED
+            else None,
+        )
+
+        self.services["agent_manager"] = agent_manager
+        logger.info("Agent orchestration system initialized")
+
+    def _init_conversation_system(self):
+        """Initialize bot-to-bot conversation system."""
+        from services.conversation.orchestrator import BotConversationOrchestrator
+        from services.conversation.persistence import ConversationPersistence
+        from pathlib import Path
+
+        persistence = ConversationPersistence(Config.DATA_DIR / "bot_conversations")
+
+        persona_router = self.services.get("persona_router")
+        behavior_engine = self.services.get("behavior_engine")
+        llm_service = self.services.get("ollama")
+        rag_service = self.services.get("rag")
+
+        if persona_router and behavior_engine and llm_service:
+            orchestrator = BotConversationOrchestrator(
+                persona_router=persona_router,
+                behavior_engine=behavior_engine,
+                llm_service=llm_service,
+                rag_service=rag_service,
+                persistence=persistence,
+            )
+
+            self.services["conversation_orchestrator"] = orchestrator
+            self.services["conversation_persistence"] = persistence
+            logger.info("Bot-to-bot conversation system initialized")
+        else:
+            self.services["conversation_orchestrator"] = None
+            self.services["conversation_persistence"] = None
+            logger.warning(
+                "Bot-to-bot conversation system not initialized (missing dependencies)"
+            )

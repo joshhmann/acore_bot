@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -32,6 +32,11 @@ class Config:
 
     # LLM Provider (ollama or openrouter)
     LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama").lower()
+
+    # Tool System Configuration
+    USE_FUNCTION_CALLING: bool = (
+        os.getenv("USE_FUNCTION_CALLING", "false").lower() == "true"
+    )  # Use OpenAI function calling format instead of regex parsing
 
     # OpenRouter
     OPENROUTER_API_KEY: str = os.getenv("OPENROUTER_API_KEY", "")
@@ -152,6 +157,62 @@ class Config:
         os.getenv("ANONYMIZED_TELEMETRY", "false").lower() == "true"
     )
 
+    # Hybrid Search Configuration
+    RAG_HYBRID_SEARCH_ENABLED: bool = (
+        os.getenv("RAG_HYBRID_SEARCH_ENABLED", "true").lower() == "true"
+    )  # Enable hybrid search (vector + keyword)
+    RAG_DEFAULT_SEARCH_MODE: str = os.getenv(
+        "RAG_DEFAULT_SEARCH_MODE", "hybrid"
+    )  # "vector", "keyword", "hybrid"
+    RAG_BM25_ENABLED: bool = (
+        os.getenv("RAG_BM25_ENABLED", "true").lower() == "true"
+    )  # Enable BM25 keyword search component
+    RAG_BM25_K1: float = float(os.getenv("RAG_BM25_K1", "1.2"))  # BM25 k1 parameter
+    RAG_BM25_B: float = float(os.getenv("RAG_BM25_B", "0.75"))  # BM25 b parameter
+    RAG_RRF_K: int = int(os.getenv("RAG_RRF_K", "60"))  # RRF constant for score fusion
+    RAG_VECTOR_WEIGHT: float = float(
+        os.getenv("RAG_VECTOR_WEIGHT", "0.5")
+    )  # Weight for vector scores in RRF (0-1)
+    RAG_KEYWORD_WEIGHT: float = float(
+        os.getenv("RAG_KEYWORD_WEIGHT", "0.5")
+    )  # Weight for keyword scores in RRF (0-1)
+
+    # Cross-Encoder Re-ranker Configuration
+    RAG_RERANKER_ENABLED: bool = (
+        os.getenv("RAG_RERANKER_ENABLED", "true").lower() == "true"
+    )  # Enable cross-encoder re-ranking
+    RAG_RERANKER_MODEL: str = os.getenv(
+        "RAG_RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-12-v2"
+    )  # Cross-encoder model name
+    RAG_RERANK_INITIAL_K: int = int(
+        os.getenv("RAG_RERANK_INITIAL_K", "20")
+    )  # Retrieve top N for re-ranking (e.g., 20 → final 5)
+    RAG_RERANK_BATCH_SIZE: int = int(
+        os.getenv("RAG_RERANK_BATCH_SIZE", "32")
+    )  # Batch size for re-ranker inference
+    RAG_RERANKER_CACHE_SIZE: int = int(
+        os.getenv("RAG_RERANKER_CACHE_SIZE", "1000")
+    )  # Max cached query-document scores
+
+    # Real-time Indexing Configuration
+    RAG_REALTIME_INDEXING: bool = (
+        os.getenv("RAG_REALTIME_INDEXING", "true").lower() == "true"
+    )  # Enable real-time indexing of Discord messages
+    RAG_INDEXING_BATCH_SIZE: int = int(
+        os.getenv("RAG_INDEXING_BATCH_SIZE", "100")
+    )  # Batch size for indexing operations
+    RAG_INDEXING_QUEUE_SIZE: int = int(
+        os.getenv("RAG_INDEXING_QUEUE_SIZE", "1000")
+    )  # Max queue size for background indexing
+
+    # Query Processing Configuration
+    RAG_QUERY_EXPANSION: bool = (
+        os.getenv("RAG_QUERY_EXPANSION", "true").lower() == "true"
+    )  # Enable query expansion (generate sub-queries)
+    RAG_SUB_QUERY_COUNT: int = int(
+        os.getenv("RAG_SUB_QUERY_COUNT", "3")
+    )  # Number of sub-queries to generate
+
     # MCP (Model Context Protocol) - ARCHIVED (service never implemented)
     # MCP_ENABLED: bool = os.getenv("MCP_ENABLED", "false").lower() == "true"
     # MCP_SERVER_URL: str = os.getenv("MCP_SERVER_URL", "http://localhost:8080")
@@ -181,7 +242,7 @@ class Config:
     # Voice/TTS
     TTS_ENGINE: str = os.getenv(
         "TTS_ENGINE", "kokoro_api"
-    )  # "kokoro", "kokoro_api", or "supertonic"
+    )  # "kokoro", "kokoro_api", "supertonic", "luxtts", or "qwen3tts"
 
     # Kokoro TTS Settings
     KOKORO_VOICE: str = os.getenv("KOKORO_VOICE", "am_adam")
@@ -202,6 +263,29 @@ class Config:
     SUPERTONIC_SPEED: float = float(
         os.getenv("SUPERTONIC_SPEED", "1.05")
     )  # Speech speed multiplier
+
+    # LuxTTS Settings
+    LUXTTS_API_URL: str = os.getenv(
+        "LUXTTS_API_URL", "http://localhost:9999"
+    )  # LuxTTS API URL
+    LUXTTS_VOICE: str = os.getenv(
+        "LUXTTS_VOICE", "default"
+    )  # Voice ID (must be uploaded first)
+    # LuxTTS Speed (optional, defaults to 1.0)
+    LUXTTS_SPEED: float = float(os.getenv("LUXTTS_SPEED", "1.0"))
+
+    # Qwen3-TTS Settings
+    QWEN3TTS_API_URL: str = os.getenv(
+        "QWEN3TTS_API_URL", "http://localhost:8880"
+    )  # Qwen3-TTS API URL
+    QWEN3TTS_VOICE: str = os.getenv(
+        "QWEN3TTS_VOICE", "Vivian"
+    )  # Options: Vivian, Ryan, Serena, Dylan, Eric, Aiden, Uncle_Fu, Ono_Anna, Sohee
+    QWEN3TTS_LANGUAGE: str = os.getenv(
+        "QWEN3TTS_LANGUAGE", "Auto"
+    )  # Auto, English, Chinese, Japanese, etc.
+    # Qwen3-TTS Speed (optional, defaults to 1.0)
+    QWEN3TTS_SPEED: float = float(os.getenv("QWEN3TTS_SPEED", "1.0"))
 
     # RVC
     RVC_ENABLED: bool = os.getenv("RVC_ENABLED", "false").lower() == "true"
@@ -601,6 +685,29 @@ class Config:
         os.getenv("LLM_CACHE_TTL_SECONDS", "3600")
     )  # Cache entry lifetime (1 hour default)
 
+    # --- Agent Orchestration Configuration ---
+    AGENT_ROUTING_ENABLED: bool = (
+        os.getenv("AGENT_ROUTING_ENABLED", "true").lower() == "true"
+    )  # Enable agent orchestration system
+    AGENT_ROUTING_STRATEGY: str = os.getenv(
+        "AGENT_ROUTING_STRATEGY", "highest_confidence"
+    )  # Routing strategy: highest_confidence, round_robin, priority_based, fallback_chain
+    AGENT_MIN_CONFIDENCE: float = float(
+        os.getenv("AGENT_MIN_CONFIDENCE", "0.3")
+    )  # Minimum confidence to route to specialist agent
+    AGENT_CHAINING_ENABLED: bool = (
+        os.getenv("AGENT_CHAINING_ENABLED", "true").lower() == "true"
+    )  # Enable agent chaining for multi-step tasks
+    AGENT_MAX_CHAIN_LENGTH: int = int(
+        os.getenv("AGENT_MAX_CHAIN_LENGTH", "3")
+    )  # Maximum agents in a chain
+    AGENT_HEALTH_CHECK_INTERVAL: float = float(
+        os.getenv("AGENT_HEALTH_CHECK_INTERVAL", "60.0")
+    )  # Seconds between health checks
+    AGENT_TIMEOUT_SECONDS: float = float(
+        os.getenv("AGENT_TIMEOUT_SECONDS", "30.0")
+    )  # Default agent timeout
+
     # LLM Model Fallback (LiteLLM-style)
     LLM_FALLBACK_ENABLED: bool = (
         os.getenv("LLM_FALLBACK_ENABLED", "false").lower() == "true"
@@ -609,6 +716,57 @@ class Config:
         "LLM_FALLBACK_MODELS", ""
     )  # Comma-separated list: "model1:free,model2:paid"
     # Example: "x-ai/grok-beta:free,anthropic/claude-3.5-sonnet:paid"
+
+    # Image Generation Settings
+    IMAGE_GENERATION_ENABLED: bool = (
+        os.getenv("IMAGE_GENERATION_ENABLED", "false").lower() == "true"
+    )
+    IMAGE_GENERATION_API_KEY: str = os.getenv("IMAGE_GENERATION_API_KEY", "")
+    IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "openai").lower()
+    IMAGE_SIZE_DEFAULT: str = os.getenv("IMAGE_SIZE_DEFAULT", "1024x1024")
+    IMAGE_QUALITY_DEFAULT: str = os.getenv("IMAGE_QUALITY_DEFAULT", "standard")
+    IMAGE_STYLE_DEFAULT: str = os.getenv("IMAGE_STYLE_DEFAULT", "vivid")
+
+    # ComfyUI Settings
+    COMFYUI_SERVER_URL: str = os.getenv("COMFYUI_SERVER_URL", "http://127.0.0.1:8188")
+    COMFYUI_WORKFLOW_ID: Optional[str] = os.getenv("COMFYUI_WORKFLOW_ID")
+
+    # LiteLLM Settings (for image generation via proxy)
+    LITELLM_API_KEY: str = os.getenv("LITELLM_API_KEY", "dummy")
+    LITELLM_BASE_URL: str = os.getenv("LITELLM_BASE_URL", "")
+    LITELLM_IMAGE_MODEL: str = os.getenv("LITELLM_IMAGE_MODEL", "dall-e-3")
+
+    # KoboldCPP Settings (local Stable Diffusion)
+    KOBOLDCPP_URL: str = os.getenv("KOBOLDCPP_URL", "http://127.0.0.1:5001")
+    KOBOLDCPP_STEPS: int = int(os.getenv("KOBOLDCPP_STEPS", "30"))
+    KOBOLDCPP_CFG_SCALE: float = float(os.getenv("KOBOLDCPP_CFG_SCALE", "7.0"))
+    KOBOLDCPP_SAMPLER: str = os.getenv("KOBOLDCPP_SAMPLER", "Euler a")
+
+    # Code Execution Settings
+    CODE_EXECUTION_ENABLED: bool = (
+        os.getenv("CODE_EXECUTION_ENABLED", "false").lower() == "true"
+    )
+    CODE_EXECUTION_TIMEOUT: int = int(os.getenv("CODE_EXECUTION_TIMEOUT", "30"))
+    CODE_SANDBOX_ENABLED: bool = (
+        os.getenv("CODE_SANDBOX_ENABLED", "true").lower() == "true"
+    )
+    CODE_MAX_OUTPUT_SIZE: int = int(os.getenv("CODE_MAX_OUTPUT_SIZE", "10000"))
+
+    # Bot-to-Bot Conversation Settings
+    BOT_CONVERSATION_ENABLED: bool = (
+        os.getenv("BOT_CONVERSATION_ENABLED", "true").lower() == "true"
+    )
+    BOT_CONVERSATION_MAX_TURNS: int = int(os.getenv("BOT_CONVERSATION_MAX_TURNS", "10"))
+    BOT_CONVERSATION_TIMEOUT_MINUTES: int = int(
+        os.getenv("BOT_CONVERSATION_TIMEOUT_MINUTES", "30")
+    )
+    BOT_CONVERSATION_DETAILED_METRICS: bool = (
+        os.getenv("BOT_CONVERSATION_DETAILED_METRICS", "false").lower() == "true"
+    )
+
+    # RL (Reinforcement Learning) Settings
+    RL_ENABLED: bool = os.getenv("RL_ENABLED", "false").lower() == "true"
+    RL_DATA_DIR: Path = Path(os.getenv("RL_DATA_DIR", "./data/rl"))
 
     @classmethod
     def validate(cls) -> bool:
@@ -720,6 +878,7 @@ class Config:
             cls.VOICE_MODELS_DIR.mkdir(parents=True, exist_ok=True)
             cls.TEMP_DIR.mkdir(parents=True, exist_ok=True)
             cls.SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
+            cls.RL_DATA_DIR.mkdir(parents=True, exist_ok=True)
         except PermissionError as e:
             raise ValueError(f"Permission denied creating directories: {e}")
         except Exception as e:

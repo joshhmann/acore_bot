@@ -64,17 +64,6 @@ class TimingConfig(BaseConfig):
     )
 
 
-class AmbientConfig(BaseConfig):
-    """Ambient mode configuration."""
-
-    ENABLED: bool = BaseConfig._get_env_bool("AMBIENT_MODE_ENABLED", False)
-    CHANNELS: list = BaseConfig._get_env_int_list("AMBIENT_CHANNELS")
-    IGNORE_USERS: list = BaseConfig._get_env_int_list("AMBIENT_IGNORE_USERS")
-    LULL_TIMEOUT: int = BaseConfig._get_env_int("AMBIENT_LULL_TIMEOUT", 300)
-    MIN_INTERVAL: int = BaseConfig._get_env_int("AMBIENT_MIN_INTERVAL", 600)
-    CHANCE: float = BaseConfig._get_env_float("AMBIENT_CHANCE", 0.3)
-
-
 class ProactiveConfig(BaseConfig):
     """Proactive engagement configuration."""
 

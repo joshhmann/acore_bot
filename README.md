@@ -109,6 +109,32 @@ ANALYTICS_API_KEY=your_secure_random_key_here
 
 **Technologies:** FastAPI + WebSocket + Chart.js
 
+### 💬 Bot-to-Bot Conversations (NEW)
+
+Enable AI personas to converse with each other in structured, multi-turn conversations:
+
+**Features:**
+- **2-5 Personas:** Structured conversations between multiple characters
+- **Up to 10 Turns:** Configurable conversation length (max 20)
+- **Quality Metrics:** Automated assessment of conversation quality
+- **Review Workflow:** Human approval before archiving
+- **RAG Integration:** Searchable conversation history
+- **Headless Testing:** Reproducible conversations for testing
+
+**Quick Example:**
+```
+/bot_conversation participants:dagoth_ur,scav topic:The nature of artificial intelligence
+```
+
+**Use Cases:**
+- Character development and relationship building
+- Entertainment (watch characters debate and interact)
+- Behavior research and emergent AI dynamics
+
+**Documentation:**
+- [User Guide](docs/BOT_CONVERSATIONS.md) - Commands, troubleshooting, best practices
+- [Architecture](docs/BOT_CONVERSATIONS_ARCHITECTURE.md) - Technical deep dive
+
 ## Configuration
 
 ### Essential .env Variables
@@ -173,6 +199,15 @@ data/
 | `/set_character <name>` | Switch active character |
 | `/list_characters` | Show available characters |
 | `!interact <char1> <char2> <topic>` | Force two characters to interact |
+
+### Bot-to-Bot Conversations
+| Command | Description |
+|---------|-------------|
+| `/bot_conversation participants:<bots> topic:<topic>` | Start bot conversation |
+| `/review_conversation conversation_id:<id>` | Post conversation for review |
+| `/list_conversations` | List recent conversations |
+| `/get_conversation conversation_id:<id>` | Retrieve conversation transcript |
+| `/archive_conversation conversation_id:<id>` | Manually archive conversation |
 
 ### Utility
 | Command | Description |

@@ -11,6 +11,7 @@ import discord
 # Event Loop Fixtures
 # ============================================================================
 
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Create an instance of the default event loop for the test session."""
@@ -22,6 +23,7 @@ def event_loop():
 # ============================================================================
 # Mock Discord Objects
 # ============================================================================
+
 
 @pytest.fixture
 def mock_bot():
@@ -107,6 +109,7 @@ def mock_interaction(mock_user, mock_channel):
 # Service Mocks
 # ============================================================================
 
+
 @pytest.fixture
 def mock_ollama_service():
     """Create a mock Ollama service."""
@@ -130,9 +133,9 @@ def mock_tts_service():
 
     service = AsyncMock(spec=TTSInterface)
     service.generate = AsyncMock(return_value=Path("/tmp/test.mp3"))
-    service.list_voices = AsyncMock(return_value=[
-        {"name": "voice1", "description": "Test Voice 1"}
-    ])
+    service.list_voices = AsyncMock(
+        return_value=[{"name": "voice1", "description": "Test Voice 1"}]
+    )
     service.is_available = AsyncMock(return_value=True)
 
     return service
@@ -144,16 +147,12 @@ def mock_stt_service():
     from services.interfaces import STTInterface
 
     service = AsyncMock(spec=STTInterface)
-    service.transcribe_file = AsyncMock(return_value={
-        "text": "Test transcription",
-        "language": "en",
-        "segments": []
-    })
-    service.transcribe_audio_data = AsyncMock(return_value={
-        "text": "Test transcription",
-        "language": "en",
-        "segments": []
-    })
+    service.transcribe_file = AsyncMock(
+        return_value={"text": "Test transcription", "language": "en", "segments": []}
+    )
+    service.transcribe_audio_data = AsyncMock(
+        return_value={"text": "Test transcription", "language": "en", "segments": []}
+    )
     service.is_available.return_value = True
 
     return service
@@ -192,13 +191,15 @@ def mock_history_manager():
 def mock_user_profiles():
     """Create a mock user profiles service."""
     service = AsyncMock()
-    service.load_profile = AsyncMock(return_value={
-        "user_id": 555666777,
-        "username": "TestUser",
-        "interaction_count": 0,
-        "facts": [],
-        "affection": 0.5
-    })
+    service.load_profile = AsyncMock(
+        return_value={
+            "user_id": 555666777,
+            "username": "TestUser",
+            "interaction_count": 0,
+            "facts": [],
+            "affection": 0.5,
+        }
+    )
     service.save_profile = AsyncMock()
     service.get_user_context = AsyncMock(return_value="Test user context")
     service.get_affection_context = Mock(return_value="")
@@ -211,6 +212,7 @@ def mock_user_profiles():
 # ============================================================================
 # Temporary Files & Directories
 # ============================================================================
+
 
 @pytest.fixture
 def temp_audio_file(tmp_path):
@@ -240,6 +242,7 @@ def temp_data_dir(tmp_path):
 # Configuration Overrides
 # ============================================================================
 
+
 @pytest.fixture
 def test_config():
     """Provide test configuration overrides."""
@@ -258,21 +261,65 @@ def test_config():
 # Async Helpers
 # ============================================================================
 
-@pytest.fixture
-def async_return():
-    """Helper to create async functions that return values."""
-    def _async_return(value):
-        async def _inner(*args, **kwargs):
-            return value
-        return _inner
-    return _async_return
-
 
 @pytest.fixture
 def async_raise():
     """Helper to create async functions that raise exceptions."""
+
     def _async_raise(exception):
         async def _inner(*args, **kwargs):
             raise exception
+
         return _inner
+
     return _async_raise
+
+
+# ============================================================================
+# Headless Discord Mocks
+# ============================================================================
+
+
+@pytest.fixture
+def mock_conversation_channel():
+    """Create a mock conversation channel."""
+    from tests.mocks.discord_mocks import MockConversationChannel
+
+    return MockConversationChannel(name="bot-conversation-test")
+
+
+@pytest.fixture
+def mock_webhook():
+    """Create a mock webhook."""
+    from tests.mocks.discord_mocks import MockWebhook
+
+    return MockWebhook(name="PersonaBot_Proxy")
+
+
+@pytest.fixture
+def mock_bot_with_channel():
+    """Create a mock bot with a guild and channel."""
+    from tests.mocks.discord_mocks import MockBot, MockGuild, MockConversationChannel
+
+    bot = MockBot()
+    guild = MockGuild(name="TestGuild")
+    channel = MockConversationChannel(name="bot-conversations")
+    guild.channels.append(channel)
+    bot.guilds.append(guild)
+    return bot, guild, channel
+
+
+@pytest.fixture
+def mock_persona_message():
+    """Create a mock message from a persona (via webhook)."""
+    from tests.mocks.discord_mocks import MockWebhook, MockMessage, MockUser
+
+    def _create(persona_name: str, content: str):
+        webhook = MockWebhook(name="PersonaBot_Proxy")
+        return MockMessage(
+            content=content,
+            author=MockUser(username=persona_name),
+            webhook_id=webhook.id,
+        )
+
+    return _create

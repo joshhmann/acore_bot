@@ -8,6 +8,7 @@ import tiktoken
 from config import Config
 from services.persona.system import CompiledPersona
 from services.persona.lorebook import LoreEntry
+from utils.token_counter import count_tokens, check_token_budget
 
 logger = logging.getLogger(__name__)
 
@@ -337,7 +338,7 @@ class ContextManager:
 
         # Token Budget Monitoring
         total_context_text = "\n".join([m.get("content", "") for m in final_messages])
-        estimated_tokens = count_tokens(total_context_text)
+        estimated_tokens = self.count_tokens(total_context_text)
         budget_info = check_token_budget(estimated_tokens)
 
         if budget_info.get("warning"):

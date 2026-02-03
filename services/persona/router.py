@@ -34,6 +34,10 @@ class PersonaRouter:
         self.last_responder: Dict[int, Dict] = {}
         self.sticky_timeout = Config.PERSONA_STICKY_TIMEOUT
 
+        # Track active conversations per channel
+        # {channel_id: List[str]} - list of persona IDs participating in conversation
+        self._active_conversations: Dict[int, List[str]] = {}
+
         # Core system for compiling/loading individual personas
         # PersonaSystem expects base_path containing 'characters/' subdir
         # profiles_dir is .../characters, so we pass parent (.../prompts)
@@ -252,10 +256,11 @@ class PersonaRouter:
         """Select a persona to respond to this message.
 
         Priority (T17 - Activity-Based Routing):
-        1. Explicit name mention in message
-        2. Activity-based match (if user provided and has activity)
-        3. Sticky: Same persona that last responded (within timeout)
-        4. Random selection (only if no context)
+        1. Active conversation: Select from conversation participants only
+        2. Explicit name mention in message
+        3. Activity-based match (if user provided and has activity)
+        4. Sticky: Same persona that last responded (within timeout)
+        5. Random selection (only if no context)
 
         Args:
             message_content: The message text
@@ -276,6 +281,33 @@ class PersonaRouter:
             key=lambda p: len(p.character.display_name),
             reverse=True,
         )
+
+        # Phase 0: Check for active conversation context
+        if channel_id and channel_id in self._active_conversations:
+            participants = self._active_conversations[channel_id]
+            conversation_personas = []
+
+            for persona_id in participants:
+                persona = self.get_persona_by_name(persona_id)
+                if persona:
+                    conversation_personas.append(persona)
+
+            if conversation_personas:
+                # Within active conversation, still respect explicit mentions
+                for p in conversation_personas:
+                    name = p.character.display_name.lower()
+                    if name in content_lower:
+                        logger.info(
+                            f"Routing to {p.character.display_name} (conversation participant - explicit mention)"
+                        )
+                        return p
+
+                # If no explicit mention, select randomly from participants
+                candidate = random.choice(conversation_personas)
+                logger.info(
+                    f"Routing to {candidate.character.display_name} (conversation participant - random)"
+                )
+                return candidate
 
         # Phase 1: Full Name Match (explicit mention)
         for p in sorted_personas:
@@ -336,6 +368,39 @@ class PersonaRouter:
     def record_response(self, channel_id: int, persona: CompiledPersona):
         """Record that a persona responded in a channel (for sticky tracking)."""
         self.last_responder[channel_id] = {"persona": persona, "time": datetime.now()}
+
+    def set_active_conversation(self, channel_id: int, participants: List[str]):
+        """Set active conversation participants for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+            participants: List of persona IDs (filenames without .json)
+        """
+        self._active_conversations[channel_id] = participants
+        logger.info(
+            f"Set active conversation in channel {channel_id}: {', '.join(participants)}"
+        )
+
+    def clear_active_conversation(self, channel_id: int):
+        """Clear active conversation context for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+        """
+        if channel_id in self._active_conversations:
+            del self._active_conversations[channel_id]
+            logger.info(f"Cleared active conversation in channel {channel_id}")
+
+    def get_active_conversation(self, channel_id: int) -> Optional[List[str]]:
+        """Get active conversation participants for a channel.
+
+        Args:
+            channel_id: Discord channel ID
+
+        Returns:
+            List of persona IDs or None if no active conversation
+        """
+        return self._active_conversations.get(channel_id)
 
     def get_all_personas(self) -> List[CompiledPersona]:
         return list(self.personas.values())
