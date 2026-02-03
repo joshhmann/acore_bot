@@ -76,6 +76,13 @@ class RLAgent:
         q_row[action] = new_q
         self.dirty = True
 
+        # Log learning progress for observability
+        logger.debug(
+            f"Q-Update: state={state}, action={action.name}, "
+            f"reward={reward:.2f}, Q: {old_q:.3f} -> {new_q:.3f} "
+            f"(Δ={new_q - old_q:+.3f})"
+        )
+
     def get_action(self, state: RLState) -> RLAction:
         return self.select_action(state)
 

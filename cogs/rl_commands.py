@@ -4,6 +4,7 @@ import shutil
 import asyncio
 import logging
 from typing import Optional
+import discord
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +24,12 @@ class RLCommands(commands.Cog):
         return None
 
     @commands.command(name="rl_stats")
-    async def rl_stats(self, ctx):
-        """Show statistics for the Reinforcement Learning system."""
+    async def rl_stats(self, ctx, user: Optional[discord.User] = None):
+        """Show statistics for the Reinforcement Learning system.
+
+        Usage: !rl_stats - Show global stats
+               !rl_stats @user - Show stats for specific user
+        """
         service = self.rl_service
 
         if not service:
@@ -34,10 +39,6 @@ class RLCommands(commands.Cog):
         # Calculate stats
         agent_count = len(service.agents)
         is_enabled = service.enabled
-
-        avg_epsilon = 0.0
-        if agent_count > 0:
-            avg_epsilon = sum(a.epsilon for a in service.agents.values()) / agent_count
 
         # Create Embed
         embed = discord.Embed(
@@ -53,7 +54,81 @@ class RLCommands(commands.Cog):
             inline=True,
         )
         embed.add_field(name="Active Agents", value=str(agent_count), inline=True)
-        embed.add_field(name="Average Epsilon", value=f"{avg_epsilon:.4f}", inline=True)
+
+        # Show specific user stats if requested
+        if user:
+            ctx_key = (ctx.channel.id, user.id)
+            agent = service.agents.get(ctx_key)
+            if agent:
+                # Calculate Q-table stats
+                total_states = len(agent.q_table)
+                avg_q = 0.0
+                if total_states > 0:
+                    all_qs = [q for row in agent.q_table.values() for q in row.values()]
+                    avg_q = sum(all_qs) / len(all_qs) if all_qs else 0.0
+
+                # Find best learned state (highest Q-value)
+                best_state = None
+                best_q = float("-inf")
+                for state, q_row in agent.q_table.items():
+                    max_q = max(q_row.values())
+                    if max_q > best_q:
+                        best_q = max_q
+                        best_state = state
+
+                embed.add_field(
+                    name=f"User: {user.display_name}",
+                    value=(
+                        f"Epsilon: {agent.epsilon:.4f}\n"
+                        f"States Learned: {total_states}\n"
+                        f"Avg Q-Value: {avg_q:.2f}\n"
+                        f"Best Q: {best_q:.2f} (state {best_state})"
+                    ),
+                    inline=False,
+                )
+
+                # Show top 3 learned states
+                if agent.q_table:
+                    top_states = sorted(
+                        agent.q_table.items(),
+                        key=lambda x: max(x[1].values()),
+                        reverse=True,
+                    )[:3]
+
+                    state_info = []
+                    for state, q_row in top_states:
+                        best_action = max(q_row.items(), key=lambda x: x[1])
+                        state_info.append(
+                            f"{state}: {best_action[0].name}={best_action[1]:.1f}"
+                        )
+
+                    embed.add_field(
+                        name="Top Learned States",
+                        value="\n".join(state_info)
+                        if state_info
+                        else "No learning yet",
+                        inline=False,
+                    )
+            else:
+                embed.add_field(
+                    name=f"User: {user.display_name}",
+                    value="No RL data for this user in this channel",
+                    inline=False,
+                )
+        else:
+            # Global stats
+            avg_epsilon = 0.0
+            total_states = 0
+            if agent_count > 0:
+                avg_epsilon = (
+                    sum(a.epsilon for a in service.agents.values()) / agent_count
+                )
+                total_states = sum(len(a.q_table) for a in service.agents.values())
+
+            embed.add_field(
+                name="Average Epsilon", value=f"{avg_epsilon:.4f}", inline=True
+            )
+            embed.add_field(name="Total States", value=str(total_states), inline=True)
 
         # Add footer
         embed.set_footer(text="RL Service | Acore Bot")

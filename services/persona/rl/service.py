@@ -103,7 +103,23 @@ class RLService:
 
             action = agent.get_action(state)
 
+            # Log decision for observability
+            q_values = agent.q_table.get(state, {})
+            q_str = (
+                ", ".join([f"{a.name}={q:.2f}" for a, q in q_values.items()])
+                if q_values
+                else "N/A (new state)"
+            )
+            logger.info(
+                f"RL Decision: channel={channel_id}, user={user_id}, "
+                f"state={state}, chosen={action.name}, epsilon={agent.epsilon:.4f}, "
+                f"Q-values=[{q_str}]"
+            )
+
             if not self.safety.check(channel_id, user_id, action):
+                logger.warning(
+                    f"RL Safety blocked action {action.name} for user {user_id}"
+                )
                 return RLAction.WAIT, None
 
             return action, None
@@ -182,6 +198,13 @@ class RLService:
         async with self.agent_locks[key]:
             agent = await self.get_agent(channel_id, user_id)
             agent.update(state, action, reward, next_state)
+
+            # Log learning event for observability
+            logger.info(
+                f"RL Learning: channel={channel_id}, user={user_id}, "
+                f"action={action.name}, reward={reward:.2f}, "
+                f"epsilon={agent.epsilon:.4f}, states_learned={len(agent.q_table)}"
+            )
 
     async def _save_agent(self, channel_id: int, user_id: int, agent: RLAgent):
         """Save a single agent."""
