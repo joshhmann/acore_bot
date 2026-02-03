@@ -174,24 +174,21 @@ class BehaviorEngine:
         self.current_persona = persona
 
     def _bin_sentiment(self, score: float) -> int:
-        """Bin sentiment score (-1.0 to 1.0) into discrete levels 0-4.
+        """Bin sentiment score (-1.0 to 1.0) into discrete levels 0-3.
 
-        Bins:
-        0: Very Negative (-1.0 to -0.6)
-        1: Negative (-0.6 to -0.2)
-        2: Neutral (-0.2 to 0.2)
-        3: Positive (0.2 to 0.6)
-        4: Very Positive (0.6 to 1.0)
+        Bins (as per RL specification):
+        0: Very Negative (-∞ to -0.5)
+        1: Negative (-0.5 to 0.0)
+        2: Neutral (0.0 to 0.5)
+        3: Positive (0.5 to +∞)
         """
-        if score < -0.6:
+        if score < -0.5:
             return 0
-        if score < -0.2:
+        if score < 0.0:
             return 1
-        if score < 0.2:
+        if score < 0.5:
             return 2
-        if score < 0.6:
-            return 3
-        return 4
+        return 3
 
     async def _analyze_message_topics(self, message: str) -> List[str]:
         """

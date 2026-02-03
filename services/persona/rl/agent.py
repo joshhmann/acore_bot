@@ -97,7 +97,9 @@ class RLAgent:
         q_table_data = data.get("q_table", {})
         for state_str, q_row_data in q_table_data.items():
             try:
-                state = eval(state_str)
+                import ast
+
+                state = ast.literal_eval(state_str)
                 if not isinstance(state, tuple) or len(state) != 3:
                     continue
                 q_row = {}
