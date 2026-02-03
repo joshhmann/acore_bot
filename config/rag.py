@@ -8,6 +8,7 @@ class RAGConfig(BaseConfig):
     """RAG system configuration."""
 
     ENABLED: bool = BaseConfig._get_env_bool("RAG_ENABLED", False)
+    MODE: str = BaseConfig._get_env("RAG_MODE", "simple")
     VECTOR_STORE: Path = BaseConfig._get_env_path(
         "RAG_VECTOR_STORE", "./data/vector_store"
     )

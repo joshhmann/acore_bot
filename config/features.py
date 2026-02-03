@@ -56,8 +56,9 @@ class NaturalnessConfig(BaseConfig):
 
 
 class TimingConfig(BaseConfig):
-    """Natural timing configuration."""
+    """Timing configuration with multiple modes."""
 
+    MODE: str = BaseConfig._get_env("TIMING_MODE", "natural")
     ENABLED: bool = BaseConfig._get_env_bool("NATURAL_TIMING_ENABLED", True)
     MIN_DELAY: float = BaseConfig._get_env_float("NATURAL_TIMING_MIN_DELAY", 0.5)
     MAX_DELAY: float = BaseConfig._get_env_float("NATURAL_TIMING_MAX_DELAY", 2.0)
@@ -68,11 +69,7 @@ class TimingConfig(BaseConfig):
         "TYPING_INDICATOR_MAX_DELAY", 2.0
     )
 
-
-class AdaptiveTimingConfig(BaseConfig):
-    """Adaptive timing configuration."""
-
-    ENABLED: bool = BaseConfig._get_env_bool("ADAPTIVE_TIMING_ENABLED", True)
+    ADAPTIVE_ENABLED: bool = BaseConfig._get_env_bool("ADAPTIVE_TIMING_ENABLED", True)
     LEARNING_WINDOW_DAYS: int = BaseConfig._get_env_int(
         "ADAPTIVE_TIMING_LEARNING_WINDOW_DAYS", 7
     )

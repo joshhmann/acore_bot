@@ -62,7 +62,6 @@ from .features import (
     ConversationConfig,
     NaturalnessConfig,
     TimingConfig,
-    AdaptiveTimingConfig,
     VisionConfig,
     WebSearchConfig,
     TriviaConfig,
@@ -123,7 +122,6 @@ class Config:
     conversation = ConversationConfig()
     naturalness = NaturalnessConfig()
     timing = TimingConfig()
-    adaptive_timing = AdaptiveTimingConfig()
     vision = VisionConfig()
     web_search = WebSearchConfig()
     trivia = TriviaConfig()
@@ -401,10 +399,10 @@ class Config:
     PROACTIVE_MIN_MESSAGES = naturalness.PROACTIVE_MIN_MESSAGES
     PROACTIVE_COOLDOWN = naturalness.PROACTIVE_COOLDOWN
 
-    # Adaptive Timing
-    ADAPTIVE_TIMING_ENABLED = adaptive_timing.ENABLED
-    ADAPTIVE_TIMING_LEARNING_WINDOW_DAYS = adaptive_timing.LEARNING_WINDOW_DAYS
-    CHANNEL_ACTIVITY_PROFILE_PATH = adaptive_timing.CHANNEL_PROFILE_PATH
+    # Adaptive Timing (merged into Timing)
+    ADAPTIVE_TIMING_ENABLED = timing.ADAPTIVE_ENABLED
+    ADAPTIVE_TIMING_LEARNING_WINDOW_DAYS = timing.LEARNING_WINDOW_DAYS
+    CHANNEL_ACTIVITY_PROFILE_PATH = timing.CHANNEL_PROFILE_PATH
 
     # Vision
     VISION_ENABLED = vision.ENABLED
