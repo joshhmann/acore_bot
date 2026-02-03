@@ -62,7 +62,6 @@ from .features import (
     ConversationConfig,
     NaturalnessConfig,
     TimingConfig,
-    ProactiveConfig,
     AdaptiveTimingConfig,
     VisionConfig,
     WebSearchConfig,
@@ -124,7 +123,6 @@ class Config:
     conversation = ConversationConfig()
     naturalness = NaturalnessConfig()
     timing = TimingConfig()
-    proactive = ProactiveConfig()
     adaptive_timing = AdaptiveTimingConfig()
     vision = VisionConfig()
     web_search = WebSearchConfig()
@@ -398,10 +396,10 @@ class Config:
     TYPING_INDICATOR_MIN_DELAY = timing.TYPING_MIN_DELAY
     TYPING_INDICATOR_MAX_DELAY = timing.TYPING_MAX_DELAY
 
-    # Proactive
-    PROACTIVE_ENGAGEMENT_ENABLED = proactive.ENABLED
-    PROACTIVE_MIN_MESSAGES = proactive.MIN_MESSAGES
-    PROACTIVE_COOLDOWN = proactive.COOLDOWN
+    # Proactive (merged into Naturalness)
+    PROACTIVE_ENGAGEMENT_ENABLED = naturalness.PROACTIVE_ENABLED
+    PROACTIVE_MIN_MESSAGES = naturalness.PROACTIVE_MIN_MESSAGES
+    PROACTIVE_COOLDOWN = naturalness.PROACTIVE_COOLDOWN
 
     # Adaptive Timing
     ADAPTIVE_TIMING_ENABLED = adaptive_timing.ENABLED

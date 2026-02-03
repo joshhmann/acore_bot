@@ -48,6 +48,11 @@ class NaturalnessConfig(BaseConfig):
     ACTIVITY_COOLDOWN_SECONDS: int = BaseConfig._get_env_int(
         "ACTIVITY_COOLDOWN_SECONDS", 300
     )
+    PROACTIVE_ENABLED: bool = BaseConfig._get_env_bool(
+        "PROACTIVE_ENGAGEMENT_ENABLED", False
+    )
+    PROACTIVE_MIN_MESSAGES: int = BaseConfig._get_env_int("PROACTIVE_MIN_MESSAGES", 3)
+    PROACTIVE_COOLDOWN: int = BaseConfig._get_env_int("PROACTIVE_COOLDOWN", 180)
 
 
 class TimingConfig(BaseConfig):
@@ -62,14 +67,6 @@ class TimingConfig(BaseConfig):
     TYPING_MAX_DELAY: float = BaseConfig._get_env_float(
         "TYPING_INDICATOR_MAX_DELAY", 2.0
     )
-
-
-class ProactiveConfig(BaseConfig):
-    """Proactive engagement configuration."""
-
-    ENABLED: bool = BaseConfig._get_env_bool("PROACTIVE_ENGAGEMENT_ENABLED", False)
-    MIN_MESSAGES: int = BaseConfig._get_env_int("PROACTIVE_MIN_MESSAGES", 3)
-    COOLDOWN: int = BaseConfig._get_env_int("PROACTIVE_COOLDOWN", 180)
 
 
 class AdaptiveTimingConfig(BaseConfig):
