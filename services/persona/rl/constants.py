@@ -20,3 +20,10 @@ RL_REWARD_SPEED_THRESHOLD = 60.0  # seconds - threshold for speed bonus
 RL_REWARD_LONG_MSG_CHAR = 100  # character count for long message threshold
 RL_CONTEXT_MAX_AGE = 3600  # seconds - max age of reward context entries
 RL_MAX_AGENTS_PER_CHANNEL = 100  # max agents per channel
+
+# Neural RL (DQN) parameters
+RL_ALGORITHM = "tabular"  # "tabular" or "dqn"
+RL_REPLAY_BUFFER_SIZE = 10000  # Capacity of replay buffer
+RL_BATCH_SIZE = 32  # Batch size for training
+RL_WARMUP_STEPS = 1000  # Transitions to collect before training starts
+RL_TRAIN_EVERY = 4  # Train every N steps after warmup
