@@ -645,6 +645,227 @@ ANALYTICS_API_KEY=change_this_in_production
             logger.error(f"Error collecting activity metrics: {e}")
             return {"error": str(e)}
 
+    def _collect_state_space_metrics(self, rl_service) -> Dict:
+        """Collect state space visualization metrics from RL service."""
+        try:
+            extractor = rl_service.state_feature_extractor
+            if not extractor:
+                return {"enabled": False}
+
+            # Get feature names from StateFeatures dataclass
+            from services.persona.rl.state_features import StateFeatures
+
+            feature_names = [
+                "hour_of_day",
+                "day_of_week",
+                "is_weekend",
+                "is_night",
+                "turn_count",
+                "message_velocity",
+                "time_since_last",
+                "conversation_depth",
+                "message_length",
+                "has_question",
+                "has_url",
+                "has_attachment",
+                "previous_action",
+                "sentiment_trend",
+                "topic_consistency",
+                "channel_activity",
+            ]
+
+            # Build state space metrics
+            metrics = {
+                "enabled": True,
+                "feature_names": feature_names,
+                "feature_coverage": {},
+                "feature_importance": {},
+                "state_trajectory": [],
+                "state_clusters": [],
+            }
+
+            # Calculate feature coverage from replay buffer if available
+            if (
+                hasattr(rl_service, "replay_buffer")
+                and rl_service.replay_buffer
+                and len(rl_service.replay_buffer) > 0
+            ):
+                buffer_size = len(rl_service.replay_buffer)
+                sample_size = min(100, buffer_size)
+
+                # Sample transitions to analyze feature distribution
+                try:
+                    # Get raw buffer data for analysis
+                    buffer_data = list(rl_service.replay_buffer.buffer)[-sample_size:]
+
+                    # Calculate coverage for each feature dimension
+                    coverage = {}
+                    for i, name in enumerate(feature_names):
+                        values = []
+                        for transition in buffer_data:
+                            if hasattr(transition, "state"):
+                                state_vec = transition.state
+                                if isinstance(state_vec, (list, tuple)) and i < len(
+                                    state_vec
+                                ):
+                                    values.append(float(state_vec[i]))
+
+                        if values:
+                            # Coverage: what % of [0,1] range has been explored
+                            min_val = min(values)
+                            max_val = max(values)
+                            coverage[name] = {
+                                "min": round(min_val, 3),
+                                "max": round(max_val, 3),
+                                "range": round(max_val - min_val, 3),
+                                "coverage_pct": round(
+                                    min(1.0, max_val - min_val) * 100, 1
+                                ),
+                                "mean": round(sum(values) / len(values), 3),
+                                "std": round(
+                                    (
+                                        sum(
+                                            (v - sum(values) / len(values)) ** 2
+                                            for v in values
+                                        )
+                                        / len(values)
+                                    )
+                                    ** 0.5,
+                                    3,
+                                )
+                                if len(values) > 1
+                                else 0.0,
+                            }
+                        else:
+                            coverage[name] = {
+                                "min": 0.0,
+                                "max": 0.0,
+                                "range": 0.0,
+                                "coverage_pct": 0.0,
+                                "mean": 0.0,
+                                "std": 0.0,
+                            }
+
+                    metrics["feature_coverage"] = coverage
+
+                    # Estimate feature importance based on variance
+                    # Higher variance = more explored = potentially more important
+                    importance = {}
+                    for name, stats in coverage.items():
+                        # Importance score based on variance and coverage
+                        variance_score = min(
+                            1.0, stats["std"] * 2
+                        )  # Scale std to [0,1]
+                        coverage_score = stats["coverage_pct"] / 100.0
+                        importance[name] = round(
+                            (variance_score * 0.6 + coverage_score * 0.4), 3
+                        )
+
+                    metrics["feature_importance"] = importance
+
+                    # Build state trajectory (user journey through state space)
+                    trajectory = []
+                    for j, transition in enumerate(buffer_data[-20:]):  # Last 20 states
+                        if hasattr(transition, "state"):
+                            state_vec = transition.state
+                            if isinstance(state_vec, (list, tuple)):
+                                # Project to 2D using first 2 principal features
+                                trajectory.append(
+                                    {
+                                        "step": j,
+                                        "x": round(
+                                            float(state_vec[0]), 3
+                                        ),  # hour_of_day
+                                        "y": round(
+                                            float(state_vec[4]), 3
+                                        ),  # turn_count
+                                        "action": (
+                                            transition.action.name
+                                            if hasattr(transition.action, "name")
+                                            else str(transition.action)
+                                        ),
+                                        "reward": round(
+                                            float(getattr(transition, "reward", 0)), 3
+                                        ),
+                                    }
+                                )
+
+                    metrics["state_trajectory"] = trajectory
+
+                    # Simple clustering based on feature ranges
+                    clusters = []
+                    if len(buffer_data) >= 10:
+                        # Define 4 clusters based on time and activity
+                        cluster_defs = [
+                            {
+                                "name": "Night Quiet",
+                                "hour_range": (0.8, 1.0),
+                                "activity": (0.0, 0.3),
+                            },
+                            {
+                                "name": "Day Active",
+                                "hour_range": (0.3, 0.7),
+                                "activity": (0.5, 1.0),
+                            },
+                            {
+                                "name": "Evening Social",
+                                "hour_range": (0.7, 0.9),
+                                "activity": (0.3, 0.7),
+                            },
+                            {
+                                "name": "Morning Light",
+                                "hour_range": (0.2, 0.4),
+                                "activity": (0.1, 0.4),
+                            },
+                        ]
+
+                        for cluster_def in cluster_defs:
+                            count = 0
+                            for transition in buffer_data:
+                                if hasattr(transition, "state"):
+                                    state_vec = transition.state
+                                    if (
+                                        isinstance(state_vec, (list, tuple))
+                                        and len(state_vec) >= 16
+                                    ):
+                                        hour = float(state_vec[0])
+                                        activity = float(
+                                            state_vec[15]
+                                        )  # channel_activity
+                                        if (
+                                            cluster_def["hour_range"][0]
+                                            <= hour
+                                            <= cluster_def["hour_range"][1]
+                                            and cluster_def["activity"][0]
+                                            <= activity
+                                            <= cluster_def["activity"][1]
+                                        ):
+                                            count += 1
+
+                            clusters.append(
+                                {
+                                    "name": cluster_def["name"],
+                                    "count": count,
+                                    "percentage": round(
+                                        count / len(buffer_data) * 100, 1
+                                    ),
+                                }
+                            )
+
+                    metrics["state_clusters"] = clusters
+
+                except Exception as e:
+                    logger.warning(
+                        f"Error analyzing replay buffer for state space: {e}"
+                    )
+                    metrics["error"] = str(e)
+
+            return metrics
+
+        except Exception as e:
+            logger.error(f"Error collecting state space metrics: {e}")
+            return {"enabled": False, "error": str(e)}
+
     async def _collect_rl_metrics(self) -> Dict:
         """Collect RL (Reinforcement Learning) metrics."""
         try:
@@ -795,6 +1016,10 @@ ANALYTICS_API_KEY=change_this_in_production
                         "top_states": top_states,
                     }
                 )
+
+            # Add state space metrics if available
+            if hasattr(rl_service, "state_feature_extractor"):
+                metrics["state_space"] = self._collect_state_space_metrics(rl_service)
 
             # Add multi-objective metrics if available
             if hasattr(rl_service, "multi_objective_reward"):

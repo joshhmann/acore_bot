@@ -781,6 +781,56 @@
                 </div>
             </div>
 
+            <!-- State Space Visualization Section -->
+            <div id="state-space-section" class="personas-section" style="display: none;">
+                <h2>🌌 State Space Analysis</h2>
+                <p style="color: #666; margin-bottom: 20px;">Visualizing the 16-dimensional state feature space</p>
+
+                <!-- State Space Heatmap -->
+                <div class="chart-card" style="margin-bottom: 30px;">
+                    <h2>🔥 Feature Coverage Heatmap</h2>
+                    <div class="chart-container" style="height: 400px;">
+                        <canvas id="stateHeatmapChart"></canvas>
+                    </div>
+                    <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                        Shows the range [min, max] explored for each feature. Brighter = more coverage.
+                    </p>
+                </div>
+
+                <!-- Feature Importance and Trajectory -->
+                <div class="charts-grid">
+                    <!-- Feature Importance Bar Chart -->
+                    <div class="chart-card">
+                        <h2>📊 Feature Importance</h2>
+                        <div class="chart-container">
+                            <canvas id="featureImportanceChart"></canvas>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                            Based on variance and coverage in replay buffer
+                        </p>
+                    </div>
+
+                    <!-- State Trajectory Plot -->
+                    <div class="chart-card">
+                        <h2>🛤️ State Trajectory (User Journey)</h2>
+                        <div class="chart-container">
+                            <canvas id="stateTrajectoryChart"></canvas>
+                        </div>
+                        <p style="font-size: 12px; color: #666; margin-top: 10px;">
+                            Recent path through state space (hour vs activity)
+                        </p>
+                    </div>
+                </div>
+
+                <!-- State Clusters -->
+                <div class="config-section" style="margin-top: 30px;">
+                    <h2>🎯 State Clusters</h2>
+                    <div id="state-clusters-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                        <div class="loading">No cluster data available</div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Multi-Objective RL Section -->
             <div id="multi-objective-section" class="personas-section" style="display: none;">
                 <h2>🎯 Multi-Objective RL</h2>
@@ -985,6 +1035,9 @@
         let qualityChart = null;  // Quality history chart
         let affinityChart = null;  // Affinity history chart
         let curiosityChart = null;  // Curiosity history chart
+        let stateHeatmapChart = null;  // State space heatmap
+        let featureImportanceChart = null;  // Feature importance bar chart
+        let stateTrajectoryChart = null;  // State trajectory scatter plot
 
         // Initialize Charts
         function initCharts() {
@@ -1348,6 +1401,145 @@
                     options: objectiveChartOptions
                 });
             }
+
+            // State Space Heatmap
+            const stateHeatmapCtx = document.getElementById('stateHeatmapChart');
+            if (stateHeatmapCtx) {
+                stateHeatmapChart = new Chart(stateHeatmapCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: [],
+                        datasets: [
+                            {
+                                label: 'Min Value',
+                                data: [],
+                                backgroundColor: 'rgba(102, 126, 234, 0.3)',
+                                borderColor: 'rgba(102, 126, 234, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Coverage Range',
+                                data: [],
+                                backgroundColor: 'rgba(76, 175, 80, 0.6)',
+                                borderColor: 'rgba(76, 175, 80, 1)',
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'top' },
+                            tooltip: {
+                                callbacks: {
+                                    afterLabel: function(context) {
+                                        const datasetIndex = context.datasetIndex;
+                                        const dataIndex = context.dataIndex;
+                                        if (window.stateSpaceData && window.stateSpaceData[dataIndex]) {
+                                            const d = window.stateSpaceData[dataIndex];
+                                            return [`Mean: ${d.mean}`, `Std: ${d.std}`, `Coverage: ${d.coverage_pct}%`];
+                                        }
+                                        return '';
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Feature' },
+                                ticks: { maxRotation: 45, minRotation: 45 }
+                            },
+                            y: {
+                                title: { display: true, text: 'Normalized Value [0,1]' },
+                                min: 0,
+                                max: 1
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Feature Importance Chart
+            const featureImportanceCtx = document.getElementById('featureImportanceChart');
+            if (featureImportanceCtx) {
+                featureImportanceChart = new Chart(featureImportanceCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Importance Score',
+                            data: [],
+                            backgroundColor: [],
+                            borderColor: [],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: 'y',
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Importance Score' },
+                                min: 0,
+                                max: 1
+                            }
+                        }
+                    }
+                });
+            }
+
+            // State Trajectory Chart
+            const stateTrajectoryCtx = document.getElementById('stateTrajectoryChart');
+            if (stateTrajectoryCtx) {
+                stateTrajectoryChart = new Chart(stateTrajectoryCtx, {
+                    type: 'scatter',
+                    data: {
+                        datasets: [{
+                            label: 'State Trajectory',
+                            data: [],
+                            backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                            borderColor: 'rgba(102, 126, 234, 1)',
+                            borderWidth: 1,
+                            pointRadius: 6,
+                            pointHoverRadius: 8,
+                            showLine: true,
+                            lineTension: 0.3
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const point = context.raw;
+                                        return `Step ${point.step}: ${point.action} (reward: ${point.reward})`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Hour of Day (normalized)' },
+                                min: 0,
+                                max: 1
+                            },
+                            y: {
+                                title: { display: true, text: 'Turn Count (normalized)' },
+                                min: 0,
+                                max: 1
+                            }
+                        }
+                    }
+                });
+            }
         }
         
         // WebSocket Connection
@@ -1594,6 +1786,98 @@
                 updateMultiObjectiveMetrics(rl.multi_objective);
             } else {
                 document.getElementById('multi-objective-section').style.display = 'none';
+            }
+
+            // Update state space metrics
+            if (rl.state_space && rl.state_space.enabled) {
+                updateStateSpaceMetrics(rl.state_space);
+            } else {
+                document.getElementById('state-space-section').style.display = 'none';
+            }
+        }
+
+        // Update State Space Metrics
+        function updateStateSpaceMetrics(stateSpace) {
+            // Show the section
+            document.getElementById('state-space-section').style.display = 'block';
+
+            // Update heatmap
+            if (stateHeatmapChart && stateSpace.feature_coverage) {
+                const features = Object.keys(stateSpace.feature_coverage);
+                const coverage = stateSpace.feature_coverage;
+
+                // Store data for tooltips
+                window.stateSpaceData = features.map(f => coverage[f]);
+
+                const minValues = features.map(f => coverage[f].min);
+                const ranges = features.map(f => coverage[f].range);
+
+                stateHeatmapChart.data.labels = features;
+                stateHeatmapChart.data.datasets[0].data = minValues;
+                stateHeatmapChart.data.datasets[1].data = ranges;
+                stateHeatmapChart.update();
+            }
+
+            // Update feature importance chart
+            if (featureImportanceChart && stateSpace.feature_importance) {
+                const sortedFeatures = Object.entries(stateSpace.feature_importance)
+                    .sort((a, b) => b[1] - a[1]);
+
+                const labels = sortedFeatures.map(([name, _]) => name);
+                const values = sortedFeatures.map(([_, score]) => score);
+
+                // Color gradient based on importance
+                const colors = values.map(v => {
+                    if (v >= 0.7) return 'rgba(76, 175, 80, 0.8)';
+                    if (v >= 0.4) return 'rgba(255, 152, 0, 0.8)';
+                    return 'rgba(158, 158, 158, 0.8)';
+                });
+
+                featureImportanceChart.data.labels = labels;
+                featureImportanceChart.data.datasets[0].data = values;
+                featureImportanceChart.data.datasets[0].backgroundColor = colors;
+                featureImportanceChart.data.datasets[0].borderColor = colors.map(c => c.replace('0.8', '1'));
+                featureImportanceChart.update();
+            }
+
+            // Update state trajectory chart
+            if (stateTrajectoryChart && stateSpace.state_trajectory) {
+                const trajectory = stateSpace.state_trajectory.map(t => ({
+                    x: t.x,
+                    y: t.y,
+                    step: t.step,
+                    action: t.action,
+                    reward: t.reward
+                }));
+
+                stateTrajectoryChart.data.datasets[0].data = trajectory;
+
+                // Color points by reward
+                const colors = trajectory.map(t => {
+                    if (t.reward > 0.5) return 'rgba(76, 175, 80, 0.8)';
+                    if (t.reward > 0) return 'rgba(255, 152, 0, 0.8)';
+                    return 'rgba(244, 67, 54, 0.8)';
+                });
+                stateTrajectoryChart.data.datasets[0].backgroundColor = colors;
+
+                stateTrajectoryChart.update();
+            }
+
+            // Update state clusters
+            const clustersContainer = document.getElementById('state-clusters-grid');
+            if (clustersContainer && stateSpace.state_clusters) {
+                const clusters = stateSpace.state_clusters;
+                if (clusters.length > 0) {
+                    clustersContainer.innerHTML = clusters.map(c => `
+                        <div class="metric-card" style="padding: 15px;">
+                            <h3 style="font-size: 12px; margin-bottom: 8px;">${c.name}</h3>
+                            <div class="value" style="font-size: 28px;">${c.count}</div>
+                            <div class="change">${c.percentage}% of states</div>
+                        </div>
+                    `).join('');
+                } else {
+                    clustersContainer.innerHTML = '<div class="loading">No cluster data available</div>';
+                }
             }
         }
 
