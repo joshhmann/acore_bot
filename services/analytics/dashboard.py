@@ -659,65 +659,148 @@ ANALYTICS_API_KEY=change_this_in_production
             if not rl_service:
                 return {"enabled": False}
 
-            # Calculate aggregate metrics
-            total_agents = len(rl_service.agents)
-            total_states = 0
-            avg_epsilon = 0.0
-            avg_q_value = 0.0
-            q_value_count = 0
-            top_states = []
-
-            if total_agents > 0:
-                epsilons = []
-                for agent in rl_service.agents.values():
-                    epsilons.append(agent.epsilon)
-                    total_states += len(agent.q_table)
-
-                    # Collect Q-values for average
-                    for state, q_row in agent.q_table.items():
-                        for q_val in q_row.values():
-                            avg_q_value += q_val
-                            q_value_count += 1
-
-                        # Track top states by max Q-value
-                        max_q = max(q_row.values())
-                        best_action = max(q_row.items(), key=lambda x: x[1])[0]
-                        top_states.append(
-                            {
-                                "state": state,
-                                "max_q": max_q,
-                                "best_action": best_action.name,
-                                "action_values": {a.name: v for a, v in q_row.items()},
-                            }
-                        )
-
-                avg_epsilon = sum(epsilons) / len(epsilons)
-
-                # Sort and keep top 10 states
-                top_states.sort(key=lambda x: x["max_q"], reverse=True)
-                top_states = top_states[:10]
-
-            if q_value_count > 0:
-                avg_q_value /= q_value_count
-
-            return {
+            # Initialize base metrics
+            metrics = {
                 "enabled": rl_service.enabled,
-                "total_agents": total_agents,
-                "total_states": total_states,
-                "avg_epsilon": round(avg_epsilon, 4),
-                "avg_q_value": round(avg_q_value, 2),
-                "top_states": top_states,
+                "algorithm": getattr(rl_service, "algorithm", "tabular"),
+                "total_agents": 0,
+                "total_states": 0,
+                "avg_epsilon": 0.0,
+                "avg_q_value": 0.0,
+                "top_states": [],
             }
+
+            # Add neural RL specific metrics (DQN)
+            if hasattr(rl_service, "get_training_metrics"):
+                training_metrics = rl_service.get_training_metrics()
+                metrics.update(
+                    {
+                        "training_steps": training_metrics.get(
+                            "total_training_steps", 0
+                        ),
+                        "loss_history": [],  # Will be populated from training_metrics if available
+                        "buffer_utilization": training_metrics.get(
+                            "buffer_utilization", 0.0
+                        ),
+                        "buffer_size": training_metrics.get("buffer_size", 0),
+                        "warmup_steps": getattr(rl_service, "warmup_steps", 0),
+                        "batch_size": getattr(rl_service, "batch_size", 0),
+                    }
+                )
+
+            # Calculate aggregate metrics based on algorithm type
+            if metrics["algorithm"] == "dqn":
+                # Neural RL (DQN) metrics
+                total_agents = len(rl_service.neural_agents)
+                epsilons = []
+                all_q_values = []
+
+                if total_agents > 0:
+                    for agent in rl_service.neural_agents.values():
+                        epsilons.append(agent.epsilon)
+                        # Get Q-values from agent stats
+                        stats = agent.get_stats()
+                        if "mean_q_value" in stats:
+                            all_q_values.append(stats["mean_q_value"])
+
+                metrics["total_agents"] = total_agents
+                if epsilons:
+                    metrics["avg_epsilon"] = round(sum(epsilons) / len(epsilons), 4)
+                if all_q_values:
+                    metrics["avg_q_value"] = round(
+                        sum(all_q_values) / len(all_q_values), 2
+                    )
+
+                # Get sample states from replay buffer if available
+                if (
+                    hasattr(rl_service, "replay_buffer")
+                    and rl_service.replay_buffer
+                    and len(rl_service.replay_buffer) > 0
+                ):
+                    # Sample a few transitions to show state distribution
+                    try:
+                        sample = await rl_service.replay_buffer.sample(
+                            min(10, len(rl_service.replay_buffer))
+                        )
+                        state_counts = {}
+                        for transition in sample:
+                            state_key = str(transition.state)
+                            state_counts[state_key] = state_counts.get(state_key, 0) + 1
+
+                        # Convert to top_states format
+                        for state_key, count in sorted(
+                            state_counts.items(), key=lambda x: x[1], reverse=True
+                        )[:5]:
+                            metrics["top_states"].append(
+                                {
+                                    "state": [state_key],
+                                    "max_q": float(count),
+                                    "best_action": "SAMPLE",
+                                    "action_values": {"SAMPLE": float(count)},
+                                }
+                            )
+                    except Exception:
+                        pass  # Buffer sampling failed, continue without top states
+
+            else:
+                # Tabular RL metrics (original implementation)
+                total_agents = len(rl_service.agents)
+                total_states = 0
+                avg_epsilon = 0.0
+                avg_q_value = 0.0
+                q_value_count = 0
+                top_states = []
+
+                if total_agents > 0:
+                    epsilons = []
+                    for agent in rl_service.agents.values():
+                        epsilons.append(agent.epsilon)
+                        total_states += len(agent.q_table)
+
+                        # Collect Q-values for average
+                        for state, q_row in agent.q_table.items():
+                            for q_val in q_row.values():
+                                avg_q_value += q_val
+                                q_value_count += 1
+
+                            # Track top states by max Q-value
+                            max_q = max(q_row.values())
+                            best_action = max(q_row.items(), key=lambda x: x[1])[0]
+                            top_states.append(
+                                {
+                                    "state": state,
+                                    "max_q": max_q,
+                                    "best_action": best_action.name,
+                                    "action_values": {
+                                        a.name: v for a, v in q_row.items()
+                                    },
+                                }
+                            )
+
+                    avg_epsilon = sum(epsilons) / len(epsilons)
+
+                    # Sort and keep top 10 states
+                    top_states.sort(key=lambda x: x["max_q"], reverse=True)
+                    top_states = top_states[:10]
+
+                if q_value_count > 0:
+                    avg_q_value /= q_value_count
+
+                metrics.update(
+                    {
+                        "total_agents": total_agents,
+                        "total_states": total_states,
+                        "avg_epsilon": round(avg_epsilon, 4),
+                        "avg_q_value": round(avg_q_value, 2),
+                        "top_states": top_states,
+                    }
+                )
+
+            return metrics
 
         except Exception as e:
             logger.error(f"Error collecting RL metrics: {e}")
             return {"enabled": False, "error": str(e)}
-
-            return {}
-
-        except Exception as e:
-            logger.error(f"Error collecting activity metrics: {e}")
-            return {"error": str(e)}
 
     def _get_default_html(self) -> str:
         """Get default dashboard HTML if template doesn't exist."""

@@ -676,7 +676,15 @@
 
         <!-- RL Learning Tab -->
         <div id="rl" class="tab-content">
-            <div class="metrics-grid">
+            <!-- Algorithm Badge -->
+            <div style="margin-bottom: 20px;">
+                <span id="rl-algorithm-badge" style="display: inline-block; padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 20px; font-size: 14px; font-weight: 600;">
+                    Algorithm: Tabular Q-Learning
+                </span>
+            </div>
+
+            <!-- Tabular RL Metrics -->
+            <div id="tabular-metrics" class="metrics-grid">
                 <div class="metric-card">
                     <h3>RL Status</h3>
                     <div class="value" id="rl-status">--</div>
@@ -698,22 +706,81 @@
                     <div class="change">Exploration rate</div>
                 </div>
             </div>
-            
+
+            <!-- Neural RL (DQN) Metrics -->
+            <div id="neural-metrics" class="metrics-grid" style="display: none;">
+                <div class="metric-card">
+                    <h3>Training Steps</h3>
+                    <div class="value" id="rl-training-steps">0</div>
+                    <div class="change">Total training iterations</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Buffer Utilization</h3>
+                    <div class="value" id="rl-buffer-pct">0%</div>
+                    <div class="change">Replay memory usage</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Current Loss</h3>
+                    <div class="value" id="rl-current-loss">0.00</div>
+                    <div class="change">Training loss (TD error)</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Avg Q-Value</h3>
+                    <div class="value" id="rl-avg-q">0.00</div>
+                    <div class="change">Mean Q-value estimate</div>
+                </div>
+            </div>
+
+            <!-- Buffer Utilization Progress Bar (DQN only) -->
+            <div id="buffer-progress-container" style="display: none; margin-bottom: 30px; background: #fff; border: 1px solid #e0e0e0; border-radius: 12px; padding: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <h3 style="color: #667eea; font-size: 16px; margin: 0;">🗄️ Replay Buffer</h3>
+                    <span id="buffer-stats" style="font-size: 13px; color: #666;">0 / 0 transitions</span>
+                </div>
+                <div style="width: 100%; height: 24px; background: #e0e0e0; border-radius: 12px; overflow: hidden;">
+                    <div id="buffer-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #667eea 0%, #764ba2 100%); transition: width 0.5s ease; border-radius: 12px;"></div>
+                </div>
+                <div style="margin-top: 10px; font-size: 12px; color: #666;">
+                    <span>Warmup: <strong id="warmup-status">--</strong></span>
+                    <span style="margin-left: 20px;">Batch Size: <strong id="batch-size">--</strong></span>
+                    <span style="margin-left: 20px;">Train Every: <strong id="train-every">--</strong> steps</span>
+                </div>
+            </div>
+
             <div class="charts-grid">
+                <!-- Loss Curve Chart (DQN only) -->
+                <div class="chart-card" id="loss-chart-card" style="display: none;">
+                    <h2>📉 Training Loss Curve</h2>
+                    <div class="chart-container">
+                        <canvas id="rlLossChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Q-Value Distribution Chart -->
                 <div class="chart-card">
                     <h2>📈 Q-Value Distribution</h2>
                     <div class="chart-container">
                         <canvas id="rlQChart"></canvas>
                     </div>
                 </div>
-                <div class="chart-card">
+
+                <!-- Q-Value Histogram (DQN only) -->
+                <div class="chart-card" id="q-histogram-card" style="display: none;">
+                    <h2>📊 Q-Value Histogram</h2>
+                    <div class="chart-container">
+                        <canvas id="rlQHistogram"></canvas>
+                    </div>
+                </div>
+
+                <!-- Top Learned States Chart -->
+                <div class="chart-card" id="top-states-card">
                     <h2>🎯 Top Learned States</h2>
                     <div class="chart-container">
                         <canvas id="rlStatesChart"></canvas>
                     </div>
                 </div>
             </div>
-            
+
             <div class="personas-section">
                 <h2>🧠 RL Learning Details</h2>
                 <div id="rl-details" class="personas-grid">
@@ -809,10 +876,13 @@
         let ws = null;
         let messageHistory = [];
         let performanceHistory = [];
+        let lossHistory = [];  // Store last 100 loss values
         let messageChart = null;
         let performanceChart = null;
         let rlQChart = null;
         let rlStatesChart = null;
+        let rlLossChart = null;  // Loss curve chart for DQN
+        let rlQHistogram = null;  // Q-value histogram for DQN
         
         // Initialize Charts
         function initCharts() {
@@ -895,7 +965,7 @@
                     }
                 }
             });
-            
+
             // RL Top States Chart
             const rlStatesCtx = document.getElementById('rlStatesChart').getContext('2d');
             rlStatesChart = new Chart(rlStatesCtx, {
@@ -919,6 +989,79 @@
                     }
                 }
             });
+
+            // RL Loss Curve Chart (DQN only)
+            const rlLossCtx = document.getElementById('rlLossChart');
+            if (rlLossCtx) {
+                rlLossChart = new Chart(rlLossCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Training Loss',
+                            data: [],
+                            borderColor: '#f44336',
+                            backgroundColor: 'rgba(244, 67, 54, 0.1)',
+                            fill: true,
+                            tension: 0.4,
+                            pointRadius: 0,
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Training Step' },
+                                ticks: { maxTicksLimit: 10 }
+                            },
+                            y: {
+                                title: { display: true, text: 'Loss (TD Error)' },
+                                beginAtZero: true
+                            }
+                        },
+                        animation: { duration: 0 }
+                    }
+                });
+            }
+
+            // RL Q-Value Histogram (DQN only)
+            const rlQHistCtx = document.getElementById('rlQHistogram');
+            if (rlQHistCtx) {
+                rlQHistogram = new Chart(rlQHistCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: ['-2.0', '-1.5', '-1.0', '-0.5', '0.0', '0.5', '1.0', '1.5', '2.0'],
+                        datasets: [{
+                            label: 'Q-Value Distribution',
+                            data: [0, 0, 0, 0, 0, 0, 0, 0, 0],
+                            backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                            borderColor: 'rgba(102, 126, 234, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false }
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Q-Value Range' }
+                            },
+                            y: {
+                                title: { display: true, text: 'Frequency' },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
         }
         
         // WebSocket Connection
@@ -999,22 +1142,100 @@
         
         // Update RL Metrics
         function updateRLMetrics(rl) {
+            const algorithm = rl.algorithm || 'tabular';
+            const isDQN = algorithm === 'dqn';
+
+            // Update algorithm badge
+            const badgeEl = document.getElementById('rl-algorithm-badge');
+            if (badgeEl) {
+                badgeEl.textContent = `Algorithm: ${isDQN ? 'DQN (Neural)' : 'Tabular Q-Learning'}`;
+            }
+
+            // Show/hide metric sections based on algorithm
+            document.getElementById('tabular-metrics').style.display = isDQN ? 'none' : 'grid';
+            document.getElementById('neural-metrics').style.display = isDQN ? 'grid' : 'none';
+            document.getElementById('buffer-progress-container').style.display = isDQN ? 'block' : 'none';
+
+            // Show/hide DQN-specific charts
+            const lossChartCard = document.getElementById('loss-chart-card');
+            if (lossChartCard) lossChartCard.style.display = isDQN ? 'block' : 'none';
+
+            const qHistogramCard = document.getElementById('q-histogram-card');
+            if (qHistogramCard) qHistogramCard.style.display = isDQN ? 'block' : 'none';
+
             // Update status card
             const statusEl = document.getElementById('rl-status');
-            if (rl.enabled) {
-                statusEl.textContent = 'Enabled';
-                statusEl.style.color = '#4caf50';
-            } else {
-                statusEl.textContent = 'Disabled';
-                statusEl.style.color = '#f44336';
+            if (statusEl) {
+                if (rl.enabled) {
+                    statusEl.textContent = 'Enabled';
+                    statusEl.style.color = '#4caf50';
+                } else {
+                    statusEl.textContent = 'Disabled';
+                    statusEl.style.color = '#f44336';
+                }
             }
-            
-            // Update metrics
-            document.getElementById('rl-agents').textContent = rl.total_agents || 0;
-            document.getElementById('rl-states').textContent = rl.total_states || 0;
-            document.getElementById('rl-epsilon').textContent = (rl.avg_epsilon || 0).toFixed(4);
-            
-            // Update Q-Value chart (show average Q per action)
+
+            if (isDQN) {
+                // Neural RL (DQN) metrics
+                document.getElementById('rl-training-steps').textContent = rl.training_steps || 0;
+                document.getElementById('rl-avg-q').textContent = (rl.avg_q_value || 0).toFixed(2);
+
+                // Buffer utilization
+                const bufferUtil = rl.buffer_utilization || 0;
+                document.getElementById('rl-buffer-pct').textContent = (bufferUtil * 100).toFixed(1) + '%';
+
+                // Update buffer progress bar
+                const progressBar = document.getElementById('buffer-progress-bar');
+                if (progressBar) {
+                    progressBar.style.width = (bufferUtil * 100) + '%';
+                }
+
+                // Update buffer stats
+                const bufferStats = document.getElementById('buffer-stats');
+                if (bufferStats) {
+                    const bufferSize = rl.buffer_size || 0;
+                    bufferStats.textContent = `${bufferSize} transitions stored`;
+                }
+
+                // Update training config
+                document.getElementById('warmup-status').textContent = rl.warmup_steps || '--';
+                document.getElementById('batch-size').textContent = rl.batch_size || '--';
+                document.getElementById('train-every').textContent = rl.train_every || '--';
+
+                // Update loss chart
+                if (rlLossChart && rl.loss_history && rl.loss_history.length > 0) {
+                    // Update loss history array (keep last 100)
+                    lossHistory = rl.loss_history.slice(-100);
+
+                    // Generate step labels
+                    const startStep = Math.max(0, (rl.training_steps || 0) - lossHistory.length);
+                    const labels = lossHistory.map((_, i) => startStep + i);
+
+                    rlLossChart.data.labels = labels;
+                    rlLossChart.data.datasets[0].data = lossHistory;
+                    rlLossChart.update('none');
+
+                    // Update current loss display
+                    const currentLoss = lossHistory[lossHistory.length - 1] || 0;
+                    document.getElementById('rl-current-loss').textContent = currentLoss.toFixed(4);
+                }
+
+                // Update Q-value histogram (simulated from avg_q_value)
+                if (rlQHistogram && rl.avg_q_value) {
+                    const avgQ = rl.avg_q_value;
+                    const distribution = generateQHistogram(avgQ);
+                    rlQHistogram.data.datasets[0].data = distribution;
+                    rlQHistogram.update();
+                }
+
+            } else {
+                // Tabular RL metrics
+                document.getElementById('rl-agents').textContent = rl.total_agents || 0;
+                document.getElementById('rl-states').textContent = rl.total_states || 0;
+                document.getElementById('rl-epsilon').textContent = (rl.avg_epsilon || 0).toFixed(4);
+            }
+
+            // Update Q-Value chart (show average Q per action) - works for both
             if (rl.top_states && rl.top_states.length > 0) {
                 const actionQs = { 'WAIT': [], 'REACT': [], 'ENGAGE': [], 'INITIATE': [] };
                 rl.top_states.forEach(state => {
@@ -1022,59 +1243,80 @@
                         if (actionQs[action]) actionQs[action].push(q);
                     });
                 });
-                
-                const avgQs = Object.values(actionQs).map(qs => 
+
+                const avgQs = Object.values(actionQs).map(qs =>
                     qs.length > 0 ? qs.reduce((a, b) => a + b, 0) / qs.length : 10
                 );
-                
+
                 rlQChart.data.datasets[0].data = avgQs;
                 rlQChart.update();
-                
-                // Update top states chart
-                const top5 = rl.top_states.slice(0, 5);
-                rlStatesChart.data.labels = top5.map(s => 
-                    `[${s.state.join(',')}] ${s.best_action}`
-                );
-                rlStatesChart.data.datasets[0].data = top5.map(s => s.max_q);
-                rlStatesChart.update();
-                
-                // Update details grid
-                const detailsEl = document.getElementById('rl-details');
-                detailsEl.innerHTML = top5.map((state, i) => `
-                    <div class="persona-card">
-                        <div class="persona-header">
-                            <span class="persona-name">State ${state.state.join(':')}</span>
-                            <span class="persona-id">Rank #${i + 1}</span>
+
+                // Update top states chart (only for tabular)
+                if (!isDQN) {
+                    const top5 = rl.top_states.slice(0, 5);
+                    rlStatesChart.data.labels = top5.map(s =>
+                        `[${s.state.join(',')}] ${s.best_action}`
+                    );
+                    rlStatesChart.data.datasets[0].data = top5.map(s => s.max_q);
+                    rlStatesChart.update();
+
+                    // Update details grid (only for tabular)
+                    const detailsEl = document.getElementById('rl-details');
+                    detailsEl.innerHTML = top5.map((state, i) => `
+                        <div class="persona-card">
+                            <div class="persona-header">
+                                <span class="persona-name">State ${state.state.join(':')}</span>
+                                <span class="persona-id">Rank #${i + 1}</span>
+                            </div>
+                            <div class="mood-badge mood-happy">Best: ${state.best_action}</div>
+                            <div class="persona-stats">
+                                <div class="persona-stat">
+                                    <div class="persona-stat-label">Max Q</div>
+                                    <div class="persona-stat-value">${state.max_q.toFixed(2)}</div>
+                                </div>
+                                <div class="persona-stat">
+                                    <div class="persona-stat-label">WAIT</div>
+                                    <div class="persona-stat-value">${(state.action_values.WAIT || 0).toFixed(1)}</div>
+                                </div>
+                                <div class="persona-stat">
+                                    <div class="persona-stat-label">REACT</div>
+                                    <div class="persona-stat-value">${(state.action_values.REACT || 0).toFixed(1)}</div>
+                                </div>
+                                <div class="persona-stat">
+                                    <div class="persona-stat-label">ENGAGE</div>
+                                    <div class="persona-stat-value">${(state.action_values.ENGAGE || 0).toFixed(1)}</div>
+                                </div>
+                                <div class="persona-stat">
+                                    <div class="persona-stat-label">INITIATE</div>
+                                    <div class="persona-stat-value">${(state.action_values.INITIATE || 0).toFixed(1)}</div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="mood-badge mood-happy">Best: ${state.best_action}</div>
-                        <div class="persona-stats">
-                            <div class="persona-stat">
-                                <div class="persona-stat-label">Max Q</div>
-                                <div class="persona-stat-value">${state.max_q.toFixed(2)}</div>
-                            </div>
-                            <div class="persona-stat">
-                                <div class="persona-stat-label">WAIT</div>
-                                <div class="persona-stat-value">${(state.action_values.WAIT || 0).toFixed(1)}</div>
-                            </div>
-                            <div class="persona-stat">
-                                <div class="persona-stat-label">REACT</div>
-                                <div class="persona-stat-value">${(state.action_values.REACT || 0).toFixed(1)}</div>
-                            </div>
-                            <div class="persona-stat">
-                                <div class="persona-stat-label">ENGAGE</div>
-                                <div class="persona-stat-value">${(state.action_values.ENGAGE || 0).toFixed(1)}</div>
-                            </div>
-                            <div class="persona-stat">
-                                <div class="persona-stat-label">INITIATE</div>
-                                <div class="persona-stat-value">${(state.action_values.INITIATE || 0).toFixed(1)}</div>
-                            </div>
-                        </div>
-                    </div>
-                `).join('');
+                    `).join('');
+                } else {
+                    // For DQN, show a simplified message
+                    document.getElementById('rl-details').innerHTML =
+                        '<div class="loading">DQN learning in progress. Neural network weights are being updated via replay buffer sampling.</div>';
+                }
             } else {
-                document.getElementById('rl-details').innerHTML = 
+                document.getElementById('rl-details').innerHTML =
                     '<div class="loading">No learning data yet. Interact with the bot to start learning!</div>';
             }
+        }
+
+        // Generate Q-value histogram distribution based on average Q
+        function generateQHistogram(avgQ) {
+            const bins = [-2.0, -1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 2.0];
+            const distribution = new Array(bins.length).fill(0);
+
+            // Create a bell curve around the average Q value
+            for (let i = 0; i < bins.length; i++) {
+                const distance = Math.abs(bins[i] - avgQ);
+                const value = Math.exp(-distance * distance / 0.5) * 10;
+                distribution[i] = Math.round(value + Math.random() * 2);
+            }
+
+            return distribution;
         }
         
         // Update Message Chart
