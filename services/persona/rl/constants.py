@@ -27,3 +27,13 @@ RL_REPLAY_BUFFER_SIZE = 10000  # Capacity of replay buffer
 RL_BATCH_SIZE = 32  # Batch size for training
 RL_WARMUP_STEPS = 1000  # Transitions to collect before training starts
 RL_TRAIN_EVERY = 4  # Train every N steps after warmup
+
+# Multi-objective reward weights (must sum to 1.0)
+REWARD_WEIGHT_ENGAGEMENT = 0.3
+REWARD_WEIGHT_QUALITY = 0.3
+REWARD_WEIGHT_AFFINITY = 0.2
+REWARD_WEIGHT_CURIOSITY = 0.2
+
+# Component clipping
+REWARD_CLIP_COMPONENT = 5.0
+REWARD_CLIP_TOTAL = 10.0
