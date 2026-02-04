@@ -796,6 +796,131 @@ ANALYTICS_API_KEY=change_this_in_production
                     }
                 )
 
+            # Add multi-objective metrics if available
+            if hasattr(rl_service, "multi_objective_reward"):
+                morl = rl_service.multi_objective_reward
+                metrics["multi_objective"] = {
+                    "enabled": True,
+                    "weights": morl.get_weights()
+                    if hasattr(morl, "get_weights")
+                    else {},
+                    "objective_values": {
+                        "engagement": 0.0,
+                        "quality": 0.0,
+                        "affinity": 0.0,
+                        "curiosity": 0.0,
+                    },
+                    "objective_history": {
+                        "engagement": [],
+                        "quality": [],
+                        "affinity": [],
+                        "curiosity": [],
+                    },
+                    "pareto_frontier": [],
+                    "action_success_rates": {},
+                }
+
+                # Get latest objective values from reward history if available
+                if (
+                    hasattr(rl_service, "_reward_history")
+                    and rl_service._reward_history
+                ):
+                    latest = rl_service._reward_history[-1]
+                    if hasattr(latest, "engagement"):
+                        metrics["multi_objective"]["objective_values"] = {
+                            "engagement": latest.engagement,
+                            "quality": latest.quality,
+                            "affinity": latest.affinity,
+                            "curiosity": latest.curiosity,
+                        }
+
+                # Build objective history from reward history
+                if (
+                    hasattr(rl_service, "_reward_history")
+                    and rl_service._reward_history
+                ):
+                    history = rl_service._reward_history[-50:]  # Last 50 rewards
+                    metrics["multi_objective"]["objective_history"] = {
+                        "engagement": [
+                            r.engagement for r in history if hasattr(r, "engagement")
+                        ],
+                        "quality": [
+                            r.quality for r in history if hasattr(r, "quality")
+                        ],
+                        "affinity": [
+                            r.affinity for r in history if hasattr(r, "affinity")
+                        ],
+                        "curiosity": [
+                            r.curiosity for r in history if hasattr(r, "curiosity")
+                        ],
+                    }
+
+                # Build Pareto frontier from action outcomes
+                if (
+                    hasattr(rl_service, "_action_outcomes")
+                    and rl_service._action_outcomes
+                ):
+                    outcomes = rl_service._action_outcomes[-100:]  # Last 100 outcomes
+                    pareto_points = []
+                    for outcome in outcomes:
+                        if hasattr(outcome, "reward_components"):
+                            pareto_points.append(
+                                {
+                                    "engagement": outcome.reward_components.engagement,
+                                    "quality": outcome.reward_components.quality,
+                                    "affinity": outcome.reward_components.affinity,
+                                    "curiosity": outcome.reward_components.curiosity,
+                                    "action": outcome.action
+                                    if hasattr(outcome, "action")
+                                    else "UNKNOWN",
+                                }
+                            )
+                    metrics["multi_objective"]["pareto_frontier"] = pareto_points[
+                        -20:
+                    ]  # Last 20
+
+                # Calculate action success rates
+                if (
+                    hasattr(rl_service, "_action_outcomes")
+                    and rl_service._action_outcomes
+                ):
+                    action_stats = {}
+                    for outcome in rl_service._action_outcomes[
+                        -200:
+                    ]:  # Last 200 outcomes
+                        action_name = (
+                            outcome.action if hasattr(outcome, "action") else "UNKNOWN"
+                        )
+                        if action_name not in action_stats:
+                            action_stats[action_name] = {
+                                "total": 0,
+                                "success": 0,
+                                "reward_sum": 0.0,
+                            }
+                        action_stats[action_name]["total"] += 1
+                        reward = (
+                            outcome.total_reward
+                            if hasattr(outcome, "total_reward")
+                            else 0.0
+                        )
+                        action_stats[action_name]["reward_sum"] += reward
+                        if reward > 0:
+                            action_stats[action_name]["success"] += 1
+
+                    metrics["multi_objective"]["action_success_rates"] = {
+                        action: {
+                            "total": stats["total"],
+                            "successes": stats["success"],
+                            "rate": round(stats["success"] / stats["total"] * 100, 1)
+                            if stats["total"] > 0
+                            else 0.0,
+                            "avg_reward": round(stats["reward_sum"] / stats["total"], 2)
+                            if stats["total"] > 0
+                            else 0.0,
+                        }
+                        for action, stats in action_stats.items()
+                    }
+
             return metrics
 
         except Exception as e:

@@ -781,6 +781,102 @@
                 </div>
             </div>
 
+            <!-- Multi-Objective RL Section -->
+            <div id="multi-objective-section" class="personas-section" style="display: none;">
+                <h2>🎯 Multi-Objective RL</h2>
+                <p style="color: #666; margin-bottom: 20px;">Optimizing multiple reward objectives simultaneously</p>
+
+                <!-- Objective Weights -->
+                <div style="margin-bottom: 30px; background: #f8f9fa; border-radius: 12px; padding: 20px;">
+                    <h3 style="color: #667eea; font-size: 16px; margin-bottom: 15px;">⚖️ Reward Weights</h3>
+                    <div id="objective-weights" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px;">
+                        <div class="metric-card" style="padding: 15px;">
+                            <h3 style="font-size: 11px;">Engagement</h3>
+                            <div class="value" id="weight-engagement" style="font-size: 24px;">0.25</div>
+                        </div>
+                        <div class="metric-card" style="padding: 15px;">
+                            <h3 style="font-size: 11px;">Quality</h3>
+                            <div class="value" id="weight-quality" style="font-size: 24px;">0.25</div>
+                        </div>
+                        <div class="metric-card" style="padding: 15px;">
+                            <h3 style="font-size: 11px;">Affinity</h3>
+                            <div class="value" id="weight-affinity" style="font-size: 24px;">0.25</div>
+                        </div>
+                        <div class="metric-card" style="padding: 15px;">
+                            <h3 style="font-size: 11px;">Curiosity</h3>
+                            <div class="value" id="weight-curiosity" style="font-size: 24px;">0.25</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Radar Chart and Pareto Frontier -->
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <h2>🕸️ Objective Balance (Radar)</h2>
+                        <div class="chart-container">
+                            <canvas id="morlRadarChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2>📊 Pareto Frontier</h2>
+                        <div class="chart-container">
+                            <canvas id="paretoChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Per-Objective History Charts -->
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <h2>📈 Engagement History</h2>
+                        <div class="chart-container">
+                            <canvas id="engagementChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2>📈 Quality History</h2>
+                        <div class="chart-container">
+                            <canvas id="qualityChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2>📈 Affinity History</h2>
+                        <div class="chart-container">
+                            <canvas id="affinityChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h2>📈 Curiosity History</h2>
+                        <div class="chart-container">
+                            <canvas id="curiosityChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Success Rate by Action Type -->
+                <div class="config-section" style="margin-top: 30px;">
+                    <h2>🎯 Success Rate by Action Type</h2>
+                    <div id="action-success-table" style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #f8f9fa;">
+                                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e0e0e0;">Action</th>
+                                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e0e0e0;">Total</th>
+                                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e0e0e0;">Successes</th>
+                                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e0e0e0;">Success Rate</th>
+                                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #e0e0e0;">Avg Reward</th>
+                                </tr>
+                            </thead>
+                            <tbody id="action-success-tbody">
+                                <tr>
+                                    <td colspan="5" style="padding: 20px; text-align: center; color: #666;">No data available</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <div class="personas-section">
                 <h2>🧠 RL Learning Details</h2>
                 <div id="rl-details" class="personas-grid">
@@ -883,7 +979,13 @@
         let rlStatesChart = null;
         let rlLossChart = null;  // Loss curve chart for DQN
         let rlQHistogram = null;  // Q-value histogram for DQN
-        
+        let morlRadarChart = null;  // Multi-objective radar chart
+        let paretoChart = null;  // Pareto frontier chart
+        let engagementChart = null;  // Engagement history chart
+        let qualityChart = null;  // Quality history chart
+        let affinityChart = null;  // Affinity history chart
+        let curiosityChart = null;  // Curiosity history chart
+
         // Initialize Charts
         function initCharts() {
             // Message Volume Chart
@@ -1060,6 +1162,190 @@
                             }
                         }
                     }
+                });
+            }
+
+            // Multi-Objective RL Radar Chart
+            const morlRadarCtx = document.getElementById('morlRadarChart');
+            if (morlRadarCtx) {
+                morlRadarChart = new Chart(morlRadarCtx, {
+                    type: 'radar',
+                    data: {
+                        labels: ['Engagement', 'Quality', 'Affinity', 'Curiosity'],
+                        datasets: [{
+                            label: 'Current Values',
+                            data: [0, 0, 0, 0],
+                            backgroundColor: 'rgba(102, 126, 234, 0.2)',
+                            borderColor: 'rgba(102, 126, 234, 1)',
+                            borderWidth: 2,
+                            pointBackgroundColor: 'rgba(102, 126, 234, 1)',
+                            pointBorderColor: '#fff',
+                            pointHoverBackgroundColor: '#fff',
+                            pointHoverBorderColor: 'rgba(102, 126, 234, 1)'
+                        }, {
+                            label: 'Weights',
+                            data: [0.25, 0.25, 0.25, 0.25],
+                            backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                            borderColor: 'rgba(76, 175, 80, 1)',
+                            borderWidth: 2,
+                            borderDash: [5, 5],
+                            pointBackgroundColor: 'rgba(76, 175, 80, 1)',
+                            pointBorderColor: '#fff',
+                            pointHoverBackgroundColor: '#fff',
+                            pointHoverBorderColor: 'rgba(76, 175, 80, 1)'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom' }
+                        },
+                        scales: {
+                            r: {
+                                beginAtZero: true,
+                                max: 5,
+                                min: -5,
+                                ticks: {
+                                    stepSize: 2.5
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Pareto Frontier Scatter Chart
+            const paretoCtx = document.getElementById('paretoChart');
+            if (paretoCtx) {
+                paretoChart = new Chart(paretoCtx, {
+                    type: 'scatter',
+                    data: {
+                        datasets: [{
+                            label: 'Engagement vs Quality',
+                            data: [],
+                            backgroundColor: 'rgba(102, 126, 234, 0.6)',
+                            borderColor: 'rgba(102, 126, 234, 1)',
+                            borderWidth: 1,
+                            pointRadius: 4
+                        }, {
+                            label: 'Affinity vs Curiosity',
+                            data: [],
+                            backgroundColor: 'rgba(76, 175, 80, 0.6)',
+                            borderColor: 'rgba(76, 175, 80, 1)',
+                            borderWidth: 1,
+                            pointRadius: 4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom' }
+                        },
+                        scales: {
+                            x: {
+                                title: { display: true, text: 'Objective Value' },
+                                beginAtZero: false,
+                                min: -5,
+                                max: 5
+                            },
+                            y: {
+                                title: { display: true, text: 'Objective Value' },
+                                beginAtZero: false,
+                                min: -5,
+                                max: 5
+                            }
+                        }
+                    }
+                });
+            }
+
+            // Per-Objective History Charts
+            const objectiveChartOptions = {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { display: false },
+                    y: { beginAtZero: false, min: -5, max: 5 }
+                },
+                elements: { point: { radius: 0 } }
+            };
+
+            const engagementCtx = document.getElementById('engagementChart');
+            if (engagementCtx) {
+                engagementChart = new Chart(engagementCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Engagement',
+                            data: [],
+                            borderColor: '#667eea',
+                            backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: objectiveChartOptions
+                });
+            }
+
+            const qualityCtx = document.getElementById('qualityChart');
+            if (qualityCtx) {
+                qualityChart = new Chart(qualityCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Quality',
+                            data: [],
+                            borderColor: '#4caf50',
+                            backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: objectiveChartOptions
+                });
+            }
+
+            const affinityCtx = document.getElementById('affinityChart');
+            if (affinityCtx) {
+                affinityChart = new Chart(affinityCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Affinity',
+                            data: [],
+                            borderColor: '#ff9800',
+                            backgroundColor: 'rgba(255, 152, 0, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: objectiveChartOptions
+                });
+            }
+
+            const curiosityCtx = document.getElementById('curiosityChart');
+            if (curiosityCtx) {
+                curiosityChart = new Chart(curiosityCtx, {
+                    type: 'line',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Curiosity',
+                            data: [],
+                            borderColor: '#9c27b0',
+                            backgroundColor: 'rgba(156, 39, 176, 0.1)',
+                            fill: true,
+                            tension: 0.4
+                        }]
+                    },
+                    options: objectiveChartOptions
                 });
             }
         }
@@ -1301,6 +1587,114 @@
             } else {
                 document.getElementById('rl-details').innerHTML =
                     '<div class="loading">No learning data yet. Interact with the bot to start learning!</div>';
+            }
+
+            // Update multi-objective metrics
+            if (rl.multi_objective && rl.multi_objective.enabled) {
+                updateMultiObjectiveMetrics(rl.multi_objective);
+            } else {
+                document.getElementById('multi-objective-section').style.display = 'none';
+            }
+        }
+
+        // Update Multi-Objective RL Metrics
+        function updateMultiObjectiveMetrics(morl) {
+            // Show the section
+            document.getElementById('multi-objective-section').style.display = 'block';
+
+            // Update weights display
+            if (morl.weights) {
+                document.getElementById('weight-engagement').textContent = (morl.weights.engagement || 0.25).toFixed(2);
+                document.getElementById('weight-quality').textContent = (morl.weights.quality || 0.25).toFixed(2);
+                document.getElementById('weight-affinity').textContent = (morl.weights.affinity || 0.25).toFixed(2);
+                document.getElementById('weight-curiosity').textContent = (morl.weights.curiosity || 0.25).toFixed(2);
+            }
+
+            // Update radar chart
+            if (morlRadarChart && morl.objective_values) {
+                morlRadarChart.data.datasets[0].data = [
+                    morl.objective_values.engagement || 0,
+                    morl.objective_values.quality || 0,
+                    morl.objective_values.affinity || 0,
+                    morl.objective_values.curiosity || 0
+                ];
+                if (morl.weights) {
+                    morlRadarChart.data.datasets[1].data = [
+                        (morl.weights.engagement || 0.25) * 10 - 2.5,
+                        (morl.weights.quality || 0.25) * 10 - 2.5,
+                        (morl.weights.affinity || 0.25) * 10 - 2.5,
+                        (morl.weights.curiosity || 0.25) * 10 - 2.5
+                    ];
+                }
+                morlRadarChart.update();
+            }
+
+            // Update Pareto frontier chart
+            if (paretoChart && morl.pareto_frontier && morl.pareto_frontier.length > 0) {
+                const engagementQuality = morl.pareto_frontier.map(p => ({
+                    x: p.engagement || 0,
+                    y: p.quality || 0
+                }));
+                const affinityCuriosity = morl.pareto_frontier.map(p => ({
+                    x: p.affinity || 0,
+                    y: p.curiosity || 0
+                }));
+                paretoChart.data.datasets[0].data = engagementQuality;
+                paretoChart.data.datasets[1].data = affinityCuriosity;
+                paretoChart.update();
+            }
+
+            // Update objective history charts
+            if (morl.objective_history) {
+                const history = morl.objective_history;
+                const labels = history.engagement ? history.engagement.map((_, i) => i) : [];
+
+                if (engagementChart && history.engagement) {
+                    engagementChart.data.labels = labels;
+                    engagementChart.data.datasets[0].data = history.engagement;
+                    engagementChart.update();
+                }
+                if (qualityChart && history.quality) {
+                    qualityChart.data.labels = labels;
+                    qualityChart.data.datasets[0].data = history.quality;
+                    qualityChart.update();
+                }
+                if (affinityChart && history.affinity) {
+                    affinityChart.data.labels = labels;
+                    affinityChart.data.datasets[0].data = history.affinity;
+                    affinityChart.update();
+                }
+                if (curiosityChart && history.curiosity) {
+                    curiosityChart.data.labels = labels;
+                    curiosityChart.data.datasets[0].data = history.curiosity;
+                    curiosityChart.update();
+                }
+            }
+
+            // Update action success rate table
+            const tbody = document.getElementById('action-success-tbody');
+            if (tbody && morl.action_success_rates) {
+                const actions = Object.entries(morl.action_success_rates);
+                if (actions.length > 0) {
+                    tbody.innerHTML = actions.map(([action, stats]) => `
+                        <tr style="border-bottom: 1px solid #e0e0e0;">
+                            <td style="padding: 12px; font-weight: 600; color: #333;">${action}</td>
+                            <td style="padding: 12px; text-align: center; color: #666;">${stats.total}</td>
+                            <td style="padding: 12px; text-align: center; color: #666;">${stats.successes}</td>
+                            <td style="padding: 12px; text-align: center;">
+                                <span style="display: inline-block; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600;
+                                    ${stats.rate >= 70 ? 'background: #4caf50; color: white;' :
+                                      stats.rate >= 40 ? 'background: #ff9800; color: white;' :
+                                      'background: #f44336; color: white;'}">
+                                    ${stats.rate}%
+                                </span>
+                            </td>
+                            <td style="padding: 12px; text-align: center; color: #667eea; font-weight: 600;">${stats.avg_reward}</td>
+                        </tr>
+                    `).join('');
+                } else {
+                    tbody.innerHTML = '<tr><td colspan="5" style="padding: 20px; text-align: center; color: #666;">No action data available</td></tr>';
+                }
             }
         }
 
