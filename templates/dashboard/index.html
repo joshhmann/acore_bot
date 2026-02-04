@@ -619,6 +619,7 @@
         <nav class="nav-tabs">
             <button class="nav-tab active" data-tab="overview">📊 Overview</button>
             <button class="nav-tab" data-tab="rl">🧠 RL Learning</button>
+            <button class="nav-tab" data-tab="transfer">🔄 Transfer Network</button>
             <button class="nav-tab" data-tab="config">⚙️ Configuration</button>
             <button class="nav-tab" data-tab="providers">🎨 Image Providers</button>
             <button class="nav-tab" data-tab="features">✨ Features</button>
@@ -931,6 +932,81 @@
                 <h2>🧠 RL Learning Details</h2>
                 <div id="rl-details" class="personas-grid">
                     <div class="loading">Loading RL data...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Transfer Network Tab -->
+        <div id="transfer" class="tab-content">
+            <!-- Transfer Status Badge -->
+            <div style="margin-bottom: 20px;">
+                <span id="transfer-status-badge" style="display: inline-block; padding: 8px 16px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 20px; font-size: 14px; font-weight: 600;">
+                    Knowledge Transfers: 0
+                </span>
+            </div>
+
+            <!-- Transfer Metrics -->
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <h3>Total Transfers</h3>
+                    <div class="value" id="transfer-total">0</div>
+                    <div class="change">Knowledge transfers recorded</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Active Personas</h3>
+                    <div class="value" id="transfer-personas">0</div>
+                    <div class="change">In transfer network</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Avg Similarity</h3>
+                    <div class="value" id="transfer-avg-sim">0.00</div>
+                    <div class="change">Mean transfer similarity</div>
+                </div>
+                <div class="metric-card">
+                    <h3>Network Density</h3>
+                    <div class="value" id="transfer-density">0%</div>
+                    <div class="change">Connected persona pairs</div>
+                </div>
+            </div>
+
+            <!-- Network Graph and Similarity Matrix -->
+            <div class="charts-grid">
+                <!-- Network Graph -->
+                <div class="chart-card" style="grid-column: span 2;">
+                    <h2>🕸️ Knowledge Transfer Network</h2>
+                    <p style="color: #666; margin-bottom: 15px; font-size: 13px;">
+                        Interactive network showing knowledge flow between personas. 
+                        Node size = transfer activity, Edge color = similarity (green=high, yellow=medium, red=low)
+                    </p>
+                    <div class="chart-container" style="height: 400px; position: relative;">
+                        <svg id="transferNetworkSvg" width="100%" height="100%" style="border-radius: 8px; background: #f8f9fa;">
+                            <g id="network-edges"></g>
+                            <g id="network-nodes"></g>
+                        </svg>
+                        <div id="network-tooltip" style="position: absolute; display: none; background: rgba(0,0,0,0.8); color: white; padding: 8px 12px; border-radius: 6px; font-size: 12px; pointer-events: none; z-index: 100;"></div>
+                    </div>
+                </div>
+
+                <!-- Similarity Matrix Heatmap -->
+                <div class="chart-card" style="grid-column: span 2;">
+                    <h2>🔥 Similarity Matrix</h2>
+                    <p style="color: #666; margin-bottom: 15px; font-size: 13px;">
+                        Heatmap showing similarity scores between all persona pairs. 
+                        Brighter colors indicate higher similarity.
+                    </p>
+                    <div class="chart-container" style="height: 400px; overflow: auto;">
+                        <div id="similarityMatrixContainer" style="display: flex; flex-direction: column; align-items: center; padding: 20px;">
+                            <div class="loading">No similarity data available</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Transfers Timeline -->
+            <div class="config-section" style="margin-top: 30px;">
+                <h2>📜 Recent Transfer History</h2>
+                <div id="transfer-timeline" style="max-height: 400px; overflow-y: auto;">
+                    <div class="loading">No transfer history available</div>
                 </div>
             </div>
         </div>
@@ -1616,6 +1692,11 @@
             if (data.rl) {
                 updateRLMetrics(data.rl);
             }
+
+            // Update transfer network metrics
+            if (data.rl && data.rl.transfer_network) {
+                updateTransferNetwork(data.rl.transfer_network);
+            }
         }
         
         // Update RL Metrics
@@ -1996,7 +2077,303 @@
 
             return distribution;
         }
-        
+
+        // Update Transfer Network Metrics
+        function updateTransferNetwork(transferData) {
+            if (!transferData || !transferData.enabled) {
+                return;
+            }
+
+            const transfers = transferData.transfers || [];
+            const personas = transferData.personas || [];
+            const similarityMatrix = transferData.similarity_matrix || {};
+
+            // Update metric cards
+            document.getElementById('transfer-total').textContent = transfers.length;
+            document.getElementById('transfer-personas').textContent = personas.length;
+            document.getElementById('transfer-status-badge').textContent = `Knowledge Transfers: ${transfers.length}`;
+
+            // Calculate average similarity
+            let totalSim = 0;
+            let simCount = 0;
+            Object.values(similarityMatrix).forEach(row => {
+                Object.values(row).forEach(val => {
+                    if (val > 0 && val < 1) {
+                        totalSim += val;
+                        simCount++;
+                    }
+                });
+            });
+            const avgSim = simCount > 0 ? (totalSim / simCount).toFixed(2) : '0.00';
+            document.getElementById('transfer-avg-sim').textContent = avgSim;
+
+            // Calculate network density
+            const maxPossibleEdges = personas.length * (personas.length - 1);
+            const actualEdges = transfers.length;
+            const density = maxPossibleEdges > 0 ? Math.round((actualEdges / maxPossibleEdges) * 100) : 0;
+            document.getElementById('transfer-density').textContent = density + '%';
+
+            // Render network graph
+            renderTransferNetwork(personas, transfers, similarityMatrix);
+
+            // Render similarity matrix
+            renderSimilarityMatrix(personas, similarityMatrix);
+
+            // Render transfer timeline
+            renderTransferTimeline(transfers);
+        }
+
+        // Render Transfer Network Graph (SVG-based)
+        function renderTransferNetwork(personas, transfers, similarityMatrix) {
+            const svg = document.getElementById('transferNetworkSvg');
+            const edgesGroup = document.getElementById('network-edges');
+            const nodesGroup = document.getElementById('network-nodes');
+            const tooltip = document.getElementById('network-tooltip');
+
+            if (!svg || !edgesGroup || !nodesGroup) return;
+
+            // Clear existing
+            edgesGroup.innerHTML = '';
+            nodesGroup.innerHTML = '';
+
+            if (personas.length === 0) {
+                svg.innerHTML = '<text x="50%" y="50%" text-anchor="middle" fill="#999" font-size="14">No personas in network</text>';
+                return;
+            }
+
+            const width = svg.clientWidth || 800;
+            const height = svg.clientHeight || 400;
+            const centerX = width / 2;
+            const centerY = height / 2;
+            const radius = Math.min(width, height) / 2 - 60;
+
+            // Calculate node positions (circular layout)
+            const nodePositions = {};
+            const angleStep = (2 * Math.PI) / personas.length;
+
+            personas.forEach((persona, i) => {
+                const angle = i * angleStep - Math.PI / 2;
+                nodePositions[persona] = {
+                    x: centerX + radius * Math.cos(angle),
+                    y: centerY + radius * Math.sin(angle),
+                    angle: angle
+                };
+            });
+
+            // Count transfers per node for sizing
+            const transferCounts = {};
+            personas.forEach(p => transferCounts[p] = 0);
+            transfers.forEach(t => {
+                if (transferCounts[t.source] !== undefined) transferCounts[t.source]++;
+                if (transferCounts[t.target] !== undefined) transferCounts[t.target]++;
+            });
+
+            // Draw edges (transfers)
+            const drawnEdges = new Set();
+            transfers.forEach(transfer => {
+                const sourcePos = nodePositions[transfer.source];
+                const targetPos = nodePositions[transfer.target];
+
+                if (!sourcePos || !targetPos) return;
+
+                const edgeKey = `${transfer.source}-${transfer.target}`;
+                if (drawnEdges.has(edgeKey)) return;
+                drawnEdges.add(edgeKey);
+
+                const similarity = transfer.similarity || 0;
+
+                // Edge color based on similarity
+                let strokeColor;
+                if (similarity >= 0.7) strokeColor = '#4caf50';
+                else if (similarity >= 0.4) strokeColor = '#ff9800';
+                else strokeColor = '#f44336';
+
+                // Edge thickness based on similarity
+                const strokeWidth = 1 + similarity * 4;
+
+                // Create edge line
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', sourcePos.x);
+                line.setAttribute('y1', sourcePos.y);
+                line.setAttribute('x2', targetPos.x);
+                line.setAttribute('y2', targetPos.y);
+                line.setAttribute('stroke', strokeColor);
+                line.setAttribute('stroke-width', strokeWidth);
+                line.setAttribute('opacity', '0.6');
+                line.style.cursor = 'pointer';
+
+                // Edge tooltip
+                line.addEventListener('mouseenter', (e) => {
+                    tooltip.style.display = 'block';
+                    tooltip.innerHTML = `${transfer.source} → ${transfer.target}<br>Similarity: ${(similarity * 100).toFixed(1)}%<br>Components: ${transfer.components?.join(', ') || 'N/A'}`;
+                    tooltip.style.left = (e.pageX + 10) + 'px';
+                    tooltip.style.top = (e.pageY - 30) + 'px';
+                });
+                line.addEventListener('mouseleave', () => {
+                    tooltip.style.display = 'none';
+                });
+
+                edgesGroup.appendChild(line);
+
+                // Draw arrowhead
+                const angle = Math.atan2(targetPos.y - sourcePos.y, targetPos.x - sourcePos.x);
+                const arrowLength = 10;
+                const arrowAngle = Math.PI / 6;
+                const nodeRadius = 20 + Math.min(transferCounts[transfer.target] * 2, 15);
+                const arrowX = targetPos.x - nodeRadius * Math.cos(angle);
+                const arrowY = targetPos.y - nodeRadius * Math.sin(angle);
+
+                const arrow = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+                const x1 = arrowX - arrowLength * Math.cos(angle - arrowAngle);
+                const y1 = arrowY - arrowLength * Math.sin(angle - arrowAngle);
+                const x2 = arrowX - arrowLength * Math.cos(angle + arrowAngle);
+                const y2 = arrowY - arrowLength * Math.sin(angle + arrowAngle);
+                arrow.setAttribute('points', `${arrowX},${arrowY} ${x1},${y1} ${x2},${y2}`);
+                arrow.setAttribute('fill', strokeColor);
+                arrow.setAttribute('opacity', '0.8');
+                edgesGroup.appendChild(arrow);
+            });
+
+            // Draw nodes (personas)
+            personas.forEach(persona => {
+                const pos = nodePositions[persona];
+                const count = transferCounts[persona] || 0;
+                const nodeRadius = 20 + Math.min(count * 2, 15);
+
+                // Node circle
+                const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                circle.setAttribute('cx', pos.x);
+                circle.setAttribute('cy', pos.y);
+                circle.setAttribute('r', nodeRadius);
+                circle.setAttribute('fill', '#667eea');
+                circle.setAttribute('stroke', '#764ba2');
+                circle.setAttribute('stroke-width', '3');
+                circle.style.cursor = 'pointer';
+
+                // Node tooltip
+                circle.addEventListener('mouseenter', (e) => {
+                    tooltip.style.display = 'block';
+                    tooltip.innerHTML = `<strong>${persona}</strong><br>Transfers: ${count}`;
+                    tooltip.style.left = (e.pageX + 10) + 'px';
+                    tooltip.style.top = (e.pageY - 30) + 'px';
+                });
+                circle.addEventListener('mouseleave', () => {
+                    tooltip.style.display = 'none';
+                });
+
+                nodesGroup.appendChild(circle);
+
+                // Node label
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', pos.x);
+                label.setAttribute('y', pos.y + nodeRadius + 15);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('fill', '#333');
+                label.setAttribute('font-size', '11');
+                label.setAttribute('font-weight', '600');
+                label.textContent = persona.length > 12 ? persona.substring(0, 10) + '...' : persona;
+                nodesGroup.appendChild(label);
+            });
+        }
+
+        // Render Similarity Matrix Heatmap
+        function renderSimilarityMatrix(personas, similarityMatrix) {
+            const container = document.getElementById('similarityMatrixContainer');
+            if (!container) return;
+
+            if (personas.length === 0) {
+                container.innerHTML = '<div class="loading">No similarity data available</div>';
+                return;
+            }
+
+            const cellSize = 40;
+            const labelWidth = 100;
+            const totalWidth = labelWidth + personas.length * cellSize;
+            const totalHeight = labelWidth + personas.length * cellSize;
+
+            let html = `<svg width="${totalWidth}" height="${totalHeight}" style="font-family: sans-serif;">`;
+
+            // Column labels
+            personas.forEach((persona, i) => {
+                const x = labelWidth + i * cellSize + cellSize / 2;
+                const label = persona.length > 8 ? persona.substring(0, 6) + '..' : persona;
+                html += `<text x="${x}" y="${labelWidth - 10}" text-anchor="middle" font-size="10" fill="#666" transform="rotate(-45, ${x}, ${labelWidth - 10})">${label}</text>`;
+            });
+
+            // Row labels and cells
+            personas.forEach((rowPersona, row) => {
+                const y = labelWidth + row * cellSize + cellSize / 2 + 4;
+                const label = rowPersona.length > 10 ? rowPersona.substring(0, 8) + '..' : rowPersona;
+                html += `<text x="${labelWidth - 10}" y="${y}" text-anchor="end" font-size="10" fill="#666">${label}</text>`;
+
+                personas.forEach((colPersona, col) => {
+                    const similarity = similarityMatrix[rowPersona]?.[colPersona] || 0;
+                    const x = labelWidth + col * cellSize;
+                    const cellY = labelWidth + row * cellSize;
+
+                    // Color intensity based on similarity
+                    const intensity = Math.round(similarity * 255);
+                    let fill;
+                    if (similarity >= 0.7) fill = `rgba(76, 175, 80, ${similarity})`;
+                    else if (similarity >= 0.4) fill = `rgba(255, 152, 0, ${similarity})`;
+                    else fill = `rgba(244, 67, 54, ${similarity})`;
+
+                    html += `<rect x="${x}" y="${cellY}" width="${cellSize}" height="${cellSize}" fill="${fill}" stroke="#fff" stroke-width="1" />`;
+
+                    // Show value for high similarities
+                    if (similarity > 0.3) {
+                        const textColor = similarity > 0.5 ? '#fff' : '#333';
+                        html += `<text x="${x + cellSize/2}" y="${cellY + cellSize/2 + 4}" text-anchor="middle" font-size="9" fill="${textColor}">${similarity.toFixed(2)}</text>`;
+                    }
+                });
+            });
+
+            html += '</svg>';
+            container.innerHTML = html;
+        }
+
+        // Render Transfer Timeline
+        function renderTransferTimeline(transfers) {
+            const container = document.getElementById('transfer-timeline');
+            if (!container) return;
+
+            if (transfers.length === 0) {
+                container.innerHTML = '<div class="loading">No transfer history available</div>';
+                return;
+            }
+
+            // Sort by timestamp (newest first)
+            const sortedTransfers = [...transfers].sort((a, b) => {
+                return new Date(b.timestamp || 0) - new Date(a.timestamp || 0);
+            });
+
+            const html = sortedTransfers.slice(0, 20).map((transfer, i) => {
+                const date = transfer.timestamp ? new Date(transfer.timestamp).toLocaleString() : 'Unknown';
+                const similarity = (transfer.similarity || 0) * 100;
+                let simColor;
+                if (similarity >= 70) simColor = '#4caf50';
+                else if (similarity >= 40) simColor = '#ff9800';
+                else simColor = '#f44336';
+
+                return `
+                    <div style="display: flex; align-items: center; padding: 12px; border-bottom: 1px solid #e0e0e0; ${i % 2 === 0 ? 'background: #f8f9fa;' : ''}">
+                        <div style="flex: 0 0 120px; font-weight: 600; color: #667eea;">${transfer.source}</div>
+                        <div style="flex: 0 0 40px; text-align: center; color: #999;">→</div>
+                        <div style="flex: 0 0 120px; font-weight: 600; color: #764ba2;">${transfer.target}</div>
+                        <div style="flex: 0 0 100px; text-align: center;">
+                            <span style="display: inline-block; padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background: ${simColor}; color: white;">
+                                ${similarity.toFixed(0)}%
+                            </span>
+                        </div>
+                        <div style="flex: 1; color: #666; font-size: 12px;">${date}</div>
+                        <div style="flex: 0 0 150px; color: #999; font-size: 11px;">${transfer.components?.join(', ') || 'N/A'}</div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = html;
+        }
+
         // Update Message Chart
         function updateMessageChart() {
             messageChart.data.labels = messageHistory.map(h => h.time);

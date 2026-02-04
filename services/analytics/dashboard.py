@@ -1146,11 +1146,137 @@ ANALYTICS_API_KEY=change_this_in_production
                         for action, stats in action_stats.items()
                     }
 
+            # Add transfer network metrics
+            metrics["transfer_network"] = await self._collect_transfer_metrics()
+
             return metrics
 
         except Exception as e:
             logger.error(f"Error collecting RL metrics: {e}")
             return {"enabled": False, "error": str(e)}
+
+    async def _collect_transfer_metrics(self) -> Dict:
+        """Collect knowledge transfer metrics between personas.
+
+        Loads transfer history from data/rl_transfers.json and computes
+        similarity matrix for all persona pairs.
+
+        Returns:
+            Dict with transfers, personas list, and similarity matrix
+        """
+        try:
+            transfer_log_path = Path("data/rl_transfers.json")
+
+            # Load transfer history
+            transfers = []
+            if transfer_log_path.exists():
+                try:
+                    with open(transfer_log_path, "r", encoding="utf-8") as f:
+                        transfers = json.load(f)
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.warning(f"Failed to load transfer log: {e}")
+
+            # Get list of all personas from characters directory
+            persona_dir = Path("prompts/characters")
+            personas = []
+            if persona_dir.exists():
+                for file_path in persona_dir.glob("*.json"):
+                    try:
+                        with open(file_path, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            # Handle different JSON structures
+                            if "data" in data:
+                                data = data["data"]
+                            persona_id = data.get("id", file_path.stem)
+                            personas.append(persona_id)
+                    except (json.JSONDecodeError, IOError):
+                        continue
+
+            # Also include personas from transfers that might not have files
+            for transfer in transfers:
+                if transfer.get("source_id") not in personas:
+                    personas.append(transfer["source_id"])
+                if transfer.get("target_id") not in personas:
+                    personas.append(transfer["target_id"])
+
+            personas = sorted(list(set(personas)))
+
+            # Compute similarity matrix for all persona pairs
+            similarity_matrix = {}
+
+            # Try to import KnowledgeTransfer for similarity computation
+            try:
+                from services.persona.rl.transfer import KnowledgeTransfer
+
+                kt = KnowledgeTransfer()
+
+                for source in personas:
+                    similarity_matrix[source] = {}
+                    for target in personas:
+                        if source == target:
+                            similarity_matrix[source][target] = 1.0
+                        else:
+                            try:
+                                similarity = kt.compute_persona_similarity(
+                                    source, target
+                                )
+                                similarity_matrix[source][target] = round(similarity, 3)
+                            except (FileNotFoundError, ValueError):
+                                # Persona file not found, use 0 similarity
+                                similarity_matrix[source][target] = 0.0
+            except ImportError:
+                logger.warning(
+                    "KnowledgeTransfer not available, using transfer-based similarity"
+                )
+                # Fallback: compute similarity based on transfer history
+                for source in personas:
+                    similarity_matrix[source] = {}
+                    for target in personas:
+                        if source == target:
+                            similarity_matrix[source][target] = 1.0
+                        else:
+                            # Find transfers between these personas
+                            sim = 0.0
+                            for transfer in transfers:
+                                if (
+                                    transfer.get("source_id") == source
+                                    and transfer.get("target_id") == target
+                                ):
+                                    sim = max(sim, transfer.get("similarity", 0.0))
+                            similarity_matrix[source][target] = round(sim, 3)
+
+            # Format transfers for frontend
+            formatted_transfers = []
+            for transfer in transfers:
+                formatted_transfers.append(
+                    {
+                        "source": transfer.get("source_id", ""),
+                        "target": transfer.get("target_id", ""),
+                        "similarity": transfer.get("similarity", 0.0),
+                        "timestamp": transfer.get("timestamp", ""),
+                        "components": transfer.get("components_transferred", []),
+                        "weight_ratio": transfer.get("weight_transfer_ratio", 0.0),
+                        "strategy_ratio": transfer.get("strategy_transfer_ratio", 0.0),
+                    }
+                )
+
+            return {
+                "enabled": True,
+                "transfers": formatted_transfers,
+                "personas": personas,
+                "similarity_matrix": similarity_matrix,
+                "total_transfers": len(formatted_transfers),
+            }
+
+        except Exception as e:
+            logger.error(f"Error collecting transfer metrics: {e}")
+            return {
+                "enabled": False,
+                "error": str(e),
+                "transfers": [],
+                "personas": [],
+                "similarity_matrix": {},
+            }
 
     def _get_default_html(self) -> str:
         """Get default dashboard HTML if template doesn't exist."""
