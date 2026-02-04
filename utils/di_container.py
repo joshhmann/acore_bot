@@ -275,17 +275,9 @@ def create_bot_services_container() -> DIContainer:
         ),
     )
 
-    # STT Service (Whisper)
-    if Config.STT_PROVIDER == "whisper":
-        from services.whisper_stt import WhisperSTTService
-
-        c.register(
-            "stt",
-            lambda: WhisperSTTService(
-                model_size=Config.WHISPER_MODEL_SIZE,
-                language="en",
-            ),
-        )
+    # STT Service (Parakeet API - Whisper not implemented)
+    # Note: STT services are initialized in services/core/factory.py
+    # This section is reserved for future DI container support
 
     # RVC Service (if enabled)
     if Config.RVC_ENABLED:
@@ -314,22 +306,27 @@ def create_bot_services_container() -> DIContainer:
 
     # RAG Service (if enabled)
     if Config.RAG_ENABLED:
-        from services.rag import RAGService
+        from services.memory.rag import RAGService
 
         c.register(
             "rag",
             lambda: RAGService(
-                knowledge_dir=Config.RAG_KNOWLEDGE_DIR,
-                collection_name=Config.RAG_COLLECTION_NAME,
+                documents_path=str(Config.RAG_DOCUMENTS_PATH),
+                vector_store_path=str(Config.RAG_VECTOR_STORE),
+                top_k=Config.RAG_TOP_K,
             ),
         )
 
     # LLM Fallback Manager (if enabled)
     if Config.LLM_FALLBACK_ENABLED and Config.LLM_FALLBACK_MODELS:
-        from services.llm_fallback import LLMFallbackManager, ModelConfig
+        from services.llm.fallback import LLMFallbackManager, ModelConfig
 
         fallback_models = []
-        for i, model_spec in enumerate(Config.LLM_FALLBACK_MODELS.split(",")):
+        # LLM_FALLBACK_MODELS is already a list
+        fallback_models_list = Config.LLM_FALLBACK_MODELS
+        if isinstance(fallback_models_list, str):
+            fallback_models_list = fallback_models_list.split(",")
+        for i, model_spec in enumerate(fallback_models_list):
             parts = model_spec.strip().split(":")
             model_name = parts[0].strip()
             cost_tier = parts[1].strip() if len(parts) > 1 else "free"

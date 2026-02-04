@@ -86,3 +86,20 @@ class VoiceListenerConfig(BaseConfig):
     BOT_TRIGGER_WORDS: list = BaseConfig._get_env_list(
         "VOICE_BOT_TRIGGER_WORDS", ["bot", "assistant", "hey", "help", "question"]
     )
+
+
+class LuxTTSConfig(BaseConfig):
+    """LuxTTS configuration."""
+
+    API_URL: str = BaseConfig._get_env("LUXTTS_API_URL", "http://localhost:9999")
+    VOICE: str = BaseConfig._get_env("LUXTTS_VOICE", "default")
+    SPEED: float = BaseConfig._get_env_float("LUXTTS_SPEED", 1.0)
+
+
+class Qwen3TTSConfig(BaseConfig):
+    """Qwen3-TTS configuration."""
+
+    API_URL: str = BaseConfig._get_env("QWEN3TTS_API_URL", "http://localhost:8880")
+    VOICE: str = BaseConfig._get_env("QWEN3TTS_VOICE", "Vivian")
+    LANGUAGE: str = BaseConfig._get_env("QWEN3TTS_LANGUAGE", "Auto")
+    SPEED: float = BaseConfig._get_env_float("QWEN3TTS_SPEED", 1.0)

@@ -22,6 +22,26 @@ class PersonaConfig(BaseConfig):
     )
     SYSTEM_PROMPT: str = BaseConfig._get_env("SYSTEM_PROMPT", "")
 
+    # Persona weights for selection
+    WEIGHTS: dict = {}
+
+    # Active personas list
+    ACTIVE_PERSONAS: list = [
+        "dagoth_ur.json",
+        "scav.json",
+        "zenos.json",
+        "maury.json",
+        "hal9000.json",
+        "toad.json",
+        "jc.json",
+        "toadette.json",
+        "joseph_stalin.json",
+        "Biblical_Jesus_Christ.json",
+    ]
+
+    # Global response chance
+    GLOBAL_RESPONSE_CHANCE: float = 1.0
+
 
 class EvolutionConfig(BaseConfig):
     """Character evolution system configuration."""
@@ -33,6 +53,10 @@ class EvolutionConfig(BaseConfig):
     MILESTONES: list = BaseConfig._get_env_int_list(
         "PERSONA_EVOLUTION_MILESTONES", [50, 100, 500, 1000, 5000]
     )
+
+    # Timeouts
+    STICKY_TIMEOUT: int = BaseConfig._get_env_int("PERSONA_STICKY_TIMEOUT", 300)
+    FOLLOWUP_COOLDOWN: int = BaseConfig._get_env_int("PERSONA_FOLLOWUP_COOLDOWN", 300)
 
 
 class ConflictConfig(BaseConfig):

@@ -154,6 +154,7 @@ class OllamaBot(commands.Bot):
             persona_system=self.services.get("persona_system"),
             compiled_persona=self.services.get("compiled_persona"),
             llm_fallback=self.services.get("llm_fallback"),
+            rl_service=self.services.get("rl"),
         )
         await self.add_cog(chat_cog)
 

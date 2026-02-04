@@ -17,6 +17,7 @@ Usage:
 
 import os
 from pathlib import Path
+from typing import Optional
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -53,10 +54,13 @@ from .voice import (
     WhisperConfig,
     ParakeetConfig,
     VoiceListenerConfig,
+    LuxTTSConfig,
+    Qwen3TTSConfig,
 )
 from .rl import RLConfig
 from .analytics import AnalyticsConfig, DashboardConfig
 from .logging import LoggingConfig
+from .agents import AgentConfig
 from .features import (
     MemoryConfig,
     ConversationConfig,
@@ -110,6 +114,8 @@ class Config:
     whisper = WhisperConfig()
     parakeet = ParakeetConfig()
     voice_listener = VoiceListenerConfig()
+    luxtts = LuxTTSConfig()
+    qwen3tts = Qwen3TTSConfig()
 
     rl = RLConfig()
 
@@ -117,6 +123,8 @@ class Config:
     dashboard = DashboardConfig()
 
     logging = LoggingConfig()
+
+    agent = AgentConfig()
 
     memory = MemoryConfig()
     conversation = ConversationConfig()
@@ -165,6 +173,10 @@ class Config:
     OLLAMA_TOP_K = ollama.TOP_K
     OLLAMA_REPEAT_PENALTY = ollama.REPEAT_PENALTY
 
+    # LLM (aliases for backward compatibility with di_container.py)
+    LLM_TEMPERATURE = ollama.TEMPERATURE
+    LLM_MAX_TOKENS = ollama.MAX_TOKENS
+
     # OpenRouter
     OPENROUTER_API_KEY = openrouter.API_KEY
     OPENROUTER_MODEL = openrouter.MODEL
@@ -198,11 +210,16 @@ class Config:
     FRAMEWORK = persona.FRAMEWORK
     SYSTEM_PROMPT_FILE = persona.SYSTEM_PROMPT_FILE
     SYSTEM_PROMPT = persona.SYSTEM_PROMPT
+    PERSONA_WEIGHTS = persona.WEIGHTS
+    ACTIVE_PERSONAS = persona.ACTIVE_PERSONAS
+    GLOBAL_RESPONSE_CHANCE = persona.GLOBAL_RESPONSE_CHANCE
 
     # Evolution
     PERSONA_EVOLUTION_ENABLED = evolution.ENABLED
     PERSONA_EVOLUTION_PATH = evolution.PATH
     PERSONA_EVOLUTION_MILESTONES = evolution.MILESTONES
+    PERSONA_STICKY_TIMEOUT = evolution.STICKY_TIMEOUT
+    PERSONA_FOLLOWUP_COOLDOWN = evolution.FOLLOWUP_COOLDOWN
 
     # Conflicts
     PERSONA_CONFLICTS_ENABLED = conflict.ENABLED
@@ -247,27 +264,44 @@ class Config:
     RAG_IN_CHAT = rag.IN_CHAT
     RAG_RELEVANCE_THRESHOLD = rag.RELEVANCE_THRESHOLD
 
+    # RAG backward compatibility aliases for di_container.py
+    RAG_KNOWLEDGE_DIR = rag.DOCUMENTS_PATH
+    RAG_COLLECTION_NAME = BaseConfig._get_env("RAG_COLLECTION_NAME", "default")
+
     # Hybrid Search
     RAG_HYBRID_SEARCH_ENABLED = hybrid_search.ENABLED
     RAG_KEYWORD_WEIGHT = hybrid_search.KEYWORD_WEIGHT
     RAG_SEMANTIC_WEIGHT = hybrid_search.SEMANTIC_WEIGHT
     RAG_KEYWORD_MATCH_THRESHOLD = hybrid_search.KEYWORD_MATCH_THRESHOLD
+    RAG_BM25_ENABLED = hybrid_search.BM25_ENABLED
+    RAG_BM25_K1 = hybrid_search.BM25_K1
+    RAG_BM25_B = hybrid_search.BM25_B
+    RAG_RRF_K = hybrid_search.RRF_K
+    RAG_VECTOR_WEIGHT = hybrid_search.VECTOR_WEIGHT
 
     # Reranker
     RAG_RERANKER_ENABLED = reranker.ENABLED
     RAG_RERANKER_MODEL = reranker.MODEL
     RAG_RERANKER_TOP_K_MULTIPLIER = reranker.TOP_K_MULTIPLIER
     RAG_RERANKER_BATCH_SIZE = reranker.BATCH_SIZE
+    RAG_RERANK_BATCH_SIZE = reranker.BATCH_SIZE
+    RAG_RERANK_INITIAL_K = reranker.INITIAL_K
+    RAG_RERANKER_CACHE_SIZE = reranker.CACHE_SIZE
 
     # Realtime Indexing
     RAG_REALTIME_INDEXING_ENABLED = realtime_indexing.ENABLED
+    RAG_REALTIME_INDEXING = realtime_indexing.ENABLED
     RAG_INDEXING_DEBOUNCE_SECONDS = realtime_indexing.DEBOUNCE_SECONDS
+    RAG_INDEXING_BATCH_SIZE = realtime_indexing.BATCH_SIZE
+    RAG_INDEXING_QUEUE_SIZE = realtime_indexing.QUEUE_SIZE
     RAG_SUPPORTED_EXTENSIONS = realtime_indexing.SUPPORTED_EXTENSIONS
 
     # Query Processing
     RAG_QUERY_EXPANSION_ENABLED = query_processing.EXPANSION_ENABLED
+    RAG_QUERY_EXPANSION = query_processing.EXPANSION
     RAG_QUERY_EXPANSION_TECHNIQUES = query_processing.EXPANSION_TECHNIQUES
     RAG_MAX_QUERY_EXPANSIONS = query_processing.MAX_EXPANSIONS
+    RAG_SUB_QUERY_COUNT = query_processing.SUB_QUERY_COUNT
 
     # User Profiles
     USER_PROFILES_ENABLED = user_profiles.ENABLED
@@ -326,6 +360,17 @@ class Config:
     # Voice Listener
     VOICE_ENERGY_THRESHOLD = voice_listener.ENERGY_THRESHOLD
     VOICE_BOT_TRIGGER_WORDS = voice_listener.BOT_TRIGGER_WORDS
+
+    # LuxTTS
+    LUXTTS_API_URL = luxtts.API_URL
+    LUXTTS_VOICE = luxtts.VOICE
+    LUXTTS_SPEED = luxtts.SPEED
+
+    # Qwen3TTS
+    QWEN3TTS_API_URL = qwen3tts.API_URL
+    QWEN3TTS_VOICE = qwen3tts.VOICE
+    QWEN3TTS_LANGUAGE = qwen3tts.LANGUAGE
+    QWEN3TTS_SPEED = qwen3tts.SPEED
 
     # RL
     RL_ENABLED = rl.ENABLED
@@ -430,12 +475,63 @@ class Config:
     DYNAMIC_MAX_TOKENS = performance.DYNAMIC_MAX_TOKENS
     SERVICE_CLEANUP_TIMEOUT = performance.SERVICE_CLEANUP_TIMEOUT
 
+    # Agent Orchestration
+    AGENT_ROUTING_ENABLED = agent.ROUTING_ENABLED
+    AGENT_ROUTING_STRATEGY = agent.ROUTING_STRATEGY
+    AGENT_MIN_CONFIDENCE = agent.MIN_CONFIDENCE
+    AGENT_CHAINING_ENABLED = agent.CHAINING_ENABLED
+    AGENT_MAX_CHAIN_LENGTH = agent.MAX_CHAIN_LENGTH
+    AGENT_HEALTH_CHECK_INTERVAL = agent.HEALTH_CHECK_INTERVAL
+    AGENT_TIMEOUT_SECONDS = agent.TIMEOUT_SECONDS
+
+    # Paths (backward compatibility)
+    DATA_DIR: Path = Path("./data")
+    CHAT_HISTORY_DIR: Path = DATA_DIR / "chat_history"
+    VOICE_MODELS_DIR: Path = DATA_DIR / "voice_models"
+    TEMP_DIR: Path = DATA_DIR / "temp"
+    SUMMARY_DIR: Path = DATA_DIR / "conversation_summaries"
+
+    # Image Generation (backward compatibility)
+    IMAGE_GENERATION_ENABLED: bool = (
+        os.getenv("IMAGE_GENERATION_ENABLED", "false").lower() == "true"
+    )
+    IMAGE_GENERATION_API_KEY: str = os.getenv("IMAGE_GENERATION_API_KEY", "")
+    IMAGE_PROVIDER: str = os.getenv("IMAGE_PROVIDER", "openai").lower()
+    IMAGE_SIZE_DEFAULT: str = os.getenv("IMAGE_SIZE_DEFAULT", "1024x1024")
+    IMAGE_QUALITY_DEFAULT: str = os.getenv("IMAGE_QUALITY_DEFAULT", "standard")
+    IMAGE_STYLE_DEFAULT: str = os.getenv("IMAGE_STYLE_DEFAULT", "vivid")
+    COMFYUI_SERVER_URL: str = os.getenv("COMFYUI_SERVER_URL", "http://127.0.0.1:8188")
+    COMFYUI_WORKFLOW_ID: Optional[str] = os.getenv("COMFYUI_WORKFLOW_ID")
+    LITELLM_API_KEY: str = os.getenv("LITELLM_API_KEY", "dummy")
+    LITELLM_BASE_URL: str = os.getenv("LITELLM_BASE_URL", "")
+    LITELLM_IMAGE_MODEL: str = os.getenv("LITELLM_IMAGE_MODEL", "dall-e-3")
+    KOBOLDCPP_URL: str = os.getenv("KOBOLDCPP_URL", "http://127.0.0.1:5001")
+    KOBOLDCPP_STEPS: int = int(os.getenv("KOBOLDCPP_STEPS", "30"))
+    KOBOLDCPP_CFG_SCALE: float = float(os.getenv("KOBOLDCPP_CFG_SCALE", "7.0"))
+    KOBOLDCPP_SAMPLER: str = os.getenv("KOBOLDCPP_SAMPLER", "Euler a")
+
+    # Code Execution (backward compatibility)
+    CODE_EXECUTION_ENABLED: bool = (
+        os.getenv("CODE_EXECUTION_ENABLED", "false").lower() == "true"
+    )
+    CODE_EXECUTION_TIMEOUT: int = int(os.getenv("CODE_EXECUTION_TIMEOUT", "30"))
+    CODE_SANDBOX_ENABLED: bool = (
+        os.getenv("CODE_SANDBOX_ENABLED", "true").lower() == "true"
+    )
+    CODE_MAX_OUTPUT_SIZE: int = int(os.getenv("CODE_MAX_OUTPUT_SIZE", "10000"))
+
     @classmethod
     def validate(cls):
         """Validate configuration and create necessary directories."""
+        # Create data directories
+        cls.DATA_DIR.mkdir(parents=True, exist_ok=True)
+        cls.CHAT_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        cls.VOICE_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        cls.TEMP_DIR.mkdir(parents=True, exist_ok=True)
+        cls.SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
+
         # Create RL data directory if RL is enabled
         if cls.RL_ENABLED:
             cls.RL_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-        # Add other validation as needed
         return True

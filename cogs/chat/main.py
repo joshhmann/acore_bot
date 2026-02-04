@@ -56,6 +56,7 @@ class ChatCog(commands.Cog):
         persona_system: Optional[Any] = None,
         compiled_persona: Optional[Any] = None,
         llm_fallback: Optional[Any] = None,
+        rl_service: Optional[Any] = None,
     ) -> None:
         """Initialize chat cog."""
         self.bot = bot
@@ -65,6 +66,7 @@ class ChatCog(commands.Cog):
         # self.context_router = context_router # This is passed in now
         self.user_profiles = user_profiles
         self.llm_fallback = llm_fallback
+        self.rl_service = rl_service
         self.ollama = ollama  # Kept for direct access
         self.summarizer = summarizer
         self.web_search = web_search
@@ -119,7 +121,11 @@ class ChatCog(commands.Cog):
 
             # 3. Initialize Behavior Engine (Needs ContextManager)
             self.behavior_engine = BehaviorEngine(
-                self.bot, self.ollama, self.context_manager, self.lorebook_service
+                self.bot,
+                self.ollama,
+                self.context_manager,
+                self.lorebook_service,
+                rl_service=self.rl_service,
             )
 
             # 4. Initialize Persona Router (Loads Characters)
