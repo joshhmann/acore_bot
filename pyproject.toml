@@ -43,6 +43,7 @@ packages = ["cogs", "services", "utils"]
 dev = [
     "black>=25.12.0",
     "mypy>=1.19.0",
+    "pytest-asyncio>=1.3.0",
     "ruff>=0.14.8",
     "types-aiofiles>=25.1.0.20251011",
     "types-psutil>=7.1.3.20251211",
