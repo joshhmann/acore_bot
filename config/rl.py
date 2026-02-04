@@ -34,3 +34,22 @@ class RLConfig(BaseConfig):
     MAX_AGENTS_PER_CHANNEL: int = BaseConfig._get_env_int(
         "RL_MAX_AGENTS_PER_CHANNEL", 100
     )
+
+    # DQN (Neural RL) and related environment variables
+    # Algorithm selection
+    ALGORITHM: str = BaseConfig._get_env("RL_ALGORITHM", "tabular")
+
+    # Neural RL (DQN) settings
+    REPLAY_BUFFER_SIZE: int = BaseConfig._get_env_int("RL_REPLAY_BUFFER_SIZE", 10000)
+    BATCH_SIZE: int = BaseConfig._get_env_int("RL_BATCH_SIZE", 32)
+    WARMUP_STEPS: int = BaseConfig._get_env_int("RL_WARMUP_STEPS", 1000)
+    TRAIN_EVERY: int = BaseConfig._get_env_int("RL_TRAIN_EVERY", 4)
+    STATE_DIM: int = BaseConfig._get_env_int("RL_STATE_DIM", 128)
+
+    # Feature flags for advanced RL capabilities
+    USE_HIERARCHICAL: bool = BaseConfig._get_env_bool("RL_USE_HIERARCHICAL", True)
+    USE_TRANSFER: bool = BaseConfig._get_env_bool("RL_USE_TRANSFER", True)
+    USE_MULTI_OBJECTIVE: bool = BaseConfig._get_env_bool("RL_USE_MULTI_OBJECTIVE", True)
+    OFFLINE_PRETRAINING: bool = BaseConfig._get_env_bool(
+        "RL_OFFLINE_PRETRAINING", False
+    )
