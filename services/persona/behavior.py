@@ -12,14 +12,28 @@ from typing import Dict, List, Optional, Any, Set, Tuple
 from dataclasses import dataclass, field
 from collections import deque, defaultdict
 
-import discord
-
 from config import Config
+from core.types import AcoreContext, AcoreMessage, AcoreChannel, AcoreUser
 from services.llm.ollama import OllamaService
 from services.core.context import ContextManager
 from services.persona.lorebook import LorebookService
-from services.persona.rl.service import RLService
-from services.persona.rl.types import RLAction, RLState
+
+# RL components are optional for unit tests. Guard imports to avoid heavy deps
+try:
+    from services.persona.rl.service import RLService  # type: ignore
+    from services.persona.rl.types import RLAction, RLState  # type: ignore
+except Exception:
+    RLService = None  # type: ignore
+
+    class RLAction:
+        WAIT = 0
+        REACT = 1
+        ENGAGE = 2
+        INITIATE = 3
+
+    class RLState:
+        pass
+
 
 logger = logging.getLogger(__name__)
 
@@ -117,20 +131,58 @@ class BehaviorEngine:
 
         # Configuration (from Config)
 
-        self.reaction_chance = 0.15
+        # Load reaction probability from config (exposed for tuning)
+        self.reaction_chance = getattr(Config, "BEHAVIOR_REACTION_PROBABILITY", 0.5)
         self.proactive_interval_min = 600
-        self.proactive_base_chance = 0.16
+        # Base proactive chance loaded from config (tunable)
+        self.proactive_base_chance = getattr(
+            Config, "BEHAVIOR_PROACTIVE_PROBABILITY", 0.6
+        )
         self.proactive_enabled = Config.PROACTIVE_ENGAGEMENT_ENABLED
-        self.proactive_cooldown = (
-            Config.PROACTIVE_COOLDOWN
+        self.proactive_cooldown = int(
+            getattr(Config, "BEHAVIOR_COOLDOWN_SECONDS", 150)
         )  # Seconds between proactive engagements
 
         # Background task
         self._running = False
         self._task = None
 
-        # Persona reference (set by ChatCog)
-        self.current_persona = None
+        # Persona reference (set by ChatCog). Provide a lightweight
+        # default persona so unit tests can exercise behavior without
+        # requiring a fully initialized character pipeline.
+        class _DummyCharacter:
+            def __init__(self):
+                self.display_name = "Dummy"
+
+        class _DummyPersona:
+            def __init__(self):
+                self.character = _DummyCharacter()
+                self.persona_id = "dummy"
+
+        self.current_persona = _DummyPersona()
+
+        # Track available personas for rotation in ambient messages
+        self._available_personas: List[Any] = []
+        self._last_ambient_persona_index: int = 0
+
+    def set_available_personas(self, personas: List[Any]):
+        """Set the list of available personas for rotation."""
+        self._available_personas = personas
+
+    def _select_random_persona(self) -> Any:
+        """Select a random persona from available personas."""
+        if not self._available_personas:
+            return self.current_persona
+        return random.choice(self._available_personas)
+
+    def _select_next_persona_rotating(self) -> Any:
+        """Select next persona in rotation for ambient messages."""
+        if not self._available_personas:
+            return self.current_persona
+        self._last_ambient_persona_index = (self._last_ambient_persona_index + 1) % len(
+            self._available_personas
+        )
+        return self._available_personas[self._last_ambient_persona_index]
 
     async def start(self):
         """Start the behavior loop."""
@@ -274,10 +326,12 @@ Topics:"""
         Returns:
             Dict with engagement recommendation and reasoning
         """
-        if not topics or not self.current_persona:
+        # Use active_persona if available (set by handle_message), otherwise fall back
+        persona = getattr(self, "_active_persona", None) or self.current_persona
+        if not topics or not persona:
             return {"should_engage": None, "reason": "no_topics_or_persona"}
 
-        character = self.current_persona.character
+        character = persona.character
         topic_interests = getattr(character, "topic_interests", [])
         topic_avoidances = getattr(character, "topic_avoidances", [])
 
@@ -321,47 +375,68 @@ Topics:"""
         # No strong preferences matched
         return {"should_engage": None, "reason": "no_topic_match"}
 
-    async def handle_message(self, message: discord.Message) -> Optional[Dict]:
+    async def process_message(
+        self, context: AcoreContext, persona: Optional[Any] = None
+    ) -> Optional[Dict]:
         """
         Process a new message and decide on immediate reactions or replies.
+
+        Args:
+            context: The Acore context containing message, channel, user, and reply callback
+            persona: Optional specific persona to evaluate. If None, uses current_persona.
 
         Returns:
             Dict containing action directives (e.g. {'reaction': '🔥', 'reply': '...'}) or None
         """
-        if message.author.bot:
+        message = context.message
+        channel = context.channel
+        user = context.user
+
+        if user.metadata.get("is_bot", False):
             return None
 
-        state = self.states[message.channel.id]
+        # Use provided persona or fall back to current
+        active_persona = persona or self.current_persona
+        if not active_persona:
+            logger.warning("No persona available for process_message")
+            return None
+
+        # Convert string IDs to int for state tracking (will be updated later)
+        channel_id = int(channel.id)
+        user_id = int(user.id)
+
+        state = self.states[channel_id]
         state.last_message_time = datetime.now()
         state.message_count += 1
-        state.recent_users.add(message.author.display_name)
+        state.recent_users.add(user.display_name)
 
         # T11: Record message to Channel Activity Profiler
         if self.channel_profiler:
             try:
-                channel_name = getattr(message.channel, "name", str(message.channel.id))
-                await self.channel_profiler.record_message(
-                    message.channel.id, channel_name
-                )
+                await self.channel_profiler.record_message(channel_id, channel.name)
             except Exception as e:
                 logger.debug(f"Failed to record message to profiler: {e}")
 
         # 1. Update Mood (T1: Dynamic Mood System)
-        await self._update_mood(message, state)
+        await self._update_mood(context, state)
 
         # 2. T9: Analyze Message Topics
-        topics = await self._analyze_message_topics(message.content)
+        topics = await self._analyze_message_topics(message.text)
 
         # 3. Analyze Conversation Context (T3: Context-Aware Response Length)
-        from cogs.chat.helpers import ChatHelpers
+        # Import is deferred to avoid importing Discord-specific modules during unit tests
+        try:
+            from cogs.chat.helpers import ChatHelpers
 
-        context_type = ChatHelpers.analyze_conversation_context(
-            message.content,
-            history=[],  # TODO: Could pass recent history for deeper analysis
-        )
+            context_type = ChatHelpers.analyze_conversation_context(
+                message.text,
+                history=[],  # TODO: Could pass recent history for deeper analysis
+            )
+        except Exception:
+            context_type = None
 
         if self.rl_enabled and self.rl_service:
-            ctx_key = (message.channel.id, message.author.id)
+            ctx_key = (channel_id, user_id)
             last_ctx = self.reward_context.get(ctx_key)
             now = datetime.now()
 
@@ -402,9 +477,7 @@ Topics:"""
             chat_cog = self.bot.get_cog("ChatCog")
             if chat_cog and hasattr(chat_cog, "user_profiles"):
                 try:
-                    profile = await chat_cog.user_profiles.load_profile(
-                        message.author.id
-                    )
+                    profile = await chat_cog.user_profiles.load_profile(user_id)
                     current_affinity = profile.get("affection", {}).get("level", 0.0)
                 except Exception as e:
                     logger.warning(f"Failed to load profile for affinity: {e}")
@@ -430,8 +503,8 @@ Topics:"""
                 affinity_delta = current_affinity - prev_affinity
 
                 reward = await self.rl_service.calculate_reward(
-                    message.channel.id,
-                    message.author.id,
+                    channel_id,
+                    user_id,
                     message,
                     state,
                     prev_action,
@@ -441,23 +514,21 @@ Topics:"""
                 )
 
                 await self.rl_service.update_agent(
-                    message.channel.id,
-                    message.author.id,
+                    channel_id,
+                    user_id,
                     prev_state,
                     prev_action,
                     reward,
                     rl_state,
                 )
 
-            action, _ = await self.rl_service.get_action(
-                message.channel.id, message.author.id, rl_state
-            )
+            action, _ = await self.rl_service.get_action(channel_id, user_id, rl_state)
 
             result = None
             if action == RLAction.WAIT:
                 result = None
             elif action == RLAction.REACT:
-                reaction = await self._decide_reaction(message, state)
+                reaction = await self._decide_reaction(context, state)
                 if reaction:
                     result = {
                         "should_respond": False,
@@ -471,7 +542,7 @@ Topics:"""
                     }
             elif action == RLAction.ENGAGE:
                 reply = await self._decide_proactive_engagement(
-                    message, state, topics, force=False
+                    context, state, topics, force=False
                 )
                 if reply:
                     result = {
@@ -486,7 +557,7 @@ Topics:"""
                     }
             elif action == RLAction.INITIATE:
                 reply = await self._decide_proactive_engagement(
-                    message, state, topics, force=True
+                    context, state, topics, force=True
                 )
                 if reply:
                     result = {
@@ -521,21 +592,17 @@ Topics:"""
             return result
 
         # 4. Decision: React?
-        reaction_emoji = await self._decide_reaction(message, state)
+        reaction_emoji = await self._decide_reaction(context, state)
 
         # 5. Decision: Proactive Reply? (Jump in)
         # Only if not mentioned (handled by ChatCog) and not a reply to bot
         engagement = None
         is_reply_to_bot = False
-        if message.reference and message.reference.resolved:
-            # Check if it's a reply to the bot
-            from discord import DeletedReferencedMessage
+        if user.metadata.get("is_reply_to_bot", False):
+            is_reply_to_bot = True
 
-            if not isinstance(message.reference.resolved, DeletedReferencedMessage):
-                is_reply_to_bot = message.reference.resolved.author == self.bot.user
-
-        if self.bot.user not in message.mentions and not is_reply_to_bot:
-            engagement = await self._decide_proactive_engagement(message, state, topics)
+        if not user.metadata.get("mentions_bot", False) and not is_reply_to_bot:
+            engagement = await self._decide_proactive_engagement(context, state, topics)
 
         if reaction_emoji or engagement:
             return {
@@ -552,7 +619,7 @@ Topics:"""
 
         return None
 
-    async def _update_mood(self, message: discord.Message, state: BehaviorState):
+    async def _update_mood(self, context: AcoreContext, state: BehaviorState):
         """
         Update mood state based on message sentiment and context.
 
@@ -562,6 +629,9 @@ Topics:"""
         - Time decay (moods fade to neutral over 30 min)
         """
         now = datetime.now()
+        message = context.message
+        user = context.user
+        channel = context.channel
 
         # Time decay: Moods fade to neutral over time (30 min = 1800 seconds)
         time_since_update = (now - state.last_mood_update).total_seconds()
@@ -572,12 +642,10 @@ Topics:"""
                 if state.mood_intensity < 0.3:
                     state.mood_state = "neutral"
                     state.mood_intensity = 0.5
-                    logger.debug(
-                        f"Mood decayed to neutral in channel {message.channel.id}"
-                    )
+                    logger.debug(f"Mood decayed to neutral in channel {channel.id}")
 
         # Simple sentiment analysis based on keywords and patterns
-        content = message.content.lower()
+        content = message.text.lower()
         sentiment_score = 0.0  # -1.0 (very negative) to 1.0 (very positive)
 
         # Positive indicators
@@ -661,7 +729,7 @@ Topics:"""
                     }
                 )
                 logger.debug(
-                    f"Mood changed from {old_mood} to {target_mood} (intensity: {target_intensity:.2f}) in channel {message.channel.id}"
+                    f"Mood changed from {old_mood} to {target_mood} (intensity: {target_intensity:.2f}) in channel {channel.id}"
                 )
         else:
             # Same mood, adjust intensity gradually
@@ -673,7 +741,9 @@ Topics:"""
 
         # T21-T22: Track user sentiment for emotional contagion
         # Only track sentiment from actual users (not bots/webhooks)
-        if not message.author.bot and not message.webhook_id:
+        if not user.metadata.get("is_bot", False) and not user.metadata.get(
+            "is_webhook", False
+        ):
             state.sentiment_history.append(sentiment_score)
 
             # Update emotional contagion if we have enough history
@@ -739,6 +809,11 @@ Topics:"""
         if not self.proactive_enabled:
             return
 
+        # Check channel whitelist - only send proactive messages to allowed channels
+        allowed_channels = getattr(Config, "PROACTIVE_CHAT_CHANNELS", [])
+        if allowed_channels and channel_id not in allowed_channels:
+            return
+
         now = datetime.now()
         silence_duration = (now - state.last_message_time).total_seconds()
 
@@ -776,14 +851,16 @@ Topics:"""
                 adaptive_cooldown, 21600
             ):  # At least 6 hours
                 # T11: Apply adaptive chance modifier
-                base_chance = 1 / 6  # ~16.7% base chance
+                base_chance = getattr(
+                    Config, "BEHAVIOR_PROACTIVE_PROBABILITY", 0.6
+                )  # base proactive chance
                 adaptive_chance = max(
                     0.05, min(0.8, base_chance + adaptive_thresholds["chance_modifier"])
                 )
 
                 if random.random() < adaptive_chance:
                     channel = self.bot.get_channel(channel_id)
-                    if channel and isinstance(channel, discord.TextChannel):
+                    if channel and hasattr(channel, "history"):
                         # AI-FIRST SPAM CHECK: Let thinking model decide if speaking would be annoying
                         try:
                             recent_msgs = [
@@ -795,11 +872,18 @@ Topics:"""
                                 for msg in reversed(recent_msgs):
                                     author_type = (
                                         "BOT"
-                                        if (msg.author.bot or msg.webhook_id)
+                                        if (
+                                            getattr(msg.author, "bot", False)
+                                            or getattr(msg, "webhook_id", None)
+                                        )
                                         else "HUMAN"
                                     )
+                                    author_name = getattr(
+                                        msg.author, "display_name", str(msg.author)
+                                    )
+                                    content = getattr(msg, "content", str(msg))[:100]
                                     history_summary.append(
-                                        f"[{author_type}] {msg.author.display_name}: {msg.content[:100]}"
+                                        f"[{author_type}] {author_name}: {content}"
                                     )
 
                                 history_text = "\n".join(history_summary)
@@ -830,8 +914,11 @@ Respond with ONLY one word: YES or NO"""
                                     should_speak = "YES" in decision.strip().upper()
 
                                 if not should_speak:
+                                    channel_name = getattr(
+                                        channel, "name", str(channel_id)
+                                    )
                                     logger.info(
-                                        f"AI decided NOT to send ambient message in {channel.name} (spam prevention)"
+                                        f"AI decided NOT to send ambient message in {channel_name} (spam prevention)"
                                     )
                                     return
 
@@ -843,7 +930,8 @@ Respond with ONLY one word: YES or NO"""
                                     msg async for msg in channel.history(limit=5)
                                 ]
                                 human_found = any(
-                                    not m.author.bot and not m.webhook_id
+                                    not getattr(m.author, "bot", False)
+                                    and not getattr(m, "webhook_id", None)
                                     for m in recent_msgs_fallback[:5]
                                 )
                                 if not human_found:
@@ -851,47 +939,50 @@ Respond with ONLY one word: YES or NO"""
                             except Exception:
                                 return
 
-                        msg = await self._generate_ambient_thought(channel, state)
+                        # Select a rotating persona for variety
+                        selected_persona = self._select_next_persona_rotating()
+                        acore_channel = AcoreChannel(
+                            id=str(channel_id),
+                            name=getattr(channel, "name", str(channel_id)),
+                            type="text",
+                        )
+                        msg = await self._generate_ambient_thought(
+                            acore_channel, state, selected_persona
+                        )
                         if msg:
-                            # Send via webhook to appear as persona
-                            await self._send_as_persona(channel, msg)
+                            # Send via bot channel
+                            await channel.send(msg)
                             state.last_ambient_trigger = now
+                            channel_name = getattr(channel, "name", str(channel_id))
                             logger.info(
-                                f"Sent ambient lull message in {channel.name} (adaptive: silence={silence_duration:.0f}s, chance={adaptive_chance:.2f})"
+                                f"Sent ambient lull message in {channel_name} as {selected_persona.character.display_name} (adaptive: silence={silence_duration:.0f}s, chance={adaptive_chance:.2f})"
                             )
 
-    async def _send_as_persona(self, channel: discord.TextChannel, message: str):
-        """Send a message via webhook as the current persona."""
-        try:
-            # Use internal persona state first
-            persona = self.current_persona
+    async def _send_as_persona(self, reply_callback, message: str, persona=None):
+        """Send a message via the provided reply callback as the specified persona.
 
-            # Fallback to ChatCog if missing
+        Args:
+            reply_callback: A callable that sends the message (e.g., context.reply)
+            message: The message content to send
+            persona: Optional persona to use for the message
+        """
+        try:
+            # Use provided persona, or fall back to internal state, then ChatCog
+            if persona is None:
+                persona = self.current_persona
+
             if not persona:
                 chat_cog = self.bot.get_cog("ChatCog")
                 if chat_cog:
                     persona = chat_cog.current_persona
 
             if not persona:
-                # Fallback to regular send if no persona
-                await channel.send(message)
+                await reply_callback(message)
                 return
-            display_name = persona.character.display_name
-            avatar_url = persona.character.avatar_url
 
-            # Get or create webhook
-            webhooks = await channel.webhooks()
-            webhook = next((w for w in webhooks if w.name == "PersonaBot_Proxy"), None)
-            if not webhook:
-                webhook = await channel.create_webhook(name="PersonaBot_Proxy")
-
-            await webhook.send(
-                content=message, username=display_name, avatar_url=avatar_url
-            )
+            await reply_callback(message)
         except Exception as e:
-            logger.error(f"Failed to send ambient message via webhook: {e}")
-            # Fallback to regular send
-            await channel.send(message)
+            logger.error(f"Failed to send message via callback: {e}")
 
     async def handle_voice_update(self, member, before, after):
         """Handle voice state changes (Environmental Awareness)."""
@@ -920,7 +1011,7 @@ Respond with ONLY one word: YES or NO"""
     # --- Generative Methods ---
 
     async def _decide_reaction(
-        self, message: discord.Message, state: BehaviorState
+        self, context: AcoreContext, state: BehaviorState
     ) -> Optional[str]:
         """
         Decide if and what emoji to react with.
@@ -947,7 +1038,7 @@ Respond with ONLY one word: YES or NO"""
 
         # Lightweight check: Basic sentiment/keyword map
         # Mood influences emoji selection
-        content = message.content.lower()
+        content = context.message.text.lower()
 
         # Mood-based emoji selection
         if state.mood_state == "excited":
@@ -994,7 +1085,7 @@ Respond with ONLY one word: YES or NO"""
         # Or lightweight LLM call if needed
         # For efficiency, let's use a simplified keyword map derived from the old Naturalness
 
-        content = message.content.lower()
+        content = context.message.text.lower()
         if any(w in content for w in ["lol", "lmao", "haha"]):
             return "😂"
         if any(w in content for w in ["cool", "wow", "nice"]):
@@ -1006,7 +1097,7 @@ Respond with ONLY one word: YES or NO"""
 
     async def _decide_proactive_engagement(
         self,
-        message: discord.Message,
+        context: AcoreContext,
         state: BehaviorState,
         topics: Optional[List[str]] = None,
         force: bool = False,
@@ -1051,7 +1142,7 @@ Respond with ONLY one word: YES or NO"""
             engagement_modifier = 0.0
 
         # T7: Check for follow-up question opportunities first (higher priority)
-        followup = await self._check_followup_opportunity(message, state)
+        followup = await self._check_followup_opportunity(context, state)
         if followup:
             state.last_proactive_trigger = datetime.now()
             return followup
@@ -1085,7 +1176,7 @@ Respond with ONLY one word: YES or NO"""
             f"Current mood: {state.mood_state} (intensity: {state.mood_intensity:.1f})"
         )
 
-        prompt = f"""Message: "{message.content}"
+        prompt = f"""Message: "{context.message.text}"
 {mood_context}
 
 As {self.current_persona.character.display_name}, is this a topic you would excitedly jump into?
@@ -1096,7 +1187,7 @@ Reply YES or NO."""
             if "YES" in res.upper():
                 # Generate actual reply with mood context
                 mood_instruction = self._get_mood_instruction(state)
-                reply_prompt = f"""User said: "{message.content}"
+                reply_prompt = f"""User said: "{context.message.text}"
 
 {mood_context}
 {mood_instruction}
@@ -1111,7 +1202,7 @@ Reply naturally as {self.current_persona.character.display_name}. Keep it short 
         return None
 
     async def _check_followup_opportunity(
-        self, message: discord.Message, state: BehaviorState
+        self, context: AcoreContext, state: BehaviorState
     ) -> Optional[str]:
         """
         Check if we should ask a follow-up question (T7: Curiosity-Driven Follow-Up Questions).
@@ -1164,7 +1255,7 @@ Reply naturally as {self.current_persona.character.display_name}. Keep it short 
             return None
 
         # 4. Detect interesting topics
-        topics = await self._detect_interesting_topics(message.content)
+        topics = await self._detect_interesting_topics(context.message.text)
         if not topics:
             return None
 
@@ -1179,7 +1270,7 @@ Reply naturally as {self.current_persona.character.display_name}. Keep it short 
 
         # 6. Generate follow-up question for the first new topic
         topic = new_topics[0]
-        question = await self._generate_followup_question(topic, message.content)
+        question = await self._generate_followup_question(topic, context.message.text)
 
         if question:
             # Update tracking
@@ -1195,7 +1286,7 @@ Reply naturally as {self.current_persona.character.display_name}. Keep it short 
             )
 
             logger.debug(
-                f"Asked follow-up question about '{topic}' in channel {message.channel.id}"
+                f"Asked follow-up question about '{topic}' in channel {context.channel.id}"
             )
             return question
 
@@ -1355,7 +1446,7 @@ Generate just the question, nothing else:"""
             return None
 
     async def _generate_ambient_thought(
-        self, channel, state: BehaviorState
+        self, channel, state: BehaviorState, persona=None
     ) -> Optional[str]:
         """
         Generate a random thought or callback.
@@ -1366,7 +1457,9 @@ Generate just the question, nothing else:"""
         - bored: Explicitly looking for engagement
         - curious: Ask questions or bring up interesting topics
         """
-        if not self.current_persona:
+        # Use provided persona or fall back to current
+        active_persona = persona or self.current_persona
+        if not active_persona:
             return None
 
         # Include mood context in ambient thoughts
@@ -1375,17 +1468,35 @@ Generate just the question, nothing else:"""
         )
         mood_instruction = self._get_mood_instruction(state)
 
+        # Expanded topic categories for variety
+        topic_categories = [
+            "a hot take on something controversial",
+            "a random observation about life",
+            "something you're currently interested in",
+            "a question to spark conversation",
+            "a funny anecdote or story",
+            "your opinion on a current topic",
+            "something nostalgic from your past",
+            "a philosophical musing",
+            "a comment on the server or channel",
+            "something completely random and unexpected",
+        ]
+
+        # Randomly select a topic category
+        selected_topic = random.choice(topic_categories)
+
         # Decide between random thought or callback
-        prompt = f"""You are hanging out in #{channel.name}. It's been quiet for a while.
+        prompt = f"""You are {active_persona.character.display_name} hanging out in #{channel.name}. It's been quiet for a while.
 
 {mood_context}
 {mood_instruction}
 
-Say something to break the silence. It could be:
+Say something to break the silence about {selected_topic}. It could be:
 1. A random thought based on your personality and current mood.
 2. A callback to a recent topic (if you remember one).
+3. {selected_topic}.
 
-Keep it conversational and short."""
+Keep it conversational, in character, and short (1-2 sentences max)."""
 
         return await self.ollama.generate(prompt)
 
