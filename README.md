@@ -1,12 +1,26 @@
 # Acore Bot - AI Character Ecosystem
 
-**Status**: ✅ **PRODUCTION READY** (2025-12-11)
+**Status**: **PRODUCTION READY** (2025-12-11)
 
 A Discord bot featuring multiple AI personas that interact with users and each other, building relationships over time.
 
 **Latest Release**: Production-ready with comprehensive testing, 21 services, 10 active characters, and full feature set operational.
 
+---
+
+## What is Acore?
+
+Acore is a **multi-platform AI character framework** that happens to include a full-featured Discord bot. The same engine that powers your Discord characters can run on the command line, integrate with other platforms, or embed into your own applications.
+
+**For Discord users**: You get a bot with multiple AI personas that chat, build relationships, and remember your users.
+
+**For developers**: You get a modular framework with clean Core/Adapter architecture, event-driven messaging, and platform-agnostic business logic.
+
+---
+
 ## Quick Start
+
+### Option 1: Discord Bot (Recommended)
 
 ```bash
 # 1. Install dependencies (using uv - recommended)
@@ -22,11 +36,130 @@ cp .env.example .env
 # 3. Run the bot
 uv run python main.py
 
+# Or use the launcher
+uv run python launcher.py
+
 # Or install as systemd service (production)
 sudo ./install_service.sh
 ```
 
+### Option 2: CLI Mode
+
+Chat with personas directly from your terminal:
+
+```bash
+# Start CLI mode
+ACORE_CLI_ENABLED=true uv run python launcher.py
+
+# Or run directly
+uv run python -m adapters.cli
+
+# Chat with a specific persona
+echo "@dagoth_ur Hello, how are you?" | uv run python -m adapters.cli
+```
+
 **Production Deployment**: See [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) for comprehensive deployment guide.
+
+---
+
+## Framework Architecture
+
+Acore uses a **Core/Adapter architecture** that separates platform-agnostic business logic from platform-specific integrations.
+
+```
++------------------+     +------------------+     +------------------+
+|  Discord Adapter |     |   CLI Adapter    |     |  [Your Adapter]  |
+|  (Production)    |     |  (Terminal)      |     |  (Custom)        |
++------------------+     +------------------+     +------------------+
+         |                       |                        |
+         +-----------------------+------------------------+
+                                 |
+                    +------------v-------------+
+                    |       Core Layer         |
+                    |  - Platform-agnostic     |
+                    |  - Event-driven          |
+                    |  - Business logic        |
+                    +------------+-------------+
+                                 |
+                    +------------v-------------+
+                    |     Service Layer        |
+                    |  - Persona System        |
+                    |  - Memory/RAG            |
+                    |  - LLM Services          |
+                    |  - Voice Pipeline        |
+                    +--------------------------+
+```
+
+**Key Benefits**:
+- Run the same personas on Discord, CLI, or your own platform
+- Test core logic without Discord dependencies
+- Add new platforms by implementing adapter interfaces
+- Clean separation keeps code maintainable
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for full technical details.
+
+---
+
+## Adapters
+
+Acore includes adapters for different platforms. Each adapter handles platform-specific I/O while the core manages personas and responses.
+
+### Discord Adapter (Production)
+
+Full-featured Discord bot with webhooks, slash commands, and voice support.
+
+```bash
+# Run Discord bot
+uv run python main.py
+# Or via launcher
+ACORE_DISCORD_ENABLED=true uv run python launcher.py
+```
+
+**Features**:
+- Webhook persona spoofing (each character has unique name/avatar)
+- Slash commands and traditional prefix commands
+- Voice channel support (TTS, STT, RVC)
+- Reaction handling and message tracking
+
+### CLI Adapter (Terminal)
+
+Chat with personas from the command line. Great for testing and development.
+
+```bash
+# Interactive mode
+uv run python -m adapters.cli
+
+# Pipe a message
+echo "@scav Tell me a story" | uv run python -m adapters.cli
+
+# With launcher
+ACORE_CLI_ENABLED=true uv run python launcher.py
+```
+
+**Usage**:
+```
+# Address a specific persona
+@dagoth_ur What is your favorite game?
+
+# Or use default persona
+Hello, how are you today?
+```
+
+### Creating Custom Adapters
+
+Want to integrate Acore with Telegram, Slack, or your own platform? See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#creating-new-adapters) for a step-by-step guide.
+
+Basic adapter structure:
+```python
+from core.interfaces import InputAdapter, OutputAdapter
+
+class MyAdapter(InputAdapter):
+    async def start(self): ...
+    async def stop(self): ...
+    def on_event(self, callback): ...
+```
+
+---
 
 ## Core Features
 
@@ -65,10 +198,10 @@ Characters build relationships with each other over time:
 
 **18 AI enhancements** that make personas feel truly alive and adaptive:
 
-**Core Intelligence** (Phase 1 - 11 features):
+**Core Intelligence** (Phase 1):
 - **Dynamic Mood System**: Personas have emotional states that evolve based on conversations
 - **Context-Aware Responses**: Adjusts verbosity automatically (brief for quick questions, detailed for complex topics)
-- **Memory Isolation**: Each persona maintains separate memories - no cross-contamination
+- **Memory Isolation**: Each persona maintains separate memories (no cross-contamination)
 - **Curiosity-Driven Questions**: Asks thoughtful follow-ups based on curiosity level
 - **Topic Interest Filtering**: Personas engage more with topics they care about
 - **Adaptive Ambient Timing**: Learns channel activity patterns and adjusts proactive behavior
@@ -78,7 +211,7 @@ Characters build relationships with each other over time:
 - **Framework Blending**: Dynamically adapts personality based on context (supportive, playful, analytical)
 - **Emotional Contagion**: Mirrors or supports user's emotional state
 
-**Adaptive Behavior** (Phase 2 - 8 features):
+**Adaptive Behavior** (Phase 2):
 - **Semantic Lorebook**: Uses AI to match lore conceptually, not just by keywords (ML-powered)
 - **Real-Time Analytics Dashboard**: Web UI for monitoring persona metrics with live updates
 
@@ -161,6 +294,10 @@ ACTIVE_PERSONAS=dagoth_ur.json,scav.json,toad.json,maury.json,hal9000.json,zenos
 USER_PROFILES_AUTO_LEARN=true
 PROACTIVE_ENGAGEMENT_ENABLED=true
 RAG_ENABLED=true
+
+# Adapters (for launcher.py)
+ACORE_DISCORD_ENABLED=true
+ACORE_CLI_ENABLED=false
 ```
 
 ### Key Directories
@@ -180,6 +317,14 @@ data/
 ├── user_profiles/       # Per-user memory
 ├── persona_relationships.json  # Character affinity data
 └── import_cards/        # Drop PNG cards here for bulk import
+
+core/                    # Platform-agnostic framework core
+├── types.py            # AcoreMessage, AcoreUser, etc.
+└── interfaces.py       # Adapter interfaces
+
+adapters/                # Platform-specific adapters
+├── discord/            # Discord bot implementation
+└── cli/                # Command-line interface
 ```
 
 ## Commands
@@ -217,14 +362,14 @@ data/
 
 ## Production Status
 
-### ✅ Verified Production-Ready (2025-12-11)
+### Verified Production-Ready (2025-12-11)
 
 **Startup Validation:**
-- ✅ All 21 services initialize successfully
-- ✅ 12 cogs + extensions load without errors
-- ✅ Graceful shutdown and cleanup verified
-- ✅ Command tree sync with error handling
-- ✅ 0 critical linting errors (168 fixed)
+- All 21 services initialize successfully
+- 12 cogs + extensions load without errors
+- Graceful shutdown and cleanup verified
+- Command tree sync with error handling
+- 0 critical linting errors (168 fixed)
 
 **Active Services:**
 - **LLM**: Ollama, OpenRouter, Thinking, Cache, Fallback
@@ -292,6 +437,31 @@ data/
 3. Or bulk: Copy PNGs to `data/import_cards/`, run `!import_folder`
 4. Add character ID to `ACTIVE_PERSONAS` in `.env`
 5. Run `!reload_characters`
+
+---
+
+## Documentation
+
+**Framework Documentation:**
+- [Architecture Overview](docs/ARCHITECTURE.md) - Core/Adapter architecture, creating adapters
+- [API Reference](docs/API_REFERENCE.md) - Core types, interfaces, events
+
+**Setup and Deployment:**
+- [Production Readiness](docs/PRODUCTION_READINESS.md) - Complete deployment guide
+- [VM Setup](docs/setup/VM_SETUP.md) - Virtual machine configuration
+- [RVC Setup](docs/setup/RVC_SETUP.md) - Voice conversion setup
+
+**Feature Documentation:**
+- [Bot Conversations](docs/BOT_CONVERSATIONS.md) - Multi-bot chat system
+- [Persona System](docs/guides/Persona_System_Guide.md) - Character behavior guide
+- [Voice System](docs/guides/Voice_TTS_System_Guide.md) - TTS/RVC configuration
+- [Analytics](docs/guides/Analytics_Monitoring_Guide.md) - Dashboard setup
+
+**Developer Resources:**
+- [Codebase Summary](docs/codebase_summary/README.md) - Comprehensive code documentation
+- [Contributing](docs/CONTRIBUTING.md) - Development guidelines
+
+---
 
 ## Monitoring
 
