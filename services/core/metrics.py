@@ -102,6 +102,10 @@ class MetricsService:
         # Start time
         self.start_time = datetime.now()
 
+        # Behavior analytics (new)
+        self.behavior_decisions = defaultdict(int)
+        self.engagement_stats = defaultdict(lambda: {"engaged": 0, "messages": 0})  # type: ignore
+
         # Batch logging for reducing disk I/O
         self.pending_events = []  # Buffer for events before batch write
         self.batch_size = 50  # Write after 50 events
@@ -157,6 +161,67 @@ class MetricsService:
             "p95": sorted_times[int(count * 0.95)] if count > 1 else sorted_times[0],
             "p99": sorted_times[int(count * 0.99)] if count > 1 else sorted_times[0],
             "count": count,
+        }
+
+    # Behavior metrics (new)
+    def record_behavior_decision(self, decision_type: str, channel_id: int = None):
+        """Record a behavioral decision made by the bot.
+
+        Args:
+            decision_type: One of 'react', 'wait', 'proactive', 'ambient'
+            channel_id: Optional channel id for future per-channel statistics (currently unused for counting)
+        """
+        # Normalize input and count only known decision types
+        valid_types = {"react", "wait", "proactive", "ambient"}
+        if decision_type not in valid_types:
+            logger.debug(
+                f"Unknown behavior decision_type '{decision_type}' received; ignoring."
+            )
+            return
+
+        self.behavior_decisions[decision_type] += 1
+
+        # Optionally, reserve a hook for per-channel tagging in the future
+        _ = channel_id  # keep signature compatibility; not used for now
+
+    def record_engagement(self, channel_id: int, engaged: bool):
+        """Record whether the bot engaged a channel in a message.
+
+        Args:
+            channel_id: The target channel id
+            engaged: True if bot responded, False if bot waited
+        """
+        stats = self.engagement_stats[channel_id]
+        stats["messages"] = stats.get("messages", 0) + 1  # type: ignore
+        if engaged:
+            stats["engaged"] = stats.get("engaged", 0) + 1  # type: ignore
+        self.engagement_stats[channel_id] = stats
+
+    def get_behavior_stats(self) -> dict:
+        """Return aggregated behavior metrics.
+
+        Returns:
+            dict with keys:
+              - decision_counts: dict[str,int]
+              - engagement_rate: float
+              - total_decisions: int
+        """
+        decision_counts = dict(self.behavior_decisions)
+
+        total_messages = sum(
+            s.get("messages", 0) for s in self.engagement_stats.values()
+        )
+        total_engaged = sum(s.get("engaged", 0) for s in self.engagement_stats.values())
+        engagement_rate = (
+            (total_engaged / total_messages) if total_messages > 0 else 0.0
+        )
+
+        total_decisions = sum(decision_counts.values()) if decision_counts else 0
+
+        return {
+            "decision_counts": decision_counts,
+            "engagement_rate": engagement_rate,
+            "total_decisions": total_decisions,
         }
 
     # Token usage tracking

@@ -1,0 +1,41 @@
+TASK 12: Migrate Discord cogs from cogs/ to adapters/discord/commands/
+=======================================================================
+
+STATUS: COMPLETE
+
+FILES MIGRATED:
+  cogs/chat/          -> adapters/discord/commands/chat/
+  cogs/voice/         -> adapters/discord/commands/voice/
+  cogs/character_commands.py -> adapters/discord/commands/character.py
+  cogs/conversation_commands.py -> adapters/discord/commands/conversation.py
+  cogs/rl_commands.py -> adapters/discord/commands/rl.py
+  cogs/help.py        -> adapters/discord/commands/help.py
+  cogs/memory_commands.py -> adapters/discord/commands/memory.py
+  cogs/profile_commands.py -> adapters/discord/commands/profile.py
+  cogs/search_commands.py -> adapters/discord/commands/search.py
+  cogs/system.py      -> adapters/discord/commands/system.py
+
+IMPORTS UPDATED:
+  main.py - 4 imports updated to adapters.discord.commands.*
+  services/persona/behavior.py - ChatHelpers import updated
+  tests/unit/test_chat_helpers.py - import updated
+  tests/unit/test_loop_bypass.py - import updated
+  tests/unit/test_rl_commands.py - import updated
+  tests/unit/test_session_manager.py - import updated
+  tests/standalone/test_phase1_phase2_integration.py - import updated
+  verify_production_deployment.py - import updated
+
+BACKWARD COMPATIBILITY:
+  cogs/__init__.py re-exports from adapters.discord.commands.*
+  Original cogs/ files preserved (not deleted per instructions)
+
+VERIFICATION:
+  - All module imports succeed (ChatHelpers, SessionManager, MessageHandler,
+    RLCommands, CharacterCommandsCog, HelpCog, SystemCog, ChatCog)
+  - 26 unit tests pass (test_session_manager, test_rl_commands)
+  - 8 unit tests pass (test_loop_bypass)
+  - Backward compat: cogs.chat.helpers.ChatHelpers still importable
+  - No import path regressions introduced
+  - Pre-existing failures unaffected (voice_recv, WebhookPool)
+
+NO GREP MATCHES for 'from cogs.' in codebase - all imports migrated.

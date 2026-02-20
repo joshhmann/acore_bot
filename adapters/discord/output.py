@@ -116,10 +116,14 @@ class DiscordOutputAdapter(OutputAdapter):
             self._event_handlers["persona_spoke"] = self._on_persona_spoke
             self._event_handlers["conversation_typing"] = self._on_conversation_typing
             self._event_handlers["conversation_summary"] = self._on_conversation_summary
-            
+
             self.event_bus.subscribe("persona_spoke", self._on_persona_spoke)
-            self.event_bus.subscribe("conversation_typing", self._on_conversation_typing)
-            self.event_bus.subscribe("conversation_summary", self._on_conversation_summary)
+            self.event_bus.subscribe(
+                "conversation_typing", self._on_conversation_typing
+            )
+            self.event_bus.subscribe(
+                "conversation_summary", self._on_conversation_summary
+            )
             logger.debug("DiscordOutputAdapter subscribed to conversation events")
 
     async def stop(self) -> None:
@@ -148,16 +152,24 @@ class DiscordOutputAdapter(OutputAdapter):
             logger.warning("Missing required fields in persona_spoke event")
             return
 
+        assert channel_id is not None
+        assert persona_id is not None
+        assert display_name is not None
+
+        cid = str(channel_id)
+        pid = str(persona_id)
+        dname = str(display_name)
+
         try:
-            channel = self.bot.get_channel(int(channel_id))
+            channel = self.bot.get_channel(int(cid))
             if not channel or not isinstance(channel, discord.TextChannel):
                 logger.error(f"Channel {channel_id} not found or not a text channel")
                 return
 
             pool = self._get_or_create_webhook_pool(channel)
             await pool.send_message(
-                persona_id=persona_id,
-                display_name=display_name,
+                persona_id=pid,
+                display_name=dname,
                 avatar_url=avatar_url,
                 content=content,
                 wait=True,
@@ -169,7 +181,7 @@ class DiscordOutputAdapter(OutputAdapter):
     async def _on_conversation_typing(self, event_payload: dict) -> None:
         """Handle conversation_typing event by showing typing indicator."""
         channel_id = event_payload.get("channel_id")
-        
+
         if not channel_id:
             return
 
@@ -185,7 +197,7 @@ class DiscordOutputAdapter(OutputAdapter):
     async def _on_conversation_summary(self, event_payload: dict) -> None:
         """Handle conversation_summary event by sending summary to channel."""
         channel_id = event_payload.get("channel_id")
-        
+
         if not channel_id:
             return
 

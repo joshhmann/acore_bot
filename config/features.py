@@ -29,6 +29,10 @@ class ConversationConfig(BaseConfig):
     STORE_SUMMARIES_IN_RAG: bool = BaseConfig._get_env_bool(
         "STORE_SUMMARIES_IN_RAG", True
     )
+    # RL training integration for bot-to-bot conversations
+    BOTCONV_RL_TRAINING_ENABLED: bool = BaseConfig._get_env_bool(
+        "BOTCONV_RL_TRAINING_ENABLED", False
+    )
 
 
 class NaturalnessConfig(BaseConfig):
@@ -53,6 +57,14 @@ class NaturalnessConfig(BaseConfig):
     )
     PROACTIVE_MIN_MESSAGES: int = BaseConfig._get_env_int("PROACTIVE_MIN_MESSAGES", 3)
     PROACTIVE_COOLDOWN: int = BaseConfig._get_env_int("PROACTIVE_COOLDOWN", 180)
+
+    # Behavior probability and mood settings (new)
+    REACTION_PROBABILITY: float = BaseConfig._get_env_float("REACTION_PROBABILITY", 0.5)
+    PROACTIVE_PROBABILITY: float = BaseConfig._get_env_float(
+        "PROACTIVE_PROBABILITY", 0.6
+    )
+    COOLDOWN_SECONDS: int = BaseConfig._get_env_int("COOLDOWN_SECONDS", 150)
+    MOOD_SHIFT_MAX: float = BaseConfig._get_env_float("MOOD_SHIFT_MAX", 0.2)
 
 
 class TimingConfig(BaseConfig):

@@ -60,6 +60,16 @@ class EventBus(ABC):
         """
         pass
 
+    @abstractmethod
+    def unsubscribe(self, event_type: str, handler: Callable[..., Any]) -> None:
+        """Unsubscribe a handler from a specific event type.
+
+        Args:
+            event_type: The type of event to unsubscribe from.
+            handler: The handler to remove from subscribers.
+        """
+        pass
+
 
 class SimpleEventBus(EventBus):
     """Simple in-memory implementation of the EventBus interface."""

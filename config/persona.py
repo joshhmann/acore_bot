@@ -25,7 +25,7 @@ class PersonaConfig(BaseConfig):
     # Persona weights for selection
     WEIGHTS: dict = {}
 
-    # Active personas list
+    # Active personas list (all 16 personas)
     ACTIVE_PERSONAS: list = [
         "dagoth_ur.json",
         "scav.json",
@@ -37,6 +37,11 @@ class PersonaConfig(BaseConfig):
         "toadette.json",
         "joseph_stalin.json",
         "Biblical_Jesus_Christ.json",
+        "arbiter.json",
+        "chief.json",
+        "fred.json",
+        "gothmommy.json",
+        "tom.json",
     ]
 
     # Global response chance
@@ -55,8 +60,8 @@ class EvolutionConfig(BaseConfig):
     )
 
     # Timeouts
-    STICKY_TIMEOUT: int = BaseConfig._get_env_int("PERSONA_STICKY_TIMEOUT", 300)
-    FOLLOWUP_COOLDOWN: int = BaseConfig._get_env_int("PERSONA_FOLLOWUP_COOLDOWN", 300)
+    STICKY_TIMEOUT: int = BaseConfig._get_env_int("PERSONA_STICKY_TIMEOUT", 30)
+    FOLLOWUP_COOLDOWN: int = BaseConfig._get_env_int("PERSONA_FOLLOWUP_COOLDOWN", 60)
 
 
 class ConflictConfig(BaseConfig):

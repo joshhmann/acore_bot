@@ -1,5 +1,12 @@
-"""Cogs package for Discord bot commands."""
-from .chat import ChatCog
-from .voice import VoiceCog
+"""Cogs package - re-exports from adapters.discord.commands for backward compatibility."""
 
-__all__ = ["ChatCog", "VoiceCog"]
+from adapters.discord.commands.chat import ChatCog
+
+__all__ = ["ChatCog"]
+
+try:
+    from adapters.discord.commands.voice import VoiceCog
+
+    __all__.append("VoiceCog")
+except ImportError:
+    pass

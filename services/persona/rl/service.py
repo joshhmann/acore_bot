@@ -19,6 +19,11 @@ from .constants import (
     RL_BATCH_SIZE,
     RL_WARMUP_STEPS,
     RL_TRAIN_EVERY,
+    RL_EXPLORATION_MODE,
+    RL_EXPLORATION_ACTIVITY_THRESHOLD,
+    RL_EXPLORATION_BONUS_MAX,
+    RL_EPSILON_BOOST_FACTOR,
+    RL_EPSILON_BOOST_DECAY,
 )
 from .persistence import RLStorage
 from .safety import SafetyLayer
@@ -87,6 +92,41 @@ class RLService:
         }
 
         self._bg_task = None
+
+        # Exploration-heavy mode for low-interaction training
+        self.exploration_mode = (
+            getattr(config, "RL_EXPLORATION_MODE", RL_EXPLORATION_MODE)
+            if config
+            else RL_EXPLORATION_MODE
+        )
+        self.exploration_activity_threshold = (
+            getattr(
+                config,
+                "RL_EXPLORATION_ACTIVITY_THRESHOLD",
+                RL_EXPLORATION_ACTIVITY_THRESHOLD,
+            )
+            if config
+            else RL_EXPLORATION_ACTIVITY_THRESHOLD
+        )
+        self.exploration_bonus_max = (
+            getattr(config, "RL_EXPLORATION_BONUS_MAX", RL_EXPLORATION_BONUS_MAX)
+            if config
+            else RL_EXPLORATION_BONUS_MAX
+        )
+        self.epsilon_boost_factor = (
+            getattr(config, "RL_EPSILON_BOOST_FACTOR", RL_EPSILON_BOOST_FACTOR)
+            if config
+            else RL_EPSILON_BOOST_FACTOR
+        )
+        self.epsilon_boost_decay = (
+            getattr(config, "RL_EPSILON_BOOST_DECAY", RL_EPSILON_BOOST_DECAY)
+            if config
+            else RL_EPSILON_BOOST_DECAY
+        )
+
+        # Activity tracking for exploration mode
+        self._channel_activity: Dict[int, Dict[str, Any]] = {}
+        self._activity_window_seconds = 3600  # 1 hour window
 
         logger.info(f"RLService initialized with algorithm='{self.algorithm}'")
 
@@ -169,8 +209,19 @@ class RLService:
         self, channel_id: int, user_id: int, state: RLState
     ) -> Tuple[RLAction, Optional[str]]:
         """Get action using tabular Q-learning agent."""
+        # Record activity for exploration mode
+        self._record_channel_activity(channel_id)
+
         agent = await self.get_agent(channel_id, user_id)
+
+        # Apply epsilon boost during low activity periods
+        original_epsilon = agent.epsilon
+        agent.epsilon = self._get_boosted_epsilon(channel_id, agent.epsilon)
+
         action = agent.get_action(state)
+
+        # Restore original epsilon (boost is tracked separately)
+        agent.epsilon = original_epsilon
 
         # Log decision for observability
         q_values = agent.q_table.get(state, {})
@@ -195,8 +246,15 @@ class RLService:
         self, channel_id: int, user_id: int, state: RLState
     ) -> Tuple[RLAction, Optional[str]]:
         """Get action using neural DQN agent."""
+        # Record activity for exploration mode
+        self._record_channel_activity(channel_id)
+
         agent = await self.get_neural_agent(channel_id, user_id)
-        action = agent.get_action(state)
+
+        # Apply epsilon boost during low activity periods
+        boosted_epsilon = self._get_boosted_epsilon(channel_id, agent.epsilon)
+
+        action = agent.select_action(state, epsilon=boosted_epsilon)
 
         # Log decision for observability
         q_values = agent.get_q_values(state)
@@ -265,6 +323,10 @@ class RLService:
         # Penalty 2: Wait action with negative sentiment
         if prev_action == RLAction.WAIT and current_sentiment < -0.3:
             reward -= 0.5
+
+        # Exploration bonus for proactive engagement during low activity
+        exploration_bonus = self._get_exploration_bonus(channel_id, prev_action)
+        reward += exploration_bonus
 
         # Clamp reward
         return max(-10.0, min(10.0, reward))
@@ -340,10 +402,11 @@ class RLService:
         await self._maybe_train()
 
         # Log learning event
+        buffer_size = len(self.replay_buffer) if self.replay_buffer else 0
         logger.info(
             f"RL Learning (DQN): channel={channel_id}, user={user_id}, "
             f"action={action.name}, reward={reward:.2f}, "
-            f"buffer_size={len(self.replay_buffer)}, step={self.training_step}"
+            f"buffer_size={buffer_size}, step={self.training_step}"
         )
 
     async def store_transition(self, transition: Transition) -> None:
@@ -484,6 +547,17 @@ class RLService:
         except Exception as e:
             logger.error(f"Failed to save RL agents: {e}")
 
+    def record_feedback(self, state_info: Any, reward: float) -> None:
+        """Accept external feedback for RL training hooks (non-blocking)."""
+        if not self.enabled:
+            return
+        try:
+            logger.info(
+                f"External RL feedback received: state_info={state_info}, reward={reward}"
+            )
+        except Exception as e:
+            logger.debug(f"record_feedback failed: {e}")
+
     async def _persistence_loop(self):
         """Background loop to periodically save data."""
         while True:
@@ -494,3 +568,112 @@ class RLService:
                 break
             except Exception as e:
                 logger.error(f"Error in RL persistence loop: {e}")
+
+    def _record_channel_activity(self, channel_id: int):
+        """Record message activity for a channel."""
+        import time
+
+        if channel_id not in self._channel_activity:
+            self._channel_activity[channel_id] = {
+                "message_times": [],
+                "last_boosted_epsilon": 0.0,
+            }
+
+        activity = self._channel_activity[channel_id]
+        current_time = time.time()
+
+        # Add current message time
+        activity["message_times"].append(current_time)
+
+        # Clean up old messages outside the window
+        cutoff_time = current_time - self._activity_window_seconds
+        activity["message_times"] = [
+            t for t in activity["message_times"] if t > cutoff_time
+        ]
+
+    def _get_channel_activity_level(self, channel_id: int) -> int:
+        """Get the number of messages in the activity window for a channel."""
+        import time
+
+        if channel_id not in self._channel_activity:
+            return 0
+
+        activity = self._channel_activity[channel_id]
+        current_time = time.time()
+        cutoff_time = current_time - self._activity_window_seconds
+
+        # Clean and count
+        activity["message_times"] = [
+            t for t in activity["message_times"] if t > cutoff_time
+        ]
+        return len(activity["message_times"])
+
+    def _is_low_activity(self, channel_id: int) -> bool:
+        """Check if channel has low activity (below threshold)."""
+        if not self.exploration_mode:
+            return False
+
+        activity_level = self._get_channel_activity_level(channel_id)
+        return activity_level < self.exploration_activity_threshold
+
+    def _get_exploration_bonus(self, channel_id: int, action: RLAction) -> float:
+        """Calculate exploration bonus reward for proactive engagement during low activity.
+
+        Args:
+            channel_id: The Discord channel ID
+            action: The action taken by the agent
+
+        Returns:
+            Exploration bonus value (0 to exploration_bonus_max)
+        """
+        if not self.exploration_mode:
+            return 0.0
+
+        if not self._is_low_activity(channel_id):
+            return 0.0
+
+        # Reward proactive actions more during low activity
+        if action == RLAction.INITIATE:
+            return self.exploration_bonus_max
+        elif action == RLAction.ENGAGE:
+            return self.exploration_bonus_max * 0.7
+        elif action == RLAction.REACT:
+            return self.exploration_bonus_max * 0.3
+        else:  # WAIT
+            return 0.0
+
+    def _get_boosted_epsilon(self, channel_id: int, base_epsilon: float) -> float:
+        """Get epsilon value with boost applied during low activity periods.
+
+        Args:
+            channel_id: The Discord channel ID
+            base_epsilon: The base epsilon value from the agent
+
+        Returns:
+            Potentially boosted epsilon value
+        """
+        import time
+
+        if not self.exploration_mode:
+            return base_epsilon
+
+        if channel_id not in self._channel_activity:
+            return base_epsilon
+
+        activity = self._channel_activity[channel_id]
+        current_time = time.time()
+
+        # Check if we should apply boost
+        if self._is_low_activity(channel_id):
+            # Apply boost
+            boosted = min(1.0, base_epsilon * self.epsilon_boost_factor)
+            activity["last_boosted_epsilon"] = boosted
+            return boosted
+        else:
+            # Decay the boosted epsilon back to normal
+            last_boosted = activity.get("last_boosted_epsilon", 0.0)
+            if last_boosted > base_epsilon:
+                decayed = max(base_epsilon, last_boosted * self.epsilon_boost_decay)
+                activity["last_boosted_epsilon"] = decayed
+                return decayed
+            return base_epsilon

@@ -409,7 +409,7 @@ class Config:
     # Dashboard
     ANALYTICS_DASHBOARD_ENABLED = dashboard.ENABLED
     ANALYTICS_DASHBOARD_PORT = dashboard.PORT
-    ANALYTICS_API_KEY = dashboard.API_KEY
+    ANALYTICS_PASSWORD = dashboard.PASSWORD
 
     # Logging
     LOG_LEVEL = logging.LEVEL
@@ -433,6 +433,7 @@ class Config:
     CONVERSATION_SUMMARIZATION_ENABLED = conversation.SUMMARIZATION_ENABLED
     AUTO_SUMMARIZE_THRESHOLD = conversation.AUTO_SUMMARIZE_THRESHOLD
     STORE_SUMMARIES_IN_RAG = conversation.STORE_SUMMARIES_IN_RAG
+    BOTCONV_RL_TRAINING_ENABLED = conversation.BOTCONV_RL_TRAINING_ENABLED
 
     # Naturalness
     NATURALNESS_ENABLED = naturalness.ENABLED
@@ -441,6 +442,12 @@ class Config:
     ACTIVITY_AWARENESS_ENABLED = naturalness.ACTIVITY_AWARENESS_ENABLED
     ACTIVITY_COMMENT_CHANCE = naturalness.ACTIVITY_COMMENT_CHANCE
     ACTIVITY_COOLDOWN_SECONDS = naturalness.ACTIVITY_COOLDOWN_SECONDS
+
+    # Backward-compatibility: Behavior (new unified namespace)
+    BEHAVIOR_REACTION_PROBABILITY = naturalness.REACTION_PROBABILITY
+    BEHAVIOR_PROACTIVE_PROBABILITY = naturalness.PROACTIVE_PROBABILITY
+    BEHAVIOR_COOLDOWN_SECONDS = naturalness.COOLDOWN_SECONDS
+    BEHAVIOR_MOOD_SHIFT_MAX = naturalness.MOOD_SHIFT_MAX
 
     # Timing
     NATURAL_TIMING_ENABLED = timing.ENABLED
@@ -529,6 +536,31 @@ class Config:
         os.getenv("CODE_SANDBOX_ENABLED", "true").lower() == "true"
     )
     CODE_MAX_OUTPUT_SIZE: int = int(os.getenv("CODE_MAX_OUTPUT_SIZE", "10000"))
+
+    # Bot-to-Bot Conversation Settings (backward compatibility)
+    BOT_CONVERSATION_ENABLED: bool = (
+        os.getenv("BOT_CONVERSATION_ENABLED", "true").lower() == "true"
+    )
+    BOT_CONVERSATION_MAX_TURNS: int = int(os.getenv("BOT_CONVERSATION_MAX_TURNS", "10"))
+    BOT_CONVERSATION_TIMEOUT_MINUTES: int = int(
+        os.getenv("BOT_CONVERSATION_TIMEOUT_MINUTES", "30")
+    )
+    BOT_CONVERSATION_DETAILED_METRICS: bool = (
+        os.getenv("BOT_CONVERSATION_DETAILED_METRICS", "false").lower() == "true"
+    )
+
+    # RL Exploration Mode (backward compatibility)
+    RL_EXPLORATION_MODE: bool = (
+        os.getenv("RL_EXPLORATION_MODE", "false").lower() == "true"
+    )
+    RL_EXPLORATION_ACTIVITY_THRESHOLD: int = int(
+        os.getenv("RL_EXPLORATION_ACTIVITY_THRESHOLD", "5")
+    )
+    RL_EXPLORATION_BONUS_MAX: float = float(
+        os.getenv("RL_EXPLORATION_BONUS_MAX", "3.0")
+    )
+    RL_EPSILON_BOOST_FACTOR: float = float(os.getenv("RL_EPSILON_BOOST_FACTOR", "2.0"))
+    RL_EPSILON_BOOST_DECAY: float = float(os.getenv("RL_EPSILON_BOOST_DECAY", "0.999"))
 
     @classmethod
     def validate(cls):

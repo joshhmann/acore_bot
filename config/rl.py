@@ -53,3 +53,18 @@ class RLConfig(BaseConfig):
     OFFLINE_PRETRAINING: bool = BaseConfig._get_env_bool(
         "RL_OFFLINE_PRETRAINING", False
     )
+
+    # Exploration-heavy mode for low-interaction training
+    EXPLORATION_MODE: bool = BaseConfig._get_env_bool("RL_EXPLORATION_MODE", False)
+    EXPLORATION_ACTIVITY_THRESHOLD: int = BaseConfig._get_env_int(
+        "RL_EXPLORATION_ACTIVITY_THRESHOLD", 5
+    )
+    EXPLORATION_BONUS_MAX: float = BaseConfig._get_env_float(
+        "RL_EXPLORATION_BONUS_MAX", 3.0
+    )
+    EPSILON_BOOST_FACTOR: float = BaseConfig._get_env_float(
+        "RL_EPSILON_BOOST_FACTOR", 2.0
+    )
+    EPSILON_BOOST_DECAY: float = BaseConfig._get_env_float(
+        "RL_EPSILON_BOOST_DECAY", 0.999
+    )

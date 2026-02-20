@@ -1086,14 +1086,20 @@
     </div>
     
     <script>
-        // Configuration
-        const API_KEY = prompt("Enter API key:");
-        if (!API_KEY) {
-            alert("API key required to access dashboard");
-            location.reload();
+        // Configuration - use password from sessionStorage or prompt
+        let PASSWORD = sessionStorage.getItem('dashboard_password') || '';
+        
+        if (!PASSWORD) {
+            PASSWORD = prompt("Enter password:");
+            if (!PASSWORD) {
+                alert("Password required to access dashboard");
+                location.reload();
+            } else {
+                sessionStorage.setItem('dashboard_password', PASSWORD);
+            }
         }
         
-        const WS_URL = `ws://${window.location.host}/ws/metrics?api_key=${API_KEY}`;
+        const WS_URL = `ws://${window.location.host}/ws/metrics?password=${encodeURIComponent(PASSWORD)}`;
         
         let ws = null;
         let messageHistory = [];
@@ -1633,10 +1639,19 @@
                 updateDashboard(data);
             };
             
-            ws.onclose = () => {
+            ws.onclose = (event) => {
                 console.log('WebSocket disconnected');
                 document.getElementById('connection-status').innerHTML = '<span class="status-indicator"></span> Disconnected';
                 document.getElementById('connection-status').className = 'status disconnected';
+                
+                if (event.code === 1008) {
+                    // Authentication failed - clear password and reload
+                    sessionStorage.removeItem('dashboard_password');
+                    alert('Invalid password. Please try again.');
+                    location.reload();
+                    return;
+                }
+                
                 setTimeout(connect, 5000);  // Reconnect after 5s
             };
             
@@ -2442,7 +2457,7 @@
         async function loadConfig() {
             try {
                 const response = await fetch(`${window.location.origin}/api/config`, {
-                    headers: { 'X-API-Key': API_KEY }
+                    headers: { 'X-Password': PASSWORD }
                 });
                 if (response.ok) {
                     configData = await response.json();
@@ -2520,7 +2535,7 @@
         async function loadProviders() {
             try {
                 const response = await fetch(`${window.location.origin}/api/config/providers/image`, {
-                    headers: { 'X-API-Key': API_KEY }
+                    headers: { 'X-Password': PASSWORD }
                 });
                 if (response.ok) {
                     providerData = await response.json();
@@ -2560,7 +2575,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-API-Key': API_KEY
+                        'X-Password': PASSWORD
                     },
                     body: JSON.stringify({ provider: providerId })
                 });
@@ -2582,7 +2597,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'X-API-Key': API_KEY
+                        'X-Password': PASSWORD
                     },
                     body: JSON.stringify({ feature, enabled })
                 });
@@ -2603,7 +2618,7 @@
             try {
                 const response = await fetch(`${window.location.origin}/api/config/regenerate-env`, {
                     method: 'POST',
-                    headers: { 'X-API-Key': API_KEY }
+                    headers: { 'X-Password': PASSWORD }
                 });
                 const result = await response.json();
                 if (result.success) {
@@ -2626,7 +2641,7 @@
         async function loadLogs() {
             try {
                 const response = await fetch(`${window.location.origin}/api/logs?lines=100`, {
-                    headers: { 'X-API-Key': API_KEY }
+                    headers: { 'X-Password': PASSWORD }
                 });
                 if (response.ok) {
                     const data = await response.json();

@@ -426,7 +426,7 @@ Topics:"""
         # 3. Analyze Conversation Context (T3: Context-Aware Response Length)
         # Import is deferred to avoid importing Discord-specific modules during unit tests
         try:
-            from cogs.chat.helpers import ChatHelpers
+            from adapters.discord.commands.chat.helpers import ChatHelpers
 
             context_type = ChatHelpers.analyze_conversation_context(
                 message.text,

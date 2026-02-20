@@ -21,6 +21,7 @@ from .constants import (
     REWARD_WEIGHT_QUALITY,
     REWARD_WEIGHT_AFFINITY,
     REWARD_WEIGHT_CURIOSITY,
+    REWARD_WEIGHT_EXPLORATION,
 )
 from .types import RLAction
 
@@ -31,10 +32,13 @@ DEFAULT_WEIGHTS: Dict[str, float] = {
     "quality": REWARD_WEIGHT_QUALITY,
     "affinity": REWARD_WEIGHT_AFFINITY,
     "curiosity": REWARD_WEIGHT_CURIOSITY,
+    "exploration": REWARD_WEIGHT_EXPLORATION,
 }
 
 # Objective names for validation
-OBJECTIVE_NAMES = frozenset(["engagement", "quality", "affinity", "curiosity"])
+OBJECTIVE_NAMES = frozenset(
+    ["engagement", "quality", "affinity", "curiosity", "exploration"]
+)
 
 
 @dataclass

@@ -26,9 +26,10 @@ from datetime import datetime
 from config import Config
 from services.core.factory import ServiceFactory
 from services.interfaces.llm_interface import LLMInterface
-from cogs.chat import ChatCog
-from cogs.voice import VoiceCog
-from cogs.rl_commands import RLCommands
+from adapters.discord.commands.chat import ChatCog
+from adapters.discord.commands.voice import VoiceCog
+from adapters.discord.commands.rl import RLCommands
+from adapters.discord.commands.conversation import ConversationCommandsCog
 
 # Setup logging with structured JSON support
 from utils.logging_config import (
@@ -94,6 +95,9 @@ class OllamaBot(commands.Bot):
         # Initialize services via Factory
         factory: ServiceFactory = ServiceFactory(self)
         self.services: Dict[str, Any] = factory.create_services()
+        self.service_factory: ServiceFactory = (
+            factory  # Store factory for cogs to access
+        )
 
         # Expose key services as attributes for Cogs
         self.ollama: Optional[Any] = self.services.get("ollama")
@@ -109,7 +113,7 @@ class OllamaBot(commands.Bot):
 
                 self.dashboard = AnalyticsDashboard(
                     port=Config.ANALYTICS_DASHBOARD_PORT,
-                    api_key=Config.ANALYTICS_API_KEY,
+                    password=Config.ANALYTICS_PASSWORD,
                     enabled=True,
                 )
                 self.dashboard.bot = self  # Give dashboard access to bot
@@ -185,6 +189,11 @@ class OllamaBot(commands.Bot):
         # Load RL Commands
         await self.add_cog(RLCommands(self))
         logger.info("Loaded RLCommands")
+
+        # Load Conversation Commands (bot-to-bot conversations)
+        if Config.BOT_CONVERSATION_ENABLED:
+            await self.add_cog(ConversationCommandsCog(self))
+            logger.info("Loaded ConversationCommandsCog")
 
         # Sync commands (only if connected)
         try:

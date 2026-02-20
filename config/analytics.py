@@ -28,7 +28,7 @@ class DashboardConfig(BaseConfig):
 
     ENABLED: bool = BaseConfig._get_env_bool("ANALYTICS_DASHBOARD_ENABLED", False)
     PORT: int = BaseConfig._get_env_int("ANALYTICS_DASHBOARD_PORT", 8080)
-    API_KEY: str = BaseConfig._get_env("ANALYTICS_API_KEY", "change_me_in_production")
+    PASSWORD: str = BaseConfig._get_env("ANALYTICS_PASSWORD", "admin")
 
     METRICS_ENABLED: bool = BaseConfig._get_env_bool("METRICS_ENABLED", True)
     METRICS_SAVE_INTERVAL_MINUTES: int = BaseConfig._get_env_int(

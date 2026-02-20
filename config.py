@@ -381,6 +381,13 @@ class Config:
         for x in os.getenv("AMBIENT_CHANNELS", "").split(",")
         if x.strip()
     ]  # Channel IDs for ambient messages (empty = all channels)
+
+    # Proactive Chat Settings (ambient messages in text channels)
+    PROACTIVE_CHAT_CHANNELS: List[int] = [
+        int(x.strip())
+        for x in os.getenv("PROACTIVE_CHAT_CHANNELS", "1431878519016915044").split(",")
+        if x.strip()
+    ]  # Channel IDs where bot can proactively send messages (empty = disabled)
     AMBIENT_IGNORE_USERS: List[int] = [
         int(x.strip())
         for x in os.getenv("AMBIENT_IGNORE_USERS", "").split(",")
@@ -412,6 +419,20 @@ class Config:
     PROACTIVE_COOLDOWN: int = int(
         os.getenv("PROACTIVE_COOLDOWN", "180")
     )  # Seconds between proactive engagements
+
+    # Behavior Engine Probabilities (exposed as environment config)
+    # BEHAVIOR_REACTION_PROBABILITY: global probability that bot reacts to a message
+    BEHAVIOR_REACTION_PROBABILITY: float = float(
+        os.getenv("BEHAVIOR_REACTION_PROBABILITY", "0.50")
+    )
+    # BEHAVIOR_PROACTIVE_PROBABILITY: base probability used in proactive engagement checks
+    BEHAVIOR_PROACTIVE_PROBABILITY: float = float(
+        os.getenv("BEHAVIOR_PROACTIVE_PROBABILITY", "0.60")
+    )
+    # BEHAVIOR_COOLDOWN_SECONDS: cooldown for behavior-driven actions (seconds)
+    BEHAVIOR_COOLDOWN_SECONDS: int = int(os.getenv("BEHAVIOR_COOLDOWN_SECONDS", "150"))
+    # BEHAVIOR_MOOD_SHIFT_MAX: maximum mood shift per interaction/step
+    BEHAVIOR_MOOD_SHIFT_MAX: float = float(os.getenv("BEHAVIOR_MOOD_SHIFT_MAX", "0.20"))
 
     # Naturalness Settings
     NATURALNESS_ENABLED: bool = (

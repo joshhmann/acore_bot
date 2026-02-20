@@ -141,7 +141,7 @@ async def verify_type_safety():
 
     try:
         # Import modules that had type errors
-        from cogs.chat.main import ChatCog
+        from adapters.discord.commands.chat.main import ChatCog
         from services.analytics.dashboard import AnalyticsDashboard
 
         logger.info("✅ Type safety imports successful")

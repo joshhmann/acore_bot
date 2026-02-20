@@ -13,6 +13,7 @@ Features:
 """
 
 import asyncio
+import json
 import logging
 import os
 from datetime import datetime
@@ -61,14 +62,14 @@ class AnalyticsDashboard:
     def __init__(
         self,
         port: int = 8080,
-        api_key: Optional[str] = None,
+        password: Optional[str] = None,
         enabled: bool = True,
     ):
         """Initialize analytics dashboard.
 
         Args:
             port: Port to run dashboard server on
-            api_key: API key for authentication (if None, uses config)
+            password: Password for authentication (if None, uses config or default)
             enabled: Whether dashboard is enabled
         """
         if not FASTAPI_AVAILABLE:
@@ -83,23 +84,20 @@ class AnalyticsDashboard:
 
         self.port = port
 
-        # Load API key from config if not provided
-        if api_key is None:
+        # Load password from config if not provided
+        if password is None:
             try:
                 from config import Config
 
-                api_key = getattr(
-                    Config, "ANALYTICS_API_KEY", "change_me_in_production"
-                )
+                password = getattr(Config, "ANALYTICS_PASSWORD", "admin")
             except Exception as e:
-                logger.warning(f"Failed to load ANALYTICS_API_KEY from config: {e}")
-                api_key = "change_me_in_production"
+                logger.warning(f"Failed to load ANALYTICS_PASSWORD from config: {e}")
+                password = "admin"
 
-        self.api_key = api_key
+        self.password = password
 
         # FastAPI app
         self.app = FastAPI(title="Acore Bot Analytics", version="1.0.0")
-        self.api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
         # Active WebSocket connections
         self.active_connections: Set[WebSocket] = set()
@@ -108,8 +106,17 @@ class AnalyticsDashboard:
         self.metrics_cache: Dict = {}
         self.last_update = datetime.now()
 
+        # Persistence settings
+        self.metrics_persist_path = Path("data/analytics_metrics.json")
+        self.metrics_persist_interval = 60  # Save every 60 seconds
+        self._last_persist_time = datetime.now()
+        self._persisted_metrics: Dict = {}
+
         # Reference to bot (set after initialization)
         self.bot: Optional[Any] = None
+
+        # Load persisted metrics on startup
+        self._load_persisted_metrics()
 
         # Setup routes
         self._setup_routes()
@@ -228,7 +235,7 @@ RVC_ENABLED=false
 # Analytics
 ANALYTICS_DASHBOARD_ENABLED=true
 ANALYTICS_DASHBOARD_PORT=8080
-ANALYTICS_API_KEY=change_this_in_production
+ANALYTICS_PASSWORD=admin
 """
             env_path.write_text(template)
             return True
@@ -239,10 +246,11 @@ ANALYTICS_API_KEY=change_this_in_production
     def _setup_routes(self):
         """Setup FastAPI routes."""
 
-        async def verify_api_key(x_api_key: Optional[str] = Header(None)):
-            """Dependency to verify API key from header."""
-            if x_api_key != self.api_key:
-                raise HTTPException(status_code=403, detail="Invalid API key")
+        async def verify_password(
+            password: Optional[str] = Header(None, alias="X-Password"),
+        ):
+            if password != self.password:
+                raise HTTPException(status_code=403, detail="Invalid password")
             return True
 
         @self.app.get("/", response_class=HTMLResponse)
@@ -258,7 +266,6 @@ ANALYTICS_API_KEY=change_this_in_production
             if html_path.exists():
                 return html_path.read_text()
             else:
-                # Return basic HTML if template doesn't exist
                 return self._get_default_html()
 
         @self.app.get("/api/health")
@@ -273,7 +280,7 @@ ANALYTICS_API_KEY=change_this_in_production
         # ============ Configuration Management Endpoints ============
 
         @self.app.get("/api/config")
-        async def get_config(authenticated: bool = Depends(verify_api_key)):
+        async def get_config(authenticated: bool = Depends(verify_password)):
             """Get current configuration (safe fields only, no secrets)."""
             from config import Config
 
@@ -325,7 +332,7 @@ ANALYTICS_API_KEY=change_this_in_production
             return config_data
 
         @self.app.get("/api/config/providers/image")
-        async def get_image_providers(authenticated: bool = Depends(verify_api_key)):
+        async def get_image_providers(authenticated: bool = Depends(verify_password)):
             """Get available image generation providers and their status."""
             providers = {
                 "openai": {
@@ -371,7 +378,7 @@ ANALYTICS_API_KEY=change_this_in_production
 
         @self.app.post("/api/config/image-provider")
         async def set_image_provider(
-            body: dict, authenticated: bool = Depends(verify_api_key)
+            body: dict, authenticated: bool = Depends(verify_password)
         ):
             """Set the active image generation provider."""
             provider = body.get("provider")
@@ -386,7 +393,7 @@ ANALYTICS_API_KEY=change_this_in_production
 
         @self.app.post("/api/config/toggle")
         async def toggle_feature(
-            body: dict, authenticated: bool = Depends(verify_api_key)
+            body: dict, authenticated: bool = Depends(verify_password)
         ):
             """Toggle a feature on/off."""
             feature = body.get("feature")
@@ -411,7 +418,7 @@ ANALYTICS_API_KEY=change_this_in_production
 
         @self.app.get("/api/logs")
         async def get_recent_logs(
-            lines: int = 100, authenticated: bool = Depends(verify_api_key)
+            lines: int = 100, authenticated: bool = Depends(verify_password)
         ):
             """Get recent log entries."""
             log_files = [
@@ -430,12 +437,14 @@ ANALYTICS_API_KEY=change_this_in_production
             return {"logs": logs[-lines:] if len(logs) > lines else logs}
 
         @self.app.get("/api/metrics")
-        async def get_metrics(authenticated: bool = Depends(verify_api_key)):
-            """Get current metrics snapshot.
+        async def get_metrics(authenticated: bool = Depends(verify_password)):
+            """Get current metrics snapshot with persisted historical data.
 
             Requires API key authentication.
             """
-            return self.metrics_cache
+            metrics = self.metrics_cache.copy()
+            metrics["persisted_stats"] = self.get_persisted_stats()
+            return metrics
 
         @self.app.websocket("/ws/metrics")
         async def websocket_endpoint(websocket: WebSocket):
@@ -445,10 +454,10 @@ ANALYTICS_API_KEY=change_this_in_production
             """
             await websocket.accept()
 
-            # Verify API key via query param
-            api_key = websocket.query_params.get("api_key")
-            if api_key != self.api_key:
-                await websocket.close(code=1008, reason="Invalid API key")
+            # Verify password via query param
+            password = websocket.query_params.get("password")
+            if password != self.password:
+                await websocket.close(code=1008, reason="Invalid password")
                 return
 
             self.active_connections.add(websocket)
@@ -492,6 +501,11 @@ ANALYTICS_API_KEY=change_this_in_production
 
     async def stop(self):
         """Stop the dashboard server."""
+        # Save metrics before stopping
+        if self.metrics_cache:
+            self._persist_metrics(self.metrics_cache)
+            logger.info("Metrics persisted before shutdown")
+
         if self._update_task:
             self._update_task.cancel()
             try:
@@ -531,6 +545,12 @@ ANALYTICS_API_KEY=change_this_in_production
             self.metrics_cache = metrics
             self.last_update = datetime.now()
 
+            # Persist metrics periodically
+            if (
+                datetime.now() - self._last_persist_time
+            ).total_seconds() >= self.metrics_persist_interval:
+                self._persist_metrics(metrics)
+
         except asyncio.TimeoutError:
             logger.error("Metrics collection timeout after 5 seconds")
             self.metrics_cache = {"error": "timeout"}
@@ -551,6 +571,79 @@ ANALYTICS_API_KEY=change_this_in_production
             "rl": await self._collect_rl_metrics(),
         }
         return metrics
+
+    def _load_persisted_metrics(self) -> None:
+        """Load metrics from disk on startup."""
+        try:
+            if self.metrics_persist_path.exists():
+                with open(self.metrics_persist_path, "r") as f:
+                    self._persisted_metrics = json.load(f)
+                logger.info(
+                    f"Loaded persisted metrics from {self.metrics_persist_path}"
+                )
+            else:
+                logger.info("No persisted metrics found, starting fresh")
+                self._persisted_metrics = {}
+        except Exception as e:
+            logger.warning(f"Failed to load persisted metrics: {e}")
+            self._persisted_metrics = {}
+
+    def _persist_metrics(self, metrics: Dict) -> None:
+        """Save metrics to disk for persistence across restarts."""
+        try:
+            self.metrics_persist_path.parent.mkdir(parents=True, exist_ok=True)
+
+            # Build cumulative metrics
+            persisted = self._persisted_metrics.copy()
+
+            # Update with new metrics, keeping historical data
+            if "activity" in metrics:
+                activity = metrics["activity"]
+                if "total_messages" in activity:
+                    persisted["total_messages"] = persisted.get(
+                        "total_messages", 0
+                    ) + activity.get("messages_processed", 0)
+                if "total_commands" in activity:
+                    persisted["total_commands"] = persisted.get(
+                        "total_commands", 0
+                    ) + activity.get("commands_executed", 0)
+
+            if "performance" in metrics:
+                perf = metrics["performance"]
+                if "total_errors" in perf:
+                    persisted["total_errors"] = persisted.get(
+                        "total_errors", 0
+                    ) + perf.get("total_errors", 0)
+
+            # Keep track of all-time highs
+            if "rl" in metrics and "avg_q_value" in metrics["rl"]:
+                current_q = metrics["rl"]["avg_q_value"]
+                if current_q > persisted.get("best_q_value", 0):
+                    persisted["best_q_value"] = current_q
+
+            # Store last update timestamp
+            persisted["last_saved"] = datetime.now().isoformat()
+            persisted["last_metrics"] = metrics
+
+            # Write to file
+            with open(self.metrics_persist_path, "w") as f:
+                json.dump(persisted, f, indent=2)
+
+            self._persisted_metrics = persisted
+            self._last_persist_time = datetime.now()
+
+        except Exception as e:
+            logger.error(f"Failed to persist metrics: {e}")
+
+    def get_persisted_stats(self) -> Dict:
+        """Get cumulative stats from persisted data."""
+        return {
+            "total_messages": self._persisted_metrics.get("total_messages", 0),
+            "total_commands": self._persisted_metrics.get("total_commands", 0),
+            "total_errors": self._persisted_metrics.get("total_errors", 0),
+            "best_q_value": self._persisted_metrics.get("best_q_value", 0),
+            "last_saved": self._persisted_metrics.get("last_saved", None),
+        }
 
     async def _collect_persona_metrics(self) -> Dict:
         """Collect persona-specific metrics."""
@@ -1390,17 +1483,53 @@ ANALYTICS_API_KEY=change_this_in_production
     </div>
     
     <script>
-        const API_KEY = prompt("Enter API key:");
-        const WS_URL = `ws://${window.location.host}/ws/metrics?api_key=${API_KEY}`;
-        
         let ws = null;
+        let password = '';
         
-        function connect() {
-            ws = new WebSocket(WS_URL);
+        function showLogin() {
+            document.body.innerHTML = `
+                <div class="container" style="max-width: 400px; margin-top: 100px;">
+                    <h1>🔐 Login</h1>
+                    <p>Enter password to access the dashboard</p>
+                    <form id="login-form" style="margin-top: 20px;">
+                        <input type="password" id="password-input" placeholder="Password" 
+                            style="width: 100%; padding: 12px; font-size: 16px; border: 1px solid #ddd; border-radius: 5px; box-sizing: border-box;">
+                        <button type="submit" 
+                            style="width: 100%; margin-top: 15px; padding: 12px; background: #667eea; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;">
+                            Login
+                        </button>
+                    </form>
+                    <p id="error-msg" style="color: #f44336; margin-top: 10px; display: none;">Invalid password</p>
+                </div>
+            `;
+            
+            document.getElementById('login-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                password = document.getElementById('password-input').value;
+                location.reload();
+            });
+        }
+        
+        function initDashboard() {
+            // Check if password is stored
+            password = sessionStorage.getItem('dashboard_password') || '';
+            
+            if (!password) {
+                showLogin();
+                return;
+            }
+            
+            const WS_URL = `ws://${window.location.host}/ws/metrics?password=${encodeURIComponent(password)}`;
+            connect(WS_URL);
+        }
+        
+        function connect(wsUrl) {
+            ws = new WebSocket(wsUrl);
             
             ws.onopen = () => {
                 document.getElementById('connection-status').textContent = 'Connected';
                 document.getElementById('connection-status').className = 'status connected';
+                sessionStorage.setItem('dashboard_password', password);
             };
             
             ws.onmessage = (event) => {
@@ -1408,10 +1537,18 @@ ANALYTICS_API_KEY=change_this_in_production
                 updateDashboard(data);
             };
             
-            ws.onclose = () => {
+            ws.onclose = (event) => {
                 document.getElementById('connection-status').textContent = 'Disconnected';
                 document.getElementById('connection-status').className = 'status disconnected';
-                setTimeout(connect, 5000);  // Reconnect after 5s
+                
+                if (event.code === 1008) {
+                    // Authentication failed
+                    sessionStorage.removeItem('dashboard_password');
+                    showLogin();
+                    return;
+                }
+                
+                setTimeout(() => connect(wsUrl), 5000);
             };
             
             ws.onerror = (error) => {
@@ -1420,26 +1557,22 @@ ANALYTICS_API_KEY=change_this_in_production
         }
         
         function updateDashboard(data) {
-            // Update uptime
             if (data.uptime_seconds) {
                 const hours = Math.floor(data.uptime_seconds / 3600);
                 const minutes = Math.floor((data.uptime_seconds % 3600) / 60);
                 document.getElementById('uptime').textContent = `${hours}h ${minutes}m`;
             }
             
-            // Update activity metrics
             if (data.activity) {
                 document.getElementById('messages').textContent = data.activity.messages_processed || 0;
                 document.getElementById('users').textContent = data.activity.active_users || 0;
             }
             
-            // Update performance metrics
             if (data.performance) {
                 document.getElementById('response-time').textContent = 
                     Math.round(data.performance.avg_response_time_ms || 0) + 'ms';
             }
             
-            // Update personas list
             if (data.personas && data.personas.active_personas) {
                 const personasList = document.getElementById('personas-list');
                 personasList.innerHTML = data.personas.active_personas.map(p => `
@@ -1451,8 +1584,7 @@ ANALYTICS_API_KEY=change_this_in_production
             }
         }
         
-        // Connect on load
-        connect();
+        initDashboard();
     </script>
 </body>
 </html>

@@ -1,0 +1,9 @@
+QA Evidence for Task 3: Discord adapters scaffolding
+- Created adapters/discord/adapter.py with two skeleton classes:
+  - DiscordInputAdapter(InputAdapter) with async start/stop/on_event
+- Created adapters/discord/__init__.py exporting the adapters
+- Imports validated: core.interfaces, typing, and discord
+- Next steps: ensure import tests pass as per QA steps
+- Evidence of import viability will be captured by:
+  python -c "from adapters.discord import DiscordInputAdapter, DiscordOutputAdapter; print('OK')"
+  python -c "from adapters.discord.adapter import DiscordInputAdapter; from core.interfaces import InputAdapter; assert issubclass(DiscordInputAdapter, InputAdapter); print('OK')"

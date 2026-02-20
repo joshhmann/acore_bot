@@ -29,10 +29,18 @@ RL_WARMUP_STEPS = 1000  # Transitions to collect before training starts
 RL_TRAIN_EVERY = 4  # Train every N steps after warmup
 
 # Multi-objective reward weights (must sum to 1.0)
-REWARD_WEIGHT_ENGAGEMENT = 0.3
-REWARD_WEIGHT_QUALITY = 0.3
+REWARD_WEIGHT_ENGAGEMENT = 0.25
+REWARD_WEIGHT_QUALITY = 0.25
 REWARD_WEIGHT_AFFINITY = 0.2
 REWARD_WEIGHT_CURIOSITY = 0.2
+REWARD_WEIGHT_EXPLORATION = 0.1  # New: rewards proactive engagement during low activity
+
+# Exploration-heavy mode for low-interaction training
+RL_EXPLORATION_MODE = False  # Enable to boost exploration when activity is low
+RL_EXPLORATION_ACTIVITY_THRESHOLD = 5  # Messages per hour threshold for "low activity"
+RL_EXPLORATION_BONUS_MAX = 3.0  # Maximum exploration bonus reward
+RL_EPSILON_BOOST_FACTOR = 2.0  # Multiply epsilon by this during low activity
+RL_EPSILON_BOOST_DECAY = 0.999  # Decay rate for boosted epsilon
 
 # Component clipping
 REWARD_CLIP_COMPONENT = 5.0

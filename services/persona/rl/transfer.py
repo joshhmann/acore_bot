@@ -376,7 +376,10 @@ class KnowledgeTransfer:
             source_features = self.load_persona_features(source_id)
             target_features = self.load_persona_features(target_id)
         except (FileNotFoundError, ValueError) as e:
-            logger.error(f"Failed to load persona features: {e}")
+            # Persona file not found - this is expected for invalid/placeholder IDs
+            logger.debug(
+                f"Persona features not found for '{source_id}' or '{target_id}': {e}"
+            )
             return 0.0
 
         trait_sim = self.compute_trait_similarity(source_features, target_features)
@@ -393,11 +396,12 @@ class KnowledgeTransfer:
             + STYLE_COMPATIBILITY_WEIGHT * style_compat
         )
 
-        logger.debug(
-            f"Similarity between '{source_id}' and '{target_id}': "
-            f"overall={overall_similarity:.3f}, traits={trait_sim:.3f}, "
-            f"interests={interest_overlap:.3f}, style={style_compat:.3f}"
-        )
+        if overall_similarity > 0.8 or overall_similarity < 0.3:
+            logger.debug(
+                f"Similarity between '{source_id}' and '{target_id}': "
+                f"overall={overall_similarity:.3f}, traits={trait_sim:.3f}, "
+                f"interests={interest_overlap:.3f}, style={style_compat:.3f}"
+            )
 
         return overall_similarity
 

@@ -6,7 +6,17 @@ import base64
 from pathlib import Path
 from typing import Dict, Optional, Any, List
 from dataclasses import dataclass, field
-from PIL import Image
+
+# PIL is optional for unit tests that do not render images.
+try:
+    from PIL import Image  # type: ignore
+except Exception:
+
+    class Image:  # type: ignore
+        @staticmethod
+        def open(*args, **kwargs):
+            raise RuntimeError("PIL.Image is not available in this test environment")
+
 
 logger = logging.getLogger(__name__)
 
