@@ -1,7 +1,7 @@
 """Bot-to-Bot Conversation Orchestrator.
 
 This is the core service that manages multi-turn conversations
-between AI personas using webhooks for persona spoofing.
+between AI personas using events for output delivery.
 """
 
 import asyncio
@@ -9,8 +9,6 @@ import logging
 import random
 from datetime import datetime
 from typing import List, Dict, Optional, Any
-
-import discord
 
 from services.conversation.state import (
     ConversationState,
@@ -23,75 +21,14 @@ from services.conversation.metrics import ConversationMetricsCalculator
 from services.conversation.archival import ConversationArchivalService
 from services.persona.router import PersonaRouter
 from services.persona.behavior import BehaviorEngine
+from core.interfaces import EventBus
+from core.types import (
+    PersonaSpokeEvent,
+    ConversationTypingEvent,
+    ConversationSummaryEvent,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class WebhookPool:
-    """Manages Discord webhooks to avoid rate limits.
-
-    Discord limits: 10 webhooks per guild, 30 requests/minute per webhook.
-    """
-
-    def __init__(self, channel: discord.TextChannel, max_webhooks: int = 10):
-        self.channel = channel
-        self.max_webhooks = max_webhooks
-        self.webhooks: Dict[str, discord.Webhook] = {}
-        self.webhook_order: List[str] = []  # For LRU eviction
-
-    async def get_or_create_webhook(
-        self, persona_id: str, display_name: str, avatar_url: str
-    ) -> discord.Webhook:
-        """Get existing webhook or create new one."""
-
-        if persona_id in self.webhooks:
-            # Move to end (most recently used)
-            self.webhook_order.remove(persona_id)
-            self.webhook_order.append(persona_id)
-            return self.webhooks[persona_id]
-
-        # Check if we need to evict
-        if len(self.webhooks) >= self.max_webhooks:
-            # Evict least recently used
-            lru_persona = self.webhook_order.pop(0)
-            old_webhook = self.webhooks.pop(lru_persona)
-            # Update webhook for new persona
-            await old_webhook.edit(
-                name=display_name, avatar=await self._fetch_avatar(avatar_url)
-            )
-            self.webhooks[persona_id] = old_webhook
-            self.webhook_order.append(persona_id)
-            return old_webhook
-
-        # Create new webhook
-        try:
-            webhook = await self.channel.create_webhook(
-                name=display_name, avatar=await self._fetch_avatar(avatar_url)
-            )
-            self.webhooks[persona_id] = webhook
-            self.webhook_order.append(persona_id)
-            logger.debug(f"Created webhook for {persona_id}")
-            return webhook
-        except discord.HTTPException as e:
-            logger.error(f"Failed to create webhook: {e}")
-            raise
-
-    async def _fetch_avatar(self, avatar_url: str) -> Optional[bytes]:
-        """Fetch avatar image bytes from URL."""
-        if not avatar_url:
-            return None
-
-        try:
-            import aiohttp
-
-            async with aiohttp.ClientSession() as session:
-                async with session.get(avatar_url) as resp:
-                    if resp.status == 200:
-                        return await resp.read()
-        except Exception as e:
-            logger.warning(f"Failed to fetch avatar from {avatar_url}: {e}")
-
-        return None
 
 
 class ConversationConfig:
@@ -120,6 +57,7 @@ class BotConversationOrchestrator:
         persona_router: PersonaRouter,
         behavior_engine: BehaviorEngine,
         llm_service: Any,
+        event_bus: Optional[EventBus] = None,
         rag_service: Optional[Any] = None,
         persistence: Optional[ConversationPersistence] = None,
         archival_service: Optional[ConversationArchivalService] = None,
@@ -127,6 +65,7 @@ class BotConversationOrchestrator:
         self.persona_router = persona_router
         self.behavior_engine = behavior_engine
         self.llm = llm_service
+        self.event_bus = event_bus
         self.rag = rag_service
         self.persistence = persistence
         self.archival = archival_service
@@ -138,7 +77,7 @@ class BotConversationOrchestrator:
         self,
         participants: List[str],
         topic: str,
-        channel: discord.TextChannel,
+        channel_id: str,
         config: Optional[ConversationConfig] = None,
     ) -> str:
         """Start a new bot-to-bot conversation.
@@ -146,7 +85,7 @@ class BotConversationOrchestrator:
         Args:
             participants: List of persona IDs to participate
             topic: Conversation topic
-            channel: Discord channel to post messages
+            channel_id: Platform-agnostic channel identifier
             config: Optional conversation configuration
 
         Returns:
@@ -154,13 +93,11 @@ class BotConversationOrchestrator:
         """
         config = config or ConversationConfig()
 
-        # Set random seed for reproducibility (if provided)
         if config.seed is not None:
             random.seed(config.seed)
 
         conversation_id = f"conv-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{random.randint(1000, 9999)}"
 
-        # Create conversation state
         state = ConversationState(
             conversation_id=conversation_id,
             participants=participants,
@@ -173,8 +110,7 @@ class BotConversationOrchestrator:
         async with self._lock:
             self.active_conversations[conversation_id] = state
 
-        # Start conversation in background
-        asyncio.create_task(self._run_conversation(state, channel, config))
+        asyncio.create_task(self._run_conversation(state, channel_id, config))
 
         logger.info(
             f"Started conversation {conversation_id} with participants: {participants}"
@@ -184,66 +120,74 @@ class BotConversationOrchestrator:
     async def _run_conversation(
         self,
         state: ConversationState,
-        channel: discord.TextChannel,
+        channel_id: str,
         config: ConversationConfig,
     ):
         """Run the conversation loop."""
 
-        webhook_pool = WebhookPool(channel)
-
         try:
-            # Select initiator
             current_speaker = random.choice(state.participants)
             state.current_speaker = current_speaker
 
-            # Generate initial message
             await self._generate_and_send_message(
-                state, current_speaker, channel, webhook_pool, is_first=True
+                state, current_speaker, channel_id, config, is_first=True
             )
 
-            # Conversation loop
             while state.turn_count < config.max_turns:
-                # Check for timeout
                 if self._is_timeout(state, config.turn_timeout_seconds):
                     state.termination_reason = "timeout"
                     break
 
-                # Select next speaker
                 next_speaker = self._select_next_speaker(state)
                 if not next_speaker:
                     break
 
                 state.current_speaker = next_speaker
 
-                # Generate and send message
-                success = await self._generate_and_send_message(
-                    state, next_speaker, channel, webhook_pool
-                )
+                await self._emit_typing(channel_id)
+
+                max_retries = 2
+                success = False
+                for attempt in range(max_retries):
+                    success = await self._generate_and_send_message(
+                        state, next_speaker, channel_id, config
+                    )
+                    if success:
+                        break
 
                 if not success:
-                    logger.warning(f"Failed to generate message for {next_speaker}")
+                    logger.warning(
+                        f"Retry attempts exhausted for {next_speaker}, continuing conversation..."
+                    )
+
+                    await self._emit_persona_spoke(
+                        channel_id=channel_id,
+                        conversation_id=state.conversation_id,
+                        persona_id=next_speaker,
+                        display_name=next_speaker,
+                        avatar_url="",
+                        content="[Message failed to generate - continuing conversation]",
+                    )
                     continue
 
-                # Check for natural ending
+                await asyncio.sleep(1)
+
                 if self._should_end_conversation(state):
                     state.termination_reason = "natural_end"
                     break
 
-                # Small delay between messages for realism
-                await asyncio.sleep(1)
+                await asyncio.sleep(random.uniform(3, 5))
 
-            # Conversation complete
             state.status = ConversationStatus.COMPLETED
             if not state.termination_reason:
                 state.termination_reason = "turn_limit"
 
             state.ended_at = datetime.now()
 
-            # Calculate metrics
             if config.enable_metrics:
                 await self._calculate_metrics(state)
+                await self._process_rl_feedback(state, config)
 
-            # Save state
             if self.persistence:
                 await self.persistence.save(state)
 
@@ -253,8 +197,7 @@ class BotConversationOrchestrator:
                 except Exception as e:
                     logger.warning(f"Failed to index conversation to RAG: {e}")
 
-            # Send summary
-            await self._send_summary(state, channel, webhook_pool)
+            await self._send_summary(state, channel_id)
 
         except Exception as e:
             logger.error(f"Conversation {state.conversation_id} failed: {e}")
@@ -263,38 +206,38 @@ class BotConversationOrchestrator:
 
         finally:
             async with self._lock:
-                del self.active_conversations[state.conversation_id]
+                if state.conversation_id in self.active_conversations:
+                    del self.active_conversations[state.conversation_id]
 
     async def _generate_and_send_message(
         self,
         state: ConversationState,
         speaker: str,
-        channel: discord.TextChannel,
-        webhook_pool: WebhookPool,
+        channel_id: str,
+        config: ConversationConfig,
         is_first: bool = False,
     ) -> bool:
         """Generate and send a message from a persona."""
 
         try:
-            # Build context
             context = self._build_context(state, speaker, is_first)
 
-            # Get persona details
-            persona = self.persona_router.get_persona(speaker)
+            persona = self.persona_router.get_persona_by_name(speaker)
             if not persona:
                 logger.error(f"Persona {speaker} not found")
                 return False
 
-            # Generate message via LLM
             start_time = datetime.now()
 
-            response = await self.llm.generate(
-                system_prompt=persona.system_prompt, messages=context, temperature=0.8
+            response = await self.llm.chat(
+                messages=context,
+                system_prompt=persona.system_prompt,
+                temperature=0.8,
+                max_tokens=150,
             )
 
             latency = (datetime.now() - start_time).total_seconds()
 
-            # Create message object
             message = Message(
                 speaker=speaker,
                 content=response,
@@ -306,22 +249,20 @@ class BotConversationOrchestrator:
             state.messages.append(message)
             state.turn_count += 1
 
-            # Send via webhook
-            webhook = await webhook_pool.get_or_create_webhook(
-                speaker, persona.character.display_name, persona.character.avatar_url
-            )
+            avatar_val = getattr(persona.character, "avatar_url", None)
+            avatar_url_val = str(avatar_val) if avatar_val is not None else ""
+            from typing import cast
 
-            # Attach conversation metadata for loop prevention bypass
-            sent_message = await webhook.send(
+            avatar_url_arg = cast(str, avatar_url_val)
+
+            await self._emit_persona_spoke(
+                channel_id=channel_id,
+                conversation_id=state.conversation_id,
+                persona_id=speaker,
+                display_name=persona.character.display_name,
+                avatar_url=avatar_url_arg,
                 content=response,
-                username=persona.character.display_name,
-                avatar_url=persona.character.avatar_url,
-                wait=True,
             )
-
-            # Mark message as part of conversation (for loop prevention bypass)
-            if sent_message:
-                sent_message._bot_conversation_id = state.conversation_id
 
             logger.debug(f"Sent message from {speaker}: {response[:50]}...")
             return True
@@ -330,6 +271,36 @@ class BotConversationOrchestrator:
             logger.error(f"Failed to generate/send message: {e}")
             return False
 
+    async def _emit_persona_spoke(
+        self,
+        channel_id: str,
+        conversation_id: str,
+        persona_id: str,
+        display_name: str,
+        avatar_url: str,
+        content: str,
+    ) -> None:
+        """Emit a PersonaSpokeEvent to the event bus."""
+        if self.event_bus:
+            event = PersonaSpokeEvent(
+                conversation_id=conversation_id,
+                channel_id=channel_id,
+                persona_id=persona_id,
+                display_name=display_name,
+                avatar_url=avatar_url,
+                content=content,
+            )
+            self.event_bus.emit("persona_spoke", event.__dict__)
+
+    async def _emit_typing(self, channel_id: str, duration_seconds: float = 1.0) -> None:
+        """Emit a ConversationTypingEvent to the event bus."""
+        if self.event_bus:
+            event = ConversationTypingEvent(
+                channel_id=channel_id,
+                duration_seconds=duration_seconds,
+            )
+            self.event_bus.emit("conversation_typing", event.__dict__)
+
     def _build_context(
         self, state: ConversationState, speaker: str, is_first: bool
     ) -> List[Dict[str, str]]:
@@ -337,7 +308,6 @@ class BotConversationOrchestrator:
 
         context = []
 
-        # Add system instruction
         if is_first:
             context.append(
                 {
@@ -353,8 +323,7 @@ class BotConversationOrchestrator:
                 }
             )
 
-        # Add conversation history
-        for msg in state.messages[-5:]:  # Last 5 messages for context
+        for msg in state.messages[-5:]:
             context.append(
                 {
                     "role": "assistant" if msg.speaker == speaker else "user",
@@ -371,21 +340,16 @@ class BotConversationOrchestrator:
         if not current:
             return random.choice(state.participants)
 
-        # Get other participants
         others = [p for p in state.participants if p != current]
         if not others:
             return current
 
-        # Affinity-weighted selection
         weights = []
         for participant in others:
-            # Get affinity from relationship system
             affinity = self._get_affinity(current, participant)
-            # Add some randomness
             weight = affinity + random.randint(0, 20)
             weights.append(weight)
 
-        # Weighted random choice
         total = sum(weights)
         if total == 0:
             return random.choice(others)
@@ -401,8 +365,6 @@ class BotConversationOrchestrator:
 
     def _get_affinity(self, persona1: str, persona2: str) -> int:
         """Get affinity score between two personas."""
-        # TODO: Integrate with PersonaRelationships service
-        # For now, return default affinity
         return 50
 
     def _is_timeout(self, state: ConversationState, timeout_seconds: int) -> bool:
@@ -421,15 +383,9 @@ class BotConversationOrchestrator:
 
         last_message = state.messages[-1].content.lower()
 
-        # Check for farewell keywords
         farewells = ["goodbye", "farewell", "bye", "see you", "talk later"]
         if any(f in last_message for f in farewells):
             return True
-
-        # Check for question marks (if no response needed)
-        if "?" not in last_message and state.turn_count >= 8:
-            # Soft ending possible
-            pass
 
         return False
 
@@ -444,25 +400,76 @@ class BotConversationOrchestrator:
 
         state.metrics = await calculator.calculate_all_metrics(state)
 
+    async def _process_rl_feedback(self, state: ConversationState, config: ConversationConfig) -> None:
+        """Process reinforcement learning feedback for the conversation."""
+        try:
+            from config import Config as _Config
+            import inspect
+
+            if (
+                getattr(_Config, "BOTCONV_RL_TRAINING_ENABLED", False)
+                and hasattr(self, "behavior_engine")
+                and self.behavior_engine
+                and hasattr(self.behavior_engine, "rl_service")
+                and self.behavior_engine.rl_service
+            ):
+                engagement = None
+                metrics = getattr(state, "metrics", None)
+                if metrics is not None:
+                    engagement = getattr(metrics, "engagement", None)
+                score = 0.0
+                if engagement is not None:
+                    if engagement > 0.7:
+                        score = 0.9
+                    elif engagement > 0.4:
+                        score = 0.6
+                    else:
+                        score = 0.3
+
+                state_info = {
+                    "conversation_id": getattr(state, "conversation_id", None),
+                    "turns": getattr(state, "turn_count", None),
+                    "participants": getattr(state, "participants", []),
+                }
+
+                reward = 1.0 if score > 0.6 else (-1.0 if score < 0.4 else 0.0)
+                if reward != 0.0:
+                    rl_service = self.behavior_engine.rl_service
+                    record_feedback = getattr(
+                        rl_service, "record_feedback", None
+                    )
+                    if record_feedback:
+                        try:
+                            if inspect.iscoroutinefunction(record_feedback):
+                                await record_feedback(state_info, reward)
+                            else:
+                                record_feedback(state_info, reward)
+                        except Exception as e:
+                            logger.debug(f"RL record_feedback call failed: {e}")
+        except Exception as e:
+            logger.debug(f"RL training integration skip: {e}")
+
     async def _send_summary(
         self,
         state: ConversationState,
-        channel: discord.TextChannel,
-        webhook_pool: WebhookPool,
+        channel_id: str,
     ):
-        """Send conversation summary."""
+        """Send conversation summary via event."""
 
-        summary = f"""
-**Conversation Complete** ({state.conversation_id})
-- Participants: {", ".join(state.participants)}
-- Topic: {state.topic}
-- Turns: {state.turn_count}/{state.max_turns}
-- Duration: {(state.ended_at - state.started_at).total_seconds():.1f}s
-- Ending: {state.termination_reason}
-- Avg Latency: {state.metrics.avg_latency:.2f}s
-        """.strip()
+        avg_latency = state.metrics.avg_latency if state.metrics else 0.0
 
-        await channel.send(summary)
+        if self.event_bus:
+            event = ConversationSummaryEvent(
+                conversation_id=state.conversation_id,
+                channel_id=channel_id,
+                participants=state.participants,
+                topic=state.topic,
+                turn_count=state.turn_count,
+                max_turns=state.max_turns,
+                termination_reason=state.termination_reason or "unknown",
+                avg_latency=avg_latency,
+            )
+            self.event_bus.emit("conversation_summary", event.__dict__)
 
     async def get_conversation(
         self, conversation_id: str

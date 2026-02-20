@@ -17,17 +17,18 @@ from dataclasses import dataclass
 from typing import Dict, Optional, Any, Set
 from collections import deque
 
-import discord
-
+from core.types import AcoreMessage
 from services.persona.rl.constants import (
     REWARD_WEIGHT_ENGAGEMENT,
     REWARD_WEIGHT_QUALITY,
     REWARD_WEIGHT_AFFINITY,
     REWARD_WEIGHT_CURIOSITY,
+    REWARD_WEIGHT_EXPLORATION,
     REWARD_CLIP_COMPONENT,
     REWARD_CLIP_TOTAL,
     RL_REWARD_SPEED_THRESHOLD,
     RL_REWARD_LONG_MSG_CHAR,
+    RL_EXPLORATION_BONUS_MAX,
 )
 
 
@@ -40,6 +41,7 @@ class RewardComponents:
         quality: Quality component score [-5, 5]
         affinity: Affinity component score [-5, 5]
         curiosity: Curiosity component score [-5, 5]
+        exploration: Exploration bonus for proactive engagement during low activity [-5, 5]
         total: Weighted total reward [-10, 10]
     """
 
@@ -47,6 +49,7 @@ class RewardComponents:
     quality: float
     affinity: float
     curiosity: float
+    exploration: float
     total: float
 
 
@@ -69,6 +72,7 @@ class MultiObjectiveReward:
         "quality": REWARD_WEIGHT_QUALITY,
         "affinity": REWARD_WEIGHT_AFFINITY,
         "curiosity": REWARD_WEIGHT_CURIOSITY,
+        "exploration": REWARD_WEIGHT_EXPLORATION,
     }
 
     def __init__(self, weights: Optional[Dict[str, float]] = None):
@@ -89,30 +93,32 @@ class MultiObjectiveReward:
                 self.weights = {k: v / total for k, v in weights.items()}
 
         # Topic history for novelty tracking (channel_id -> deque of topics)
-        self._topic_history: Dict[int, deque] = {}
+        self._topic_history: Dict[str, deque] = {}
 
         # Question history for diversity tracking (channel_id -> deque of questions)
-        self._question_history: Dict[int, deque] = {}
+        self._question_history: Dict[str, deque] = {}
 
         # Maximum history size for novelty/diversity calculations
         self._max_history_size = 50
 
     def calculate(
         self,
-        message: discord.Message,
+        message: AcoreMessage,
         response: str,
         state: Any,
         affinity_delta: float = 0.0,
         latency: float = 0.0,
+        exploration_bonus: float = 0.0,
     ) -> RewardComponents:
         """Calculate multi-objective reward components.
 
         Args:
-            message: The Discord message that triggered the response
+            message: The message that triggered the response
             response: The bot's response text
             state: BehaviorState containing conversation context
             affinity_delta: Change in user affinity score
             latency: Response latency in seconds
+            exploration_bonus: Bonus for proactive engagement during low activity
 
         Returns:
             RewardComponents containing all individual components and total
@@ -122,12 +128,16 @@ class MultiObjectiveReward:
         quality = self._calculate_quality(message, response, state)
         affinity = self._calculate_affinity(affinity_delta)
         curiosity = self._calculate_curiosity(message, state)
+        exploration = self._calculate_exploration(exploration_bonus)
 
         # Clip individual components to [-5, 5]
         engagement = max(-REWARD_CLIP_COMPONENT, min(REWARD_CLIP_COMPONENT, engagement))
         quality = max(-REWARD_CLIP_COMPONENT, min(REWARD_CLIP_COMPONENT, quality))
         affinity = max(-REWARD_CLIP_COMPONENT, min(REWARD_CLIP_COMPONENT, affinity))
         curiosity = max(-REWARD_CLIP_COMPONENT, min(REWARD_CLIP_COMPONENT, curiosity))
+        exploration = max(
+            -REWARD_CLIP_COMPONENT, min(REWARD_CLIP_COMPONENT, exploration)
+        )
 
         # Calculate weighted total
         total = (
@@ -135,6 +145,7 @@ class MultiObjectiveReward:
             + quality * self.weights["quality"]
             + affinity * self.weights["affinity"]
             + curiosity * self.weights["curiosity"]
+            + exploration * self.weights["exploration"]
         )
 
         # Scale total to [-10, 10] range (components are [-5, 5], weighted sum is [-5, 5])
@@ -149,11 +160,12 @@ class MultiObjectiveReward:
             quality=quality,
             affinity=affinity,
             curiosity=curiosity,
+            exploration=exploration,
             total=total,
         )
 
     def _calculate_engagement(
-        self, message: discord.Message, response: str, latency: float
+        self, message: AcoreMessage, response: str, latency: float
     ) -> float:
         """Calculate engagement reward component.
 
@@ -174,7 +186,7 @@ class MultiObjectiveReward:
 
         # Message length score (0 to 2.5)
         # Longer messages indicate higher engagement
-        msg_length = len(message.content) if hasattr(message, "content") else 0
+        msg_length = len(message.text) if hasattr(message, "text") else 0
         if msg_length >= RL_REWARD_LONG_MSG_CHAR:
             reward += 2.5
         elif msg_length > 50:
@@ -201,13 +213,13 @@ class MultiObjectiveReward:
 
         # Question detection (0 to 1.0)
         # Asking questions shows engagement
-        if "?" in message.content if hasattr(message, "content") else False:
+        if "?" in message.text if hasattr(message, "text") else False:
             reward += 1.0
 
         return reward
 
     def _calculate_quality(
-        self, message: discord.Message, response: str, state: Any
+        self, message: AcoreMessage, response: str, state: Any
     ) -> float:
         """Calculate quality reward component.
 
@@ -237,7 +249,7 @@ class MultiObjectiveReward:
         # Reward for maintaining conversation thread
         if hasattr(state, "recent_topics") and state.recent_topics:
             current_topics = self._extract_topics(
-                message.content if hasattr(message, "content") else ""
+                message.text if hasattr(message, "text") else ""
             )
             recent_topics = set(state.recent_topics)
 
@@ -281,7 +293,7 @@ class MultiObjectiveReward:
         # Range: [-5, 5]
         return math.tanh(affinity_delta * 0.1) * 5.0
 
-    def _calculate_curiosity(self, message: discord.Message, state: Any) -> float:
+    def _calculate_curiosity(self, message: AcoreMessage, state: Any) -> float:
         """Calculate curiosity reward component.
 
         Factors:
@@ -297,10 +309,10 @@ class MultiObjectiveReward:
             Curiosity score [-5, 5]
         """
         reward = 0.0
-        channel_id = message.channel.id if hasattr(message, "channel") else 0
+        channel_id = message.channel_id if hasattr(message, "channel_id") else ""
 
         # Extract current topics
-        content = message.content if hasattr(message, "content") else ""
+        content = message.text if hasattr(message, "text") else ""
         current_topics = self._extract_topics(content)
 
         # Initialize topic history for this channel
@@ -366,6 +378,24 @@ class MultiObjectiveReward:
             reward += curiosity_map.get(state.curiosity_level, 0.0)
 
         return reward
+
+    def _calculate_exploration(self, exploration_bonus: float) -> float:
+        """Calculate exploration reward component for low-activity periods.
+
+        This rewards the bot for proactive engagement when channel activity is low,
+        encouraging exploration and preventing the RL policy from becoming stale
+        during quiet periods.
+
+        Args:
+            exploration_bonus: Raw bonus value from activity monitoring (typically 0-3)
+
+        Returns:
+            Exploration score [-5, 5]
+        """
+        # Clip to valid range
+        return max(
+            -RL_EXPLORATION_BONUS_MAX, min(RL_EXPLORATION_BONUS_MAX, exploration_bonus)
+        )
 
     def _count_emojis(self, text: str) -> int:
         """Count emoji characters in text.
@@ -487,7 +517,7 @@ class MultiObjectiveReward:
         if total > 0:
             self.weights = {k: v / total for k, v in weights.items()}
 
-    def reset_history(self, channel_id: Optional[int] = None) -> None:
+    def reset_history(self, channel_id: Optional[str] = None) -> None:
         """Reset topic and question history.
 
         Args:

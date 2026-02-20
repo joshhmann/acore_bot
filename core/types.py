@@ -52,11 +52,13 @@ class AcoreChannel:
         id: Unique identifier for the channel.
         name: The channel name or display name.
         type: Channel type - one of "text", "dm", "thread", "voice".
+        parent_id: Optional parent channel ID (for threads).
     """
 
     id: str
     name: str
     type: str  # "text", "dm", "thread", "voice"
+    parent_id: Optional[str] = None
 
 
 @dataclass
@@ -90,3 +92,64 @@ class AcoreContext:
             The result of the reply_callback execution.
         """
         return self.reply_callback(text)
+
+
+@dataclass
+class PersonaSpokeEvent:
+    """Event emitted when a persona speaks in a conversation.
+
+    Attributes:
+        conversation_id: Unique identifier for the conversation.
+        channel_id: Platform-specific channel ID where the message should be sent.
+        persona_id: Unique identifier for the speaking persona.
+        display_name: Display name to show for the persona.
+        avatar_url: URL to the persona's avatar image.
+        content: The message content.
+        timestamp: When the event was created.
+    """
+
+    conversation_id: str
+    channel_id: str
+    persona_id: str
+    display_name: str
+    avatar_url: str
+    content: str
+    timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass
+class ConversationTypingEvent:
+    """Event emitted to show typing indicator in a channel.
+
+    Attributes:
+        channel_id: Platform-specific channel ID.
+        duration_seconds: How long to show the typing indicator.
+    """
+
+    channel_id: str
+    duration_seconds: float = 1.0
+
+
+@dataclass
+class ConversationSummaryEvent:
+    """Event emitted when a conversation completes.
+
+    Attributes:
+        conversation_id: Unique identifier for the conversation.
+        channel_id: Platform-specific channel ID where the summary should be sent.
+        participants: List of participant persona IDs.
+        topic: Conversation topic.
+        turn_count: Number of turns completed.
+        max_turns: Maximum allowed turns.
+        termination_reason: Why the conversation ended.
+        avg_latency: Average response latency in seconds.
+    """
+
+    conversation_id: str
+    channel_id: str
+    participants: List[str]
+    topic: str
+    turn_count: int
+    max_turns: int
+    termination_reason: str
+    avg_latency: float

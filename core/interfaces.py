@@ -5,10 +5,14 @@ Adapters provide the bridge between the core bot logic and specific platforms
 like Discord, CLI, or future platforms.
 """
 
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -26,6 +30,68 @@ class AcoreEvent:
     payload: dict
     source_adapter: str
     timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+class EventBus(ABC):
+    """Abstract base class for the event bus.
+
+    The event bus facilitates communication between adapters and the core
+    bot by allowing publish/subscribe patterns for events.
+    """
+
+    @abstractmethod
+    def emit(self, event_type: str, payload: dict) -> None:
+        """Emit an event to all subscribers.
+
+        Args:
+            event_type: The type of event being emitted.
+            payload: The event data as a dictionary.
+        """
+        pass
+
+    @abstractmethod
+    def subscribe(self, event_type: str, handler: Callable[..., Any]) -> None:
+        """Subscribe a handler to a specific event type.
+
+        Args:
+            event_type: The type of event to subscribe to.
+            handler: A callable that will be invoked when events of this
+                type are emitted.
+        """
+        pass
+
+
+class SimpleEventBus(EventBus):
+    """Simple in-memory implementation of the EventBus interface."""
+
+    def __init__(self):
+        self._handlers: Dict[str, List[Callable[..., Any]]] = {}
+
+    def emit(self, event_type: str, payload: dict) -> None:
+        """Emit an event to all subscribers."""
+        if event_type not in self._handlers:
+            return
+
+        for handler in self._handlers[event_type]:
+            try:
+                result = handler(payload)
+                if asyncio.iscoroutine(result):
+                    asyncio.create_task(result)
+            except Exception as e:
+                logger.error(f"Error in event handler for {event_type}: {e}")
+
+    def subscribe(self, event_type: str, handler: Callable[..., Any]) -> None:
+        """Subscribe a handler to a specific event type."""
+        if event_type not in self._handlers:
+            self._handlers[event_type] = []
+        self._handlers[event_type].append(handler)
+        logger.debug(f"Handler subscribed to {event_type} events")
+
+    def unsubscribe(self, event_type: str, handler: Callable[..., Any]) -> None:
+        """Unsubscribe a handler from a specific event type."""
+        if event_type in self._handlers and handler in self._handlers[event_type]:
+            self._handlers[event_type].remove(handler)
+            logger.debug(f"Handler unsubscribed from {event_type} events")
 
 
 class InputAdapter(ABC):
@@ -91,34 +157,5 @@ class OutputAdapter(ABC):
             embed: A dictionary representing the embed content. The structure
                 is adapter-specific but typically includes fields like title,
                 description, color, and fields.
-        """
-        pass
-
-
-class EventBus(ABC):
-    """Abstract base class for the event bus.
-
-    The event bus facilitates communication between adapters and the core
-    bot by allowing publish/subscribe patterns for events.
-    """
-
-    @abstractmethod
-    def emit(self, event_type: str, payload: dict) -> None:
-        """Emit an event to all subscribers.
-
-        Args:
-            event_type: The type of event being emitted.
-            payload: The event data as a dictionary.
-        """
-        pass
-
-    @abstractmethod
-    def subscribe(self, event_type: str, handler: Callable[..., Any]) -> None:
-        """Subscribe a handler to a specific event type.
-
-        Args:
-            event_type: The type of event to subscribe to.
-            handler: A callable that will be invoked when events of this
-                type are emitted.
         """
         pass
