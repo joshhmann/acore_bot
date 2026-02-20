@@ -1,0 +1,76 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.0.2, pluggy-1.6.0 -- /usr/bin/python3
+cachedir: .pytest_cache
+rootdir: /root/acore_bot
+configfile: pyproject.toml
+plugins: asyncio-1.3.0, anyio-4.12.1
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 31 items
+
+tests/test_regression_discord.py::TestNoDiscordInCoreServices::test_no_discord_imports_in_core_services PASSED [  3%]
+tests/test_regression_discord.py::TestNoDiscordInCoreServices::test_discord_imports_limited_to_expected_files PASSED [  6%]
+tests/test_regression_discord.py::TestDiscordAdapterImports::test_discord_adapter_imports PASSED [  9%]
+tests/test_regression_discord.py::TestDiscordAdapterImports::test_discord_adapter_has_required_methods PASSED [ 12%]
+tests/test_regression_discord.py::TestCLIAdapterImports::test_cli_adapter_imports PASSED [ 16%]
+tests/test_regression_discord.py::TestCLIAdapterImports::test_cli_adapter_no_discord_imports PASSED [ 19%]
+tests/test_regression_discord.py::TestCLIAdapterImports::test_cli_adapter_has_required_methods PASSED [ 22%]
+tests/test_regression_discord.py::TestAcoreTypesJSONSerializable::test_acore_message_json_serializable PASSED [ 25%]
+tests/test_regression_discord.py::TestAcoreTypesJSONSerializable::test_acore_user_json_serializable PASSED [ 29%]
+tests/test_regression_discord.py::TestAcoreTypesJSONSerializable::test_acore_channel_json_serializable PASSED [ 32%]
+tests/test_regression_discord.py::TestAcoreTypesJSONSerializable::test_persona_spoke_event_json_serializable PASSED [ 35%]
+tests/test_regression_discord.py::TestAcoreTypesJSONSerializable::test_conversation_summary_event_json_serializable PASSED [ 38%]
+tests/test_regression_discord.py::TestEventBus::test_simple_event_bus_emits_events PASSED [ 41%]
+tests/test_regression_discord.py::TestEventBus::test_simple_event_bus_multiple_handlers PASSED [ 45%]
+tests/test_regression_discord.py::TestEventBus::test_simple_event_bus_unsubscribe PASSED [ 48%]
+tests/test_regression_discord.py::TestEventBus::test_simple_event_bus_async_handler PASSED [ 51%]
+tests/test_regression_discord.py::TestEventBus::test_simple_event_bus_no_handlers PASSED [ 54%]
+tests/test_regression_discord.py::TestDiscordFunctionalityWithMocks::test_discord_message_conversion PASSED [ 58%]
+tests/test_regression_discord.py::TestDiscordFunctionalityWithMocks::test_discord_user_conversion PASSED [ 61%]
+tests/test_regression_discord.py::TestDiscordFunctionalityWithMocks::test_discord_channel_conversion PASSED [ 64%]
+tests/test_regression_discord.py::TestDiscordFunctionalityWithMocks::test_discord_output_adapter_send PASSED [ 67%]
+tests/test_regression_discord.py::TestDiscordFunctionalityWithMocks::test_discord_output_adapter_send_embed PASSED [ 70%]
+tests/test_regression_discord.py::TestBotConnectionRegression::test_bot_responds_to_mention_mock PASSED [ 74%]
+tests/test_regression_discord.py::TestBotConnectionRegression::test_persona_can_send_message_via_event PASSED [ 77%]
+tests/test_regression_discord.py::TestCommandFrameworkRegression::test_set_character_command_exists PASSED [ 80%]
+tests/test_regression_discord.py::TestCommandFrameworkRegression::test_chat_command_handler_exists PASSED [ 83%]
+tests/test_regression_discord.py::TestFrameworkInterfaces::test_input_adapter_interface PASSED [ 87%]
+tests/test_regression_discord.py::TestFrameworkInterfaces::test_output_adapter_interface PASSED [ 90%]
+tests/test_regression_discord.py::TestFrameworkInterfaces::test_event_bus_interface PASSED [ 93%]
+tests/test_regression_discord.py::TestTypeSystem::test_acore_context_reply PASSED [ 96%]
+tests/test_regression_discord.py::TestTypeSystem::test_dataclass_defaults PASSED [100%]
+
+=============================== warnings summary ===============================
+../../usr/local/lib/python3.12/dist-packages/discord/player.py:30
+  /usr/local/lib/python3.12/dist-packages/discord/player.py:30: DeprecationWarning: 'audioop' is deprecated and slated for removal in Python 3.13
+    import audioop
+
+tests/test_regression_discord.py:25
+  /root/acore_bot/tests/test_regression_discord.py:25: PytestUnknownMarkWarning: Unknown pytest.mark.unit - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    pytestmark = [pytest.mark.unit, pytest.mark.regression]
+
+tests/test_regression_discord.py:25
+  /root/acore_bot/tests/test_regression_discord.py:25: PytestUnknownMarkWarning: Unknown pytest.mark.regression - is this a typo?  You can register custom marks to avoid this warning - for details, see https://docs.pytest.org/en/stable/how-to/mark.html
+    pytestmark = [pytest.mark.unit, pytest.mark.regression]
+
+tests/test_regression_discord.py::TestAcoreTypesJSONSerializable::test_acore_message_json_serializable
+tests/test_regression_discord.py::TestBotConnectionRegression::test_bot_responds_to_mention_mock
+tests/test_regression_discord.py::TestTypeSystem::test_acore_context_reply
+tests/test_regression_discord.py::TestTypeSystem::test_dataclass_defaults
+  <string>:6: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_regression_discord.py::TestAcoreTypesJSONSerializable::test_persona_spoke_event_json_serializable
+tests/test_regression_discord.py::TestBotConnectionRegression::test_persona_can_send_message_via_event
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/test_regression_discord.py::TestEventBus::test_simple_event_bus_async_handler
+  /root/acore_bot/tests/test_regression_discord.py:425: RuntimeWarning: coroutine 'TestEventBus.test_simple_event_bus_async_handler.<locals>.async_handler' was never awaited
+    event_bus.emit("test_event", {"message": "async"})
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/test_regression_discord.py::TestDiscordFunctionalityWithMocks::test_discord_message_conversion
+  /root/acore_bot/tests/test_regression_discord.py:458: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    message.created_at = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 31 passed, 11 warnings in 0.45s ========================

@@ -1,7 +1,16 @@
 """Service factory for initializing bot services."""
 
 import logging
+from typing import Optional
+
 from config import Config
+
+# Core interfaces for adapter architecture
+from core.interfaces import SimpleEventBus
+
+# Adapters
+from adapters.discord import DiscordInputAdapter, DiscordOutputAdapter
+from adapters.cli import CLIInputAdapter, CLIOutputAdapter
 
 # LLM domain
 from services.llm.ollama import OllamaService
@@ -44,10 +53,83 @@ class ServiceFactory:
     def __init__(self, bot):
         self.bot = bot
         self.services = {}
+        self._event_bus: Optional[SimpleEventBus] = None
+        self._adapters: dict = {}
 
-    def create_services(self):
-        """Initialize all configured services."""
+    def create_event_bus(self) -> SimpleEventBus:
+        """Create and return the EventBus instance."""
+        if self._event_bus is None:
+            self._event_bus = SimpleEventBus()
+            logger.info("EventBus created")
+        return self._event_bus
+
+    def create_discord_adapter(
+        self,
+        token: Optional[str] = None,
+        command_prefix: str = "!",
+        existing_bot=None,
+    ) -> tuple[DiscordInputAdapter, DiscordOutputAdapter]:
+        """Create Discord input/output adapters.
+
+        Args:
+            token: Discord bot token. If None, uses Config.DISCORD_TOKEN.
+            command_prefix: Prefix for text commands.
+            existing_bot: If provided, use this existing bot for output adapter.
+
+        Returns:
+            Tuple of (DiscordInputAdapter, DiscordOutputAdapter).
+        """
+        from discord.ext import commands
+
+        token = token or Config.DISCORD_TOKEN
+
+        if existing_bot:
+            input_adapter = DiscordInputAdapter(
+                token=token,
+                command_prefix=command_prefix,
+            )
+            output_adapter = DiscordOutputAdapter(bot=existing_bot)
+        else:
+            input_adapter = DiscordInputAdapter(
+                token=token,
+                command_prefix=command_prefix,
+            )
+            output_adapter = DiscordOutputAdapter(bot=input_adapter.bot)
+
+        self._adapters["discord_input"] = input_adapter
+        self._adapters["discord_output"] = output_adapter
+
+        logger.info("Discord adapters created")
+        return input_adapter, output_adapter
+
+    def create_cli_adapter(self) -> tuple[CLIInputAdapter, CLIOutputAdapter]:
+        """Create CLI input/output adapters.
+
+        Returns:
+            Tuple of (CLIInputAdapter, CLIOutputAdapter).
+        """
+        input_adapter = CLIInputAdapter()
+        output_adapter = CLIOutputAdapter()
+
+        self._adapters["cli_input"] = input_adapter
+        self._adapters["cli_output"] = output_adapter
+
+        logger.info("CLI adapters created")
+        return input_adapter, output_adapter
+
+    def create_services(self, event_bus: Optional[SimpleEventBus] = None):
+        """Initialize all configured services.
+
+        Args:
+            event_bus: Optional EventBus instance for adapter-based mode.
+                      If provided, stores EventBus for dependency injection.
+        """
         logger.info("Initializing services via ServiceFactory...")
+
+        # Store event_bus if provided (for adapter-based mode)
+        if event_bus:
+            self._event_bus = event_bus
+            logger.info("EventBus wired to ServiceFactory")
 
         # 1. Metrics (Core)
         self.services["metrics"] = MetricsService()

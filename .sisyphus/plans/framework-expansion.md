@@ -378,25 +378,25 @@ Wave FINAL (Verification):
   **Category**: `unspecified-high` | **Blocked By**: Task 9
   **Commit**: `refactor(discord): migrate cogs to adapter`
 
-- [ ] 13. Launcher Entry Point
+- [x] 13. Launcher Entry Point
 
   **What to do**: Create `launcher.py` to start enabled adapters.
   **Category**: `quick` | **Blocked By**: Tasks 9, 11
   **Commit**: `feat(core): add launcher`
 
-- [ ] 14. Dependency Injection Update
+- [x] 14. Dependency Injection Update
 
   **What to do**: Update `services/core/factory.py` for new architecture.
   **Category**: `deep` | **Blocked By**: Task 13
   **Commit**: `refactor(core): update factory for adapters`
 
-- [ ] 15. Regression Testing
+- [x] 15. Regression Testing
 
   **What to do**: Verify Discord parity with baseline tests.
   **Category**: `deep` | **Blocked By**: Task 14
   **Commit**: `test: add regression suite`
 
-- [ ] 16. Documentation
+- [x] 16. Documentation
 
   **What to do**: Write `docs/ARCHITECTURE.md` explaining Core vs Adapter.
   **Category**: `writing` | **Blocked By**: Task 15

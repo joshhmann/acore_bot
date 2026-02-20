@@ -1,0 +1,40 @@
+Task 14: Update ServiceFactory for Adapter Architecture - Evidence
+=================================================================
+
+VERIFICATION RESULTS
+-------------------
+
+1. Factory Imports (ast analysis):
+   ✓ core.interfaces (SimpleEventBus)
+   ✓ adapters.discord (DiscordInputAdapter, DiscordOutputAdapter)
+   ✓ adapters.cli (CLIInputAdapter, CLIOutputAdapter)
+
+2. ServiceFactory Methods Added:
+   ✓ create_event_bus() - Creates SimpleEventBus instance
+   ✓ create_discord_adapter() - Creates Discord input/output adapters
+   ✓ create_cli_adapter() - Creates CLI input/output adapters
+   ✓ create_services() - Updated to accept optional event_bus parameter
+
+3. Backward Compatibility:
+   ✓ Existing create_services() signature preserved (event_bus is optional)
+   ✓ All existing internal methods unchanged (_init_llm, _init_audio, etc.)
+   ✓ Existing service creation flow intact
+
+4. New Factory Attributes:
+   ✓ _event_bus: Optional[SimpleEventBus] - stores EventBus instance
+   ✓ _adapters: dict - stores created adapters
+
+IMPLEMENTATION DETAILS
+----------------------
+
+File: services/core/factory.py
+
+Changes made:
+1. Added imports for SimpleEventBus, adapters
+2. Added _event_bus and _adapters instance variables in __init__
+3. Added create_event_bus() method for EventBus creation
+4. Added create_discord_adapter() method supporting both new bot creation and existing bot
+5. Added create_cli_adapter() method for CLI adapters
+6. Updated create_services() to accept optional event_bus parameter
+
+VERIFICATION TIMESTAMP: 2026-02-19
