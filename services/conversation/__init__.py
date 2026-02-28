@@ -9,7 +9,6 @@ from services.conversation.state import (
 from services.conversation.persistence import ConversationPersistence
 from services.conversation.orchestrator import (
     BotConversationOrchestrator,
-    WebhookPool,
     ConversationConfig,
 )
 
@@ -20,6 +19,5 @@ __all__ = [
     "ConversationMetrics",
     "ConversationPersistence",
     "BotConversationOrchestrator",
-    "WebhookPool",
     "ConversationConfig",
 ]

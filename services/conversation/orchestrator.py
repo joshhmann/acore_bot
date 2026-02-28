@@ -8,6 +8,20 @@ import asyncio
 import logging
 import random
 from datetime import datetime
+
+# Compatibility alias for WebhookPool used by some adapters/exports.
+try:
+    # If the Discord adapter is available, expose the real WebhookPool from there
+    from adapters.discord.output import WebhookPool as _WebhookPool  # type: ignore
+
+    WebhookPool = _WebhookPool
+except Exception:
+    # Fallback placeholder to prevent ImportError in environments where the
+    # Discord adapter is not loaded.
+    class WebhookPool:  # type: ignore
+        pass
+
+
 from typing import List, Dict, Optional, Any
 
 from services.conversation.state import (
@@ -292,7 +306,9 @@ class BotConversationOrchestrator:
             )
             self.event_bus.emit("persona_spoke", event.__dict__)
 
-    async def _emit_typing(self, channel_id: str, duration_seconds: float = 1.0) -> None:
+    async def _emit_typing(
+        self, channel_id: str, duration_seconds: float = 1.0
+    ) -> None:
         """Emit a ConversationTypingEvent to the event bus."""
         if self.event_bus:
             event = ConversationTypingEvent(
@@ -400,7 +416,9 @@ class BotConversationOrchestrator:
 
         state.metrics = await calculator.calculate_all_metrics(state)
 
-    async def _process_rl_feedback(self, state: ConversationState, config: ConversationConfig) -> None:
+    async def _process_rl_feedback(
+        self, state: ConversationState, config: ConversationConfig
+    ) -> None:
         """Process reinforcement learning feedback for the conversation."""
         try:
             from config import Config as _Config
@@ -435,9 +453,7 @@ class BotConversationOrchestrator:
                 reward = 1.0 if score > 0.6 else (-1.0 if score < 0.4 else 0.0)
                 if reward != 0.0:
                     rl_service = self.behavior_engine.rl_service
-                    record_feedback = getattr(
-                        rl_service, "record_feedback", None
-                    )
+                    record_feedback = getattr(rl_service, "record_feedback", None)
                     if record_feedback:
                         try:
                             if inspect.iscoroutinefunction(record_feedback):

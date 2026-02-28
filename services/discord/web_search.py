@@ -5,7 +5,6 @@ from typing import List, Dict, Optional, Tuple
 import aiohttp
 import asyncio
 import time
-from ddgs import DDGS
 from config import Config
 
 # Query optimizer removed - feature was never fully integrated
@@ -13,6 +12,15 @@ from config import Config
 import re
 
 logger = logging.getLogger(__name__)
+
+# Graceful handling for optional ddgs dependency
+try:
+    from ddgs import DDGS  # type: ignore
+
+    DDGS_AVAILABLE = True
+except ImportError:
+    DDGS = None  # type: ignore
+    DDGS_AVAILABLE = False
 
 
 class WebSearchService:
@@ -200,6 +208,11 @@ class WebSearchService:
             List of search results
         """
         try:
+            # If DDGS is not available, skip DuckDuckGo search gracefully
+            if not DDGS_AVAILABLE or DDGS is None:
+                logger.warning("DDGS library not available; DuckDuckGo search disabled")
+                return []
+
             # Run DuckDuckGo search in thread pool (it's synchronous)
             loop = asyncio.get_event_loop()
 

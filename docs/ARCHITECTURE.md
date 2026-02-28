@@ -1,6 +1,6 @@
-# Acore Bot Architecture
+# Gestalt Framework Architecture
 
-This document explains the Core/Adapter architecture powering the Acore Bot framework. It covers the separation of concerns, event flow, type system, and how to extend the framework with new adapters.
+This document explains the Core/Adapter architecture powering the Gestalt Framework. It covers the separation of concerns, event flow, type system, and how to extend the framework with new adapters.
 
 ---
 
@@ -18,7 +18,7 @@ This document explains the Core/Adapter architecture powering the Acore Bot fram
 
 ## Overview
 
-The Acore Bot framework uses a **Core/Adapter architecture** that separates platform-agnostic business logic from platform-specific integrations. This design enables:
+The Gestalt Framework uses a **Core/Adapter architecture** that separates platform-agnostic business logic from platform-specific integrations. This design enables:
 
 - **Multi-platform support**: Run the same bot logic on Discord, Telegram, CLI, or any other platform
 - **Testability**: Core logic can be unit tested without platform dependencies

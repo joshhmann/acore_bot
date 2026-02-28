@@ -11,7 +11,7 @@ from services.conversation.orchestrator import (
     BotConversationOrchestrator,
     ConversationConfig,
 )
-from services.conversation.review import ConversationReviewService
+from adapters.discord.review import DiscordReviewService
 from utils.helpers import format_error
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ class ConversationCommandsCog(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
         self.orchestrator: Optional[BotConversationOrchestrator] = None
-        self.review_service: Optional[ConversationReviewService] = None
+        self.review_service: Optional[DiscordReviewService] = None
         logger.info("Conversation commands cog initialized")
 
     async def cog_load(self):
@@ -67,7 +67,7 @@ class ConversationCommandsCog(commands.Cog):
             review_channel_id = getattr(
                 Config, "BOT_CONVERSATION_REVIEW_CHANNEL_ID", None
             )
-            self.review_service = ConversationReviewService(review_channel_id)
+            self.review_service = DiscordReviewService(self.bot, review_channel_id)
 
             logger.info("Conversation orchestrator loaded successfully")
         else:

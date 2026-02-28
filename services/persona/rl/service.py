@@ -8,7 +8,7 @@ from collections import OrderedDict
 
 from .types import RLAction, RLState
 from .agent import RLAgent
-from .neural_agent import NeuralAgent
+from .neural_agent import NeuralAgent, TORCH_AVAILABLE
 from .replay_buffer import ReplayBuffer, Transition
 from .constants import (
     RL_EPSILON_START,
@@ -63,6 +63,14 @@ class RLService:
 
         # Replay buffer for DQN mode
         self.replay_buffer: Optional[ReplayBuffer] = None
+        # If torch is not available, gracefully fall back to tabular mode
+        self.has_torch = TORCH_AVAILABLE
+        if self.algorithm == "dqn" and not self.has_torch:
+            logger.warning(
+                "PyTorch not available; falling back from DQN to Tabular RL."
+            )
+            self.algorithm = "tabular"
+
         if self.algorithm == "dqn":
             self.replay_buffer = ReplayBuffer(capacity=RL_REPLAY_BUFFER_SIZE)
             logger.info(

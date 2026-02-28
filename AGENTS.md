@@ -6,7 +6,7 @@
 
 ## OVERVIEW
 
-Discord bot with multi-agent AI persona system, voice capabilities, and sophisticated memory/relationship tracking.
+Gestalt Framework - Multi-agent AI persona system with voice capabilities, sophisticated memory/relationship tracking, and multi-platform adapter architecture.
 
 ## STRUCTURE
 

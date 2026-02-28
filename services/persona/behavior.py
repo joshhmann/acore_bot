@@ -619,6 +619,84 @@ Topics:"""
 
         return None
 
+    async def handle_message(
+        self, message: Any, persona: Optional[Any] = None
+    ) -> Optional[Dict]:
+        """
+        Compatibility wrapper for processing Discord messages.
+        Converts Discord message to AcoreContext and calls process_message.
+
+        Args:
+            message: Discord Message object
+            persona: Optional specific persona to use
+
+        Returns:
+            Dict containing action directives or None
+        """
+        try:
+            import discord
+
+            if not isinstance(message, discord.Message):
+                logger.warning(
+                    f"handle_message received non-Discord message: {type(message)}"
+                )
+                return None
+
+            # Convert Discord message to AcoreContext
+            from core.types import AcoreMessage, AcoreUser, AcoreChannel, AcoreContext
+
+            # Create AcoreMessage
+            acore_message = AcoreMessage(
+                text=message.content or "",
+                author_id=str(message.author.id),
+                channel_id=str(message.channel.id),
+                timestamp=message.created_at,
+            )
+
+            # Create AcoreUser
+            acore_user = AcoreUser(
+                id=str(message.author.id),
+                display_name=message.author.display_name,
+                metadata={
+                    "username": message.author.name,
+                    "is_bot": message.author.bot,
+                },
+            )
+
+            # Create AcoreChannel
+            channel_type = "text"
+            if isinstance(message.channel, discord.DMChannel):
+                channel_type = "dm"
+            elif isinstance(message.channel, discord.Thread):
+                channel_type = "thread"
+
+            acore_channel = AcoreChannel(
+                id=str(message.channel.id),
+                name=getattr(message.channel, "name", "dm"),
+                type=channel_type,
+            )
+
+            # Create AcoreContext with a reply callback
+            async def reply_callback(text: str) -> None:
+                await message.channel.send(text)
+
+            context = AcoreContext(
+                message=acore_message,
+                channel=acore_channel,
+                user=acore_user,
+                reply_callback=reply_callback,
+            )
+
+            # Call the main process_message method
+            return await self.process_message(context, persona)
+
+        except ImportError:
+            logger.error("Discord not available for handle_message")
+            return None
+        except Exception as e:
+            logger.error(f"Error in handle_message: {e}")
+            return None
+
     async def _update_mood(self, context: AcoreContext, state: BehaviorState):
         """
         Update mood state based on message sentiment and context.

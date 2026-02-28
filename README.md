@@ -1,4 +1,4 @@
-# Acore Bot - AI Character Ecosystem
+# Gestalt Framework - AI Character Ecosystem
 
 **Status**: **PRODUCTION READY** (2025-12-11)
 
@@ -8,9 +8,11 @@ A Discord bot featuring multiple AI personas that interact with users and each o
 
 ---
 
-## What is Acore?
+## What is Gestalt?
 
-Acore is a **multi-platform AI character framework** that happens to include a full-featured Discord bot. The same engine that powers your Discord characters can run on the command line, integrate with other platforms, or embed into your own applications.
+Gestalt is a **multi-platform AI character framework** that happens to include a full-featured Discord bot. The same engine that powers your Discord characters can run on the command line, integrate with other platforms, or embed into your own applications.
+
+> *"The whole is greater than the sum of its parts"* — Gestalt psychology principle that perfectly captures how multiple personas emerge into a cohesive intelligence.
 
 **For Discord users**: You get a bot with multiple AI personas that chat, build relationships, and remember your users.
 
@@ -58,6 +60,37 @@ uv run python -m adapters.cli
 echo "@dagoth_ur Hello, how are you?" | uv run python -m adapters.cli
 ```
 
+### Option 3: Web API Mode
+
+Run Gestalt as an HTTP API server for integration with n8n, Zapier, or custom frontends:
+
+```bash
+# Start web server
+ACORE_WEB_ENABLED=true ACORE_WEB_PORT=8000 uv run python launcher.py
+
+# The API will be available at http://localhost:8000
+```
+
+**Features**:
+- REST API endpoints (`/chat`, `/personas`, `/health`)
+- WebSocket support for real-time streaming (`/ws`)
+- Built-in chat UI at `http://localhost:8000/`
+- Async webhook callbacks for n8n integration
+
+**Example API Usage**:
+```bash
+# Chat with a persona
+curl -X POST http://localhost:8000/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello!", "persona_id": "dagoth_ur"}'
+
+# List available personas
+curl http://localhost:8000/personas
+
+# Health check
+curl http://localhost:8000/health
+```
+
 **Production Deployment**: See [docs/PRODUCTION_READINESS.md](docs/PRODUCTION_READINESS.md) for comprehensive deployment guide.
 
 ---
@@ -68,8 +101,8 @@ Acore uses a **Core/Adapter architecture** that separates platform-agnostic busi
 
 ```
 +------------------+     +------------------+     +------------------+
-|  Discord Adapter |     |   CLI Adapter    |     |  [Your Adapter]  |
-|  (Production)    |     |  (Terminal)      |     |  (Custom)        |
+|  Discord Adapter |     |   CLI Adapter    |     |   Web Adapter    |
+|  (Production)    |     |  (Terminal)      |     |  (HTTP API)      |
 +------------------+     +------------------+     +------------------+
          |                       |                        |
          +-----------------------+------------------------+

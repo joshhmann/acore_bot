@@ -6,7 +6,7 @@ Handles probabilistic selection of which character responds to a message.
 import logging
 import random
 import asyncio
-from typing import List, Dict, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, List, Dict, Optional, Tuple, TYPE_CHECKING, Union
 from pathlib import Path
 from datetime import datetime
 
@@ -109,10 +109,12 @@ class PersonaRouter:
             self.loaded = True
 
     def _get_user_activity(self, user) -> Optional[Dict[str, str]]:
-        """Extract Discord activity information from user.
+        """Extract activity information from user.
 
         Args:
-            user: Discord Member object (or User)
+            user: Any object with .activities attribute containing activity objects
+                  (e.g., Discord Member/User). Each activity should have .type, .name,
+                  and optionally .details/.state attributes.
 
         Returns:
             Dict with activity info or None if no activity
@@ -122,35 +124,40 @@ class PersonaRouter:
             return None
 
         for activity in user.activities:
-            # Import locally to avoid circular imports
-            import discord
-
             activity_info = {"type": "unknown", "name": "", "details": ""}
 
-            if isinstance(activity, discord.Game):
+            # Duck typing: check for attributes instead of isinstance
+            if not hasattr(activity, "type"):
+                continue
+
+            activity_type = activity.type
+            # ActivityType values: 0=Game, 1=Streaming, 2=Listening, 3=Watching, 4=Custom, 5=Competing
+            if activity_type == 0:  # Game
                 activity_info["type"] = "game"
-                activity_info["name"] = activity.name or ""
+                activity_info["name"] = getattr(activity, "name", "") or ""
                 activity_info["details"] = ""
-            elif isinstance(activity, discord.Streaming):
+            elif activity_type == 1:  # Streaming
                 activity_info["type"] = "streaming"
-                activity_info["name"] = activity.name or ""
-                activity_info["details"] = activity.details or ""
-            elif isinstance(activity, discord.Activity):
-                # Spotify and other activities
-                if activity.type == discord.ActivityType.listening:
-                    activity_info["type"] = "music"
-                    activity_info["name"] = activity.name or ""
-                    activity_info["details"] = getattr(activity, "details", "") or ""
-                elif activity.type == discord.ActivityType.watching:
-                    activity_info["type"] = "watching"
-                    activity_info["name"] = activity.name or ""
-                    activity_info["details"] = getattr(activity, "details", "") or ""
-                elif activity.type == discord.ActivityType.custom:
-                    activity_info["type"] = "custom"
-                    activity_info["name"] = activity.name or ""
-                    activity_info["details"] = getattr(activity, "state", "") or ""
-                else:
-                    continue
+                activity_info["name"] = getattr(activity, "name", "") or ""
+                activity_info["details"] = getattr(activity, "details", "") or ""
+            elif activity_type == 2:  # Listening (music)
+                activity_info["type"] = "music"
+                activity_info["name"] = getattr(activity, "name", "") or ""
+                activity_info["details"] = getattr(activity, "details", "") or ""
+            elif activity_type == 3:  # Watching
+                activity_info["type"] = "watching"
+                activity_info["name"] = getattr(activity, "name", "") or ""
+                activity_info["details"] = getattr(activity, "details", "") or ""
+            elif activity_type == 4:  # Custom
+                activity_info["type"] = "custom"
+                activity_info["name"] = getattr(activity, "name", "") or ""
+                activity_info["details"] = getattr(activity, "state", "") or ""
+            elif activity_type == 5:  # Competing
+                activity_info["type"] = "game"
+                activity_info["name"] = getattr(activity, "name", "") or ""
+                activity_info["details"] = ""
+            else:
+                continue
 
             # Return first valid activity found
             if activity_info["name"] or activity_info["details"]:
@@ -251,7 +258,7 @@ class PersonaRouter:
         self,
         message_content: str,
         channel_id: Optional[int] = None,
-        user: Optional[Union["discord.Member", "discord.User"]] = None,
+        user: Optional[Any] = None,
     ) -> Optional[CompiledPersona]:
         """Select a persona to respond to this message.
 
@@ -265,7 +272,7 @@ class PersonaRouter:
         Args:
             message_content: The message text
             channel_id: Channel ID for sticky persona tracking
-            user: Discord Member for activity-based routing (T17)
+            user: User object with .activities attribute for activity-based routing (T17)
 
         Returns:
             Selected persona or None

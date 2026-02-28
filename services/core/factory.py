@@ -19,7 +19,7 @@ from services.llm.fallback import LLMFallbackManager, ModelConfig
 # Voice domain
 from services.voice.tts import TTSService
 from services.voice.rvc import UnifiedRVCService
-from services.voice.listener import EnhancedVoiceListener
+from services.voice.listener import EnhancedVoiceListener, VOICE_AVAILABLE
 from services.clients.stt_client import ParakeetAPIService
 
 # Memory domain
@@ -34,7 +34,17 @@ from services.persona.rl import RLService
 
 # Discord domain
 from services.discord.profiles import UserProfileService
-from services.discord.web_search import WebSearchService
+
+# Web search service is optional. If the dependency (ddgs) is unavailable,
+# degrade gracefully instead of failing import-time.
+try:
+    from services.discord.web_search import WebSearchService
+except Exception as e:
+    WebSearchService = None  # type: ignore
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.warning(f"WebSearchService unavailable or failed to import: {e}")
 
 # Core domain
 from services.core.metrics import MetricsService
@@ -254,18 +264,22 @@ class ServiceFactory:
             )
             if parakeet.is_available():
                 self.services["stt"] = parakeet
-
-        # Enhanced Listener
-        if self.services["stt"]:
-            trigger_words = [
-                w.strip() for w in Config.VOICE_BOT_TRIGGER_WORDS.split(",")
-            ]
+        # Enhanced Listener (only if STT is available and voice_recv is available)
+        if self.services["stt"] and VOICE_AVAILABLE:
+            trigger_words_raw = Config.VOICE_BOT_TRIGGER_WORDS
+            if isinstance(trigger_words_raw, list):
+                trigger_words = [w.strip() for w in trigger_words_raw]
+            else:
+                trigger_words = [w.strip() for w in trigger_words_raw.split(",")]
             self.services["enhanced_voice_listener"] = EnhancedVoiceListener(
                 stt_service=self.services["stt"],
                 silence_threshold=Config.WHISPER_SILENCE_THRESHOLD,
                 energy_threshold=Config.VOICE_ENERGY_THRESHOLD,
                 bot_trigger_words=trigger_words,
             )
+            logger.info("Enhanced voice listener initialized")
+        elif not VOICE_AVAILABLE:
+            logger.warning("Voice features not available - voice_recv not installed")
 
     def _init_data(self):
         """Initialize data management services."""
@@ -316,8 +330,8 @@ class ServiceFactory:
 
     def _init_features(self):
         """Initialize feature services."""
-        # Web Search
-        if Config.WEB_SEARCH_ENABLED:
+        # Web Search (optional dependency)
+        if Config.WEB_SEARCH_ENABLED and WebSearchService is not None:
             self.services["web_search"] = WebSearchService(
                 engine=Config.WEB_SEARCH_ENGINE,
                 max_results=Config.WEB_SEARCH_MAX_RESULTS,

@@ -1,4 +1,4 @@
-# Framework Expansion: Acore Home AI OS
+# Framework Expansion: Gestalt Home AI OS
 
 ## TL;DR
 > **Quick Summary**: Refactor the monolithic Discord bot into a modular "Home AI OS" framework. Decouple core logic (`services/`) from `discord.py` to enable multiple inputs (CLI, Web, etc.) while preserving 100% of existing Discord functionality.
@@ -427,7 +427,7 @@ Wave FINAL (Verification):
 
 ## Success Criteria
 
-- [ ] `grep -r "import discord" services/ | grep -v "voice"` returns empty
+- [x] `grep -r "import discord" services/ | grep -v "voice"` returns empty
 - [ ] Discord bot behaves identically to pre-refactor baseline
 - [ ] CLI adapter can chat with all personas
 - [ ] All existing tests pass

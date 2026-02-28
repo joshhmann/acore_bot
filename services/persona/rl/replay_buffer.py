@@ -7,7 +7,22 @@ from dataclasses import dataclass
 from typing import List, Optional, Union
 
 import numpy as np
-import torch
+
+# PyTorch is optional for this environment. Provide a safe fallback so that
+# imports do not fail when PyTorch is unavailable.
+try:
+    import torch  # type: ignore
+
+    TORCH_AVAILABLE = True
+except Exception:  # ImportError or any import-related issue
+    TORCH_AVAILABLE = False
+
+    # Provide a minimal stand-in so type hints like torch.Tensor don't fail
+    class _TorchPlaceholder:
+        class Tensor:  # type: ignore
+            pass
+
+    torch = _TorchPlaceholder()  # type: ignore
 
 from .types import RLAction, RLState
 

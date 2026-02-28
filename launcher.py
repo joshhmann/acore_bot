@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Acore Framework Launcher - Unified entry point for adapters.
+"""Gestalt Framework Launcher - Unified entry point for adapters.
 
-This launcher starts the Acore framework with enabled adapters (Discord, CLI, etc.)
+This launcher starts the Gestalt framework with enabled adapters (Discord, CLI, Web, etc.)
 and wires them to core services via an EventBus.
 
 Usage:
@@ -11,6 +11,8 @@ Configuration:
     Adapters are enabled/disabled via environment variables or config:
     - ACORE_DISCORD_ENABLED=true/false
     - ACORE_CLI_ENABLED=true/false
+    - ACORE_WEB_ENABLED=true/false
+    - ACORE_WEB_PORT=8000
 """
 
 import asyncio
@@ -40,28 +42,46 @@ class AcoreLauncher:
 
     async def start(self):
         """Start the framework with enabled adapters."""
-        logger.info("Starting Acore Framework...")
+        logger.info("Starting Gestalt Framework...")
 
         # Load configuration
         discord_enabled = self._get_config("ACORE_DISCORD_ENABLED", "true") == "true"
         cli_enabled = self._get_config("ACORE_CLI_ENABLED", "false") == "true"
+        web_enabled = self._get_config("ACORE_WEB_ENABLED", "false") == "true"
+        web_port = int(self._get_config("ACORE_WEB_PORT", "8000"))
 
         # Create services via factory
         logger.info("Creating services...")
-        factory = ServiceFactory()
+        factory = ServiceFactory(bot=None)
         self.services = factory.create_services()
 
         # Start Discord adapter if enabled
         if discord_enabled:
             logger.info("Starting Discord adapter...")
             try:
+                import os
                 from adapters.discord.adapter import DiscordInputAdapter
                 from adapters.discord.output import DiscordOutputAdapter
 
-                discord_input = DiscordInputAdapter()
-                discord_output = DiscordOutputAdapter(self.event_bus)
+                token = os.environ.get("DISCORD_TOKEN")
+                if not token:
+                    raise ValueError("DISCORD_TOKEN environment variable not set")
 
-                await discord_input.start()
+                discord_input = DiscordInputAdapter(token=token)
+
+                # Output adapter needs the bot instance from input adapter
+                discord_output = DiscordOutputAdapter(
+                    bot=discord_input.bot, event_bus=self.event_bus
+                )
+
+                def on_discord_event(event):
+                    logger.debug(f"Discord event: {event.type}")
+                    # TODO: Wire to core services for processing
+
+                discord_input.on_event(on_discord_event)
+
+                # Start Discord in background task (it blocks)
+                asyncio.create_task(discord_input.start())
                 await discord_output.start()
 
                 self.adapters["discord"] = {
@@ -99,7 +119,31 @@ class AcoreLauncher:
         for sig in (signal.SIGINT, signal.SIGTERM):
             asyncio.get_event_loop().add_signal_handler(sig, self._signal_handler)
 
-        logger.info("Acore Framework started. Press Ctrl+C to stop.")
+        # Start Web adapter if enabled
+        if web_enabled:
+            logger.info("Starting Web adapter...")
+            try:
+                from adapters.web.adapter import WebInputAdapter
+                from adapters.web.output import WebOutputAdapter
+
+                web_input = WebInputAdapter(port=web_port)
+                web_output = WebOutputAdapter(event_bus=self.event_bus)
+
+                def on_web_event(event):
+                    logger.debug(f"Web event: {event.type}")
+                    # TODO: Wire to core services for processing
+
+                web_input.on_event(on_web_event)
+
+                await web_input.start()
+                await web_output.start()
+
+                self.adapters["web"] = {"input": web_input, "output": web_output}
+                logger.info(f"Web adapter started on port {web_port}")
+            except Exception as e:
+                logger.error(f"Failed to start Web adapter: {e}")
+
+        logger.info("Gestalt Framework started. Press Ctrl+C to stop.")
         await self._shutdown_event.wait()
 
     def _signal_handler(self):
