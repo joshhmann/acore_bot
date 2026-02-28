@@ -7,8 +7,6 @@ Original structure:
 
 New modular structure:
 - main.py: Core ChatCog orchestrator (Facade)
-- response_handler.py: LLM response generation logic
-- context_builder.py: Context construction (history, RAG, etc.)
 - message_handler.py: Message routing and side-effects
 - commands.py: Slash command implementations
 - helpers.py: Text processing utilities
@@ -16,12 +14,6 @@ New modular structure:
 - voice_integration.py: Voice and TTS integration
 
 ## Module Responsibilities
-
-**response_handler.py** - Response Generation
-- _handle_chat_response() - Main response logic
-
-**context_builder.py** - Context Management
-- build_context() - Assemble system prompt + history + data
 
 **message_handler.py** - Message Processing
 - check_and_handle_message() - Main entry point for messages

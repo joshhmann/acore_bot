@@ -183,7 +183,7 @@ class LorebookService:
                     )
                     return entry
 
-                entry.embedding = self._get_embedding(composite_text)
+                entry.embedding = self.get_embedding(composite_text)
                 logger.debug(f"Generated embedding for lore entry {uid}")
             except Exception as e:
                 logger.debug(f"Failed to generate embedding for entry {uid}: {e}")
@@ -239,7 +239,7 @@ class LorebookService:
                     and entry.embedding is not None
                 ):
                     try:
-                        similarity = self._compute_similarity(text, entry.embedding)
+                        similarity = self.compute_similarity(text, entry.embedding)
                         if similarity >= self.semantic_threshold:
                             triggered_entries.append(entry)
                             seen_uids.add(entry.uid)
@@ -351,7 +351,7 @@ class LorebookService:
                 raise
         return self._model
 
-    def _get_embedding(self, text: str) -> np.ndarray:
+    def get_embedding(self, text: str) -> np.ndarray:
         """Get embedding vector for text, with LRU caching.
 
         Args:
@@ -395,7 +395,10 @@ class LorebookService:
 
         return embedding
 
-    def _compute_similarity(self, text: str, target_embedding: np.ndarray) -> float:
+    # Alias for backward compatibility if needed, but we're updating internal calls
+    _get_embedding = get_embedding
+
+    def compute_similarity(self, text: str, target_embedding: np.ndarray) -> float:
         """Compute cosine similarity between text and a target embedding.
 
         Args:
@@ -405,13 +408,16 @@ class LorebookService:
         Returns:
             Cosine similarity score (0.0 to 1.0, higher is more similar)
         """
-        text_embedding = self._get_embedding(text)
+        text_embedding = self.get_embedding(text)
 
         # Cosine similarity: dot product of normalized vectors
         # Both embeddings are already normalized by sentence-transformers
         similarity = np.dot(text_embedding, target_embedding)
 
         return float(similarity)
+
+    # Alias for backward compatibility
+    _compute_similarity = compute_similarity
 
     def precompute_all_embeddings(self, batch_size: int = 32):
         """Pre-compute embeddings for all lore entries using batch processing.
@@ -489,7 +495,7 @@ class LorebookService:
             for entry in entries_to_update:
                 try:
                     composite_text = " ".join(entry.keys)
-                    entry.embedding = self._get_embedding(composite_text)
+                    entry.embedding = self.get_embedding(composite_text)
                     count += 1
                 except Exception as e:
                     logger.debug(f"Failed to embed entry {entry.uid}: {e}")
