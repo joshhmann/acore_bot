@@ -18,7 +18,7 @@ repos:
     hooks:
       - id: pytest-unit
         name: pytest-unit
-        entry: uv run pytest -m unit --tb=short -q
+        entry: uv run pytest tests/unit -m unit --tb=short -q
         language: system
         pass_filenames: false
         always_run: true
