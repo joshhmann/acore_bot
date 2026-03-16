@@ -1,454 +1,284 @@
-# Persona & Behavior Enhancement Implementation Status Report
-
-**Date**: 2025-12-12  
-**Session Type**: Multi-Agent Parallel Development  
-**Overall Progress**: 67% Complete (20/30 tasks)
-**Status**: ✅ **PRODUCTION READY (Phase 1 & 2 Complete)**
-
----
-
-## 🔧 Recent Updates (2025-12-12)
-
-### Task T27: Local NLP Topic Detection - ✅ COMPLETE
-- **Hybrid Topic Detection**: Combines fast regex with smart semantic matching
-- **Semantic Matching**: Uses `sentence-transformers` (all-MiniLM-L6-v2) to detect topics by meaning
-- **Rich Embeddings**: Uses descriptive keywords for robust matching (e.g., "neural network" → technology)
-- **Performance Optimized**: Pre-computes embeddings on startup, <20ms detection time
-
-### Task A3: Configuration Management - ✅ COMPLETE
-- **All hardcoded timeouts and thresholds moved to `config.py`**
-- **Environment variable override support** for all new config values
-- **Configuration validation** with proper error messages
-- **15 new configuration values** added:
-  - Chat timing: `TYPING_INDICATOR_MIN_DELAY`, `TYPING_INDICATOR_MAX_DELAY`
-  - Response tokens: `RESPONSE_TOKENS_VERY_SHORT/SHORT/MEDIUM/LONG/VERY_LONG`
-  - Analytics: `ANALYTICS_WEBSOCKET_UPDATE_INTERVAL`, `ERROR_SPIKE_WINDOW_SECONDS`
-  - Memory: `PROFILE_SAVE_INTERVAL_SECONDS`, `RAG_RELEVANCE_THRESHOLD`
-  - Persona: `PERSONA_STICKY_TIMEOUT`, `PERSONA_FOLLOWUP_COOLDOWN`, `PERSONA_EVOLUTION_MILESTONES`
-  - Mood: `MOOD_CHECK_INTERVAL_SECONDS`, `MOOD_BOREDOM_TIMEOUT_SECONDS`
-  - Web: `WEB_SEARCH_RATE_LIMIT_DELAY`
-  - Services: `SERVICE_CLEANUP_TIMEOUT`
-- **Files Updated**: 9 files updated to use config values instead of hardcoded constants
-- **`.env.example` updated** with all new configuration options and documentation
-
----
-
-## 📋 Executive Summary
-
-We have successfully implemented **18 major persona and behavior enhancements**, transforming acore_bot into a fully adaptive AI ecosystem with semantic intelligence.
-
-### 🎯 Key Achievements
-
-**✅ Phase 1: Core Intelligence (100% Complete - 11/11 tasks)**
-- **Framework Blending System** (T19-T20): Dynamic runtime persona blending
-- **Emotional Contagion** (T21-T22): Bot catches user moods  
-- Dynamic Mood System & Context-Aware Responses
-- Persona Memory Isolation & Curiosity System
-- Topic Filtering & Adaptive Ambient Timing
-
-**✅ Phase 2: Adaptive Behavior (100% Complete - 8/8 tasks)**
-- Character Evolution System with milestone-based progression
-- Persona Conflict System with dynamic relationship tension
-- Activity-Based Persona Switching with Discord activity awareness
-- **Semantic Lorebook Triggering** (T25-T26): Conceptual lore matching with ML
-- **Real-Time Analytics Dashboard** (T23-T24): Web UI for monitoring persona metrics
-
-**📊 Performance Excellence**
-All implementations exceed performance targets by **10x to 5000x** margins, with most features operating in microseconds rather than milliseconds.
-
----
-
-## 📁 Files Created and Modified
-
-### **New Files Created (12)**
-
-#### Core Services
-1. **`services/persona/channel_profiler.py`** - Channel activity learning system
-2. **`services/persona/evolution.py`** - Character progression tracker
-3. **`scripts/migrate_persona_profiles.py`** - Profile migration tool
-
-#### Test Suites
-4. **`tests/test_mood_system_simple.py`** - Mood system comprehensive tests
-5. **`tests/test_evolution_system.py`** - Evolution system tests
-6. **`tests/test_conflict_system.py`** - Conflict system tests
-7. **`scripts/test_persona_isolation.py`** - Memory isolation tests
-8. **`test_conflict_manual.py`** - Conflict integration tests
-9. **`test_activity_routing_manual.py`** - Activity routing tests
-
-#### Documentation
-10. **`T5_IMPLEMENTATION_SUMMARY.md`** - Memory isolation documentation
-11. **`T13_IMPLEMENTATION_SUMMARY.md`** - Evolution system documentation
-12. **`T15_IMPLEMENTATION_SUMMARY.md`** - Conflict system documentation
-
-### **Files Modified (15)**
-
-#### Core Persona Services
-1. **`services/persona/behavior.py`** - Enhanced with mood, curiosity, topics, adaptive timing
-2. **`services/persona/system.py`** - Extended Character schema with evolution, topics, activity preferences
-3. **`services/persona/relationships.py`** - Added conflict tracking and resolution
-4. **`services/persona/router.py`** - Enhanced with activity-based persona selection
-
-#### Integration Services
-5. **`services/discord/profiles.py`** - Modified for persona-scoped memory
-6. **`services/core/context.py`** - Added evolution and conflict prompt modifiers
-7. **`cogs/chat/helpers.py`** - Enhanced with context analysis
-8. **`cogs/chat/main.py`** - Integration points for new systems
-9. **`utils/di_container.py`** - Fixed dependency injection
-
-#### Documentation
-10. **`prompts/PERSONA_SCHEMA.md`** - Comprehensive documentation of all new features
-11. **`docs/PERSONA_BEHAVIOR_ROADMAP.md`** - Complete 30-task roadmap with progress tracking
-
----
-
-## 🚀 Implemented Features
-
-### **Phase 1: Core Intelligence (8/10 Complete)**
-
-#### ✅ **T1-T2: Dynamic Mood System**
-**Status**: COMPLETE & APPROVED
-- **6 Mood States**: neutral, excited, frustrated, sad, bored, curious
-- **Gradual Transitions**: Max 0.1 shift per message, 30-minute decay to neutral
-- **Behavioral Impact**: Affects reactions, engagement probability, response tone
-- **Performance**: 0.01ms (1000x better than 10ms target)
-- **Files**: `behavior.py`, `PERSONA_SCHEMA.md`
-
-#### ✅ **T3-T4: Context-Aware Response Length**
-**Status**: COMPLETE & APPROVED
-- **4 Context Types**: quick_reply, casual_chat, detailed_question, storytelling
-- **Dynamic Token Allocation**: 75, 150, 300, 450 tokens respectively
-- **Persona Configuration**: Per-character verbosity settings supported
-- **Performance**: <1ms (20x better than 20ms target)
-- **Files**: `helpers.py`, `PERSONA_SCHEMA.md`
-
-#### ✅ **T5-T6: Persona Memory Isolation**
-**Status**: COMPLETE & APPROVED
-- **Separate Memory Stores**: `data/profiles/{persona_id}/{user_id}.json`
-- **Complete Isolation**: No memory bleed between personas
-- **Migration Tool**: Automatic migration with backup/rollback
-- **Performance**: 0.33ms (150x better than 50ms target)
-- **Files**: `profiles.py`, migration script, `di_container.py`
-
-#### ✅ **T7-T8: Curiosity-Driven Follow-Up Questions**
-**Status**: COMPLETE & APPROVED
-- **4 Curiosity Levels**: low (10%), medium (30%), high (60%), maximum (80%)
-- **Smart Cooldowns**: 5-minute individual, 15-minute window limits
-- **Topic Memory**: Prevents repetition with 20-topic history
-- **Natural Generation**: Uses ThinkingService for contextual questions
-- **Performance**: 1.45ms (14x better than 20ms target)
-- **Files**: `behavior.py`, `PERSONA_SCHEMA.md`
-
-#### ✅ **T9-T10: Topic Interest Filtering**
-**Status**: COMPLETE & APPROVED
-- **17 Topic Categories**: Gaming, technology, movies, music, sports, food, travel, work, school, health, relationships, money, weather, pets, books, politics, religion
-- **Engagement Modifiers**: +30% per interest, -100% block for avoidances
-- **Ultra-Fast Detection**: 0.05ms (1000x better than 50ms target)
-- **False Positive Rate**: ~2% (target: <5%)
-- **Files**: `system.py`, `behavior.py`, `PERSONA_SCHEMA.md`
-
-#### ✅ **T11-T12: Adaptive Ambient Timing**
-**Status**: COMPLETE & APPROVED
-- **7-Day Rolling Window**: Learns channel activity patterns
-- **Adaptive Thresholds**: Peak hours reduce engagement, quiet hours increase
-- **Frequency-Based Adjustments**: High-frequency channels get less ambient triggers
-- **Performance**: 0.02ms (5000x better than 100ms target)
-- **Files**: `channel_profiler.py`, `behavior.py`, `PERSONA_SCHEMA.md`
-
-### **Phase 2: Adaptive Behavior (4/8 Complete)**
-
-#### ✅ **T13-T14: Character Evolution System**
-**Status**: COMPLETE & APPROVED
-- **5 Milestone Stages**: 50, 100, 500, 1000, 5000 messages
-- **Evolution Effects**: Tone shifts, new quirks, knowledge expansion
-- **Dynamic Prompts**: Evolution modifiers injected into system prompts
-- **Progressive Unlocks**: Gradual personality development
-- **Performance**: 0.01ms (1000x better than 10ms target)
-- **Files**: `evolution.py`, `system.py`, `behavior.py`, `context.py`, `PERSONA_SCHEMA.md`
-
-#### ✅ **T15-T16: Persona Conflict System**
-**Status**: COMPLETE & APPROVED
-- **Conflict Triggers**: Topics causing tension between persona pairs
-- **Dynamic Severity**: Escalates when triggers mentioned (0.0-1.0 scale)
-- **Banter Reduction**: Formula-based reduction based on conflict severity
-- **Resolution Mechanics**: Gradual decay over time when topics avoided
-- **Performance**: 0.001ms (5000x better than 5ms target)
-- **Files**: `relationships.py`, `behavior.py`, `context.py`, `PERSONA_SCHEMA.md`
-
-#### ✅ **T17-T18: Activity-Based Persona Switching**
-**Status**: COMPLETE & APPROVED
-- **Activity Detection**: Gaming, music, streaming, watching, custom activities
-- **Smart Matching**: Exact match (100pts), category match (50pts), keyword match (25pts)
-- **Routing Priority**: Activity-based → Sticky → Random fallback
-- **Performance**: 0.000ms (∞x better than 10ms target)
-- **Files**: `system.py`, `router.py`, `main.py`, `PERSONA_SCHEMA.md`
-
----
-
-## 📊 Performance Summary
-
-| Feature | Target | Actual | Performance Gain |
-|---------|--------|--------|------------------|
-| Mood System | < 10ms | 0.01ms | **1000x better** |
-| Response Length | < 20ms | < 1ms | **20x better** |
-| Memory Isolation | < 50ms | 0.33ms | **150x better** |
-| Curiosity Questions | < 20ms | 1.45ms | **14x better** |
-| Topic Filtering | < 50ms | 0.05ms | **1000x better** |
-| Adaptive Timing | < 100ms | 0.02ms | **5000x better** |
-| Character Evolution | < 10ms | 0.01ms | **1000x better** |
-| Persona Conflicts | < 5ms | 0.001ms | **5000x better** |
-| Activity Routing | < 10ms | 0.000ms | **∞x better** |
-
-**Overall Performance**: All targets exceeded by **14x to 5000x** margins! 🚀
-
----
-
-## 🔄 What Still Needs Implementation
-
-### **Phase 1 Remaining (0/10 tasks)**
-
-All Phase 1 tasks are now **COMPLETE!** 🎉
-
-#### ✅ **T19-T20: Dynamic Framework Blending**
-**Status**: COMPLETE & APPROVED
-- **Context Detection**: Emotional, creative, analytical contexts
-- **Dynamic Blending**: Merges prompt templates at runtime
-- **Files**: `framework_blender.py`, `system.py`, `context.py`
-
-#### ✅ **T21-T22: Emotional Contagion System**
-**Status**: COMPLETE & APPROVED
-- **Sentiment Tracking**: Adapts to user emotional state
-- **Reaction**: Empathetic or enthusiastic tone shifts
-- **Files**: `behavior.py`, `context.py`
-
-### **Phase 2 Completed (7/8 tasks)**
-
-#### ✅ **T25-T26: Semantic Lorebook Triggering**
-**Status**: COMPLETE & APPROVED  
-**Completed**: 2025-12-11
-- **Semantic Similarity Matching**: Uses sentence-transformers (all-MiniLM-L6-v2)
-- **Conceptual Triggering**: Matches on meaning, not just keywords (e.g., "sixth house" → Dagoth Ur lore)
-- **Backward Compatible**: Falls back to keyword matching seamlessly
-- **Performance**: <100ms with embedding caching
-- **Configuration**: `SEMANTIC_LOREBOOK_ENABLED`, `SEMANTIC_LOREBOOK_THRESHOLD` (default: 0.65)
-- **Files**: `lorebook.py`, `config.py`, `.env.example`, `chat/main.py`
-
-### **Phase 2 Completed (8/8 tasks - 100% COMPLETE!)**
-
-#### ✅ **T23-T24: Real-Time Analytics Dashboard**
-**Status**: COMPLETE & APPROVED  
-**Completed**: 2025-12-11
-- **FastAPI Backend**: Modern async web framework with WebSocket support
-- **Real-Time Updates**: WebSocket endpoint pushes metrics every 2 seconds
-- **Rich Metrics Display**: Messages processed, uptime, active users, response times, persona stats
-- **Chart.js Visualizations**: Interactive charts for message volume and performance trends
-- **API Key Authentication**: Secure access via header or query parameter
-- **Configuration**: `ANALYTICS_DASHBOARD_ENABLED`, `ANALYTICS_DASHBOARD_PORT` (8080), `ANALYTICS_API_KEY`
-- **Performance**: <50ms metric collection, 2-second update interval
-- **Files**: `services/analytics/dashboard.py`, `templates/dashboard/index.html`, `main.py`, `config.py`, `.env.example`
-
-### **Phase 3: Advanced Systems (8/8 tasks)**
-
-#### ✅ **T27: Local NLP Topic Detection**
-**Status**: COMPLETE & APPROVED
-- **Hybrid Approach**: Fast regex + Semantic NLP
-- **Semantic Engine**: Reuses `LorebookService` model (all-MiniLM-L6-v2)
-- **Topic Coverage**: Catches subtle matches missed by keywords (e.g., "golden retriever" → pets)
-- **Performance**: <20ms latency
-- **Files**: `behavior.py`, `lorebook.py`
-
-Pending:
-- T28: Framework Blending (continuation)
-- T29-T30: Additional advanced features (future scope)
-
-### **Phase 4: Documentation (4/4 tasks)**
-
-All Phase 4 tasks are pending:
-- T27-T28: Update PERSONA_SCHEMA.md with all new fields
-- T29-T30: Create migration guide for existing deployments
-
----
-
-## ⚠️ Integration Issues to Resolve
-
-### **Critical Issues Identified**
-
-1. **Import Resolution Errors**
-   ```
-   services/persona/evolution.py: Import "services.persona.evolution" could not be resolved
-   services/persona/channel_profiler.py: Similar import issues
-   ```
-
-2. **Attribute Access Errors in ChatCog**
-   ```
-   cogs/chat/main.py: Cannot access attribute "ollama" for class "Cog"
-   cogs/chat/message_handler.py: Multiple attribute access errors
-   ```
-
-3. **Type Safety Issues**
-   ```
-   services/core/context.py: Expression of type "None" cannot be assigned to parameter
-   Multiple type mismatches in service constructors
-   ```
-
-4. **Missing Dependencies**
-   ```
-   utils/stream_multiplexer: Import could not be resolved
-   services/voice/streaming_tts: Import could not be resolved
-   ```
-
-### **Required Fixes Before Production**
-
-1. **Fix Import Paths**: Resolve circular imports and missing module paths
-2. **Fix Attribute Access**: Ensure all services are properly injected into Cogs
-3. **Fix Type Safety**: Add proper type hints and handle None values
-4. **Test Integration**: Verify all new services work together in live environment
-
----
-
-## 📈 Code Quality Assessment
-
-### **✅ Strengths**
-- **Exceptional Performance**: All targets exceeded by huge margins
-- **Comprehensive Testing**: Test suites for all major features
-- **Backwards Compatibility**: Existing personas work without modification
-- **Clean Architecture**: Proper separation of concerns and dependency injection
-- **Extensive Documentation**: Complete schema documentation with examples
-
-### **⚠️ Areas for Improvement**
-- **Integration Testing**: Need comprehensive end-to-end testing
-- **Error Handling**: Some edge cases need better error recovery
-- **Type Safety**: Several type mismatches need resolution
-- **Import Management**: Circular import issues need addressing
-
----
-
-## 🚀 Production Readiness Assessment
-
-### **✅ Ready for Production**
-- Core Intelligence features (T1-T12) are functionally complete and tested
-- Performance is exceptional with minimal overhead
-- Backwards compatibility maintained
-- Comprehensive documentation provided
-
-### **⚠️ Requires Integration Fixes**
-- Import resolution errors prevent proper loading
-- Attribute access issues in ChatCog block functionality
-- Type safety issues could cause runtime errors
-
-### **📋 Deployment Recommendation**
-
-1. **Phase 1 Deployment**: Deploy T1-T12 features after fixing integration issues
-2. **Monitor Performance**: Track the exceptional performance in production
-3. **Gather User Feedback**: Collect feedback on new persona behaviors
-4. **Continue Development**: Implement remaining Phase 1 tasks (T19-T22)
-
----
-
-## 📚 Documentation Status
-
-### **✅ Complete Documentation**
-- **PERSONA_SCHEMA.md**: Fully updated with all implemented features
-- **Implementation Summaries**: Detailed documentation for each major feature
-- **Roadmap**: Complete 30-task roadmap with progress tracking
-- **Test Coverage**: Comprehensive test suites for all features
-
-### **📝 Documentation Created**
-1. `T5_IMPLEMENTATION_SUMMARY.md` - Memory isolation guide
-2. `T13_IMPLEMENTATION_SUMMARY.md` - Evolution system guide  
-3. `T15_IMPLEMENTATION_SUMMARY.md` - Conflict system guide
-4. `MULTIAGENT_SESSION_SUMMARY.md` - Development session report
-5. `IMPLEMENTATION_STATUS_REPORT.md` - This comprehensive status report
-
----
-
-## 🎯 Next Steps
-
-### **Immediate (This Session)**
-1. **Fix Integration Issues**: Resolve import errors and attribute access problems
-2. **End-to-End Testing**: Test all implemented features working together
-3. **Production Deployment**: Deploy Phase 1 features to production environment
-
-### **Short-Term (Next Week)**
-1. **Complete Phase 1**: Implement T19-T22 (Framework Blending, Emotional Contagion)
-2. **Begin Phase 3**: Start T23-T24 (Analytics Dashboard, Semantic Lorebook)
-3. **User Training**: Create guides for new persona features
-
-### **Long-Term (This Month)**
-1. **Complete Roadmap**: Implement all remaining 18 tasks
-2. **Advanced Features**: Implement Phase 3 advanced systems
-3. **Documentation Updates**: Complete migration guides and final documentation
-
----
-
-## 🏆 Session Success Metrics
-
-### **Development Efficiency**
-- **Multi-Agent Parallelism**: 3x faster than sequential development
-- **Feature Completion Rate**: 12/13 attempted features (92% success)
-- **Code Quality Score**: 9.2/10 (excellent)
-- **Performance Achievement**: 1000x average improvement over targets
-
-### **Technical Achievements**
-- **Zero Breaking Changes**: All implementations maintain backwards compatibility
-- **Exceptional Performance**: All targets exceeded by 10x-5000x margins
-- **Comprehensive Testing**: 100% test coverage for implemented features
-- **Production-Ready Code**: Clean, documented, and performant
-
----
-
-## 📊 Final Statistics
-
-### **Implementation Progress**
-- **Total Tasks**: 30
-- **Completed**: 19
-- **In Progress**: 0
-- **Not Started**: 11
-- **Progress**: 63% ███████████████████░░░░░░░ 19/30
-
-### **By Phase**
-| Phase | Tasks | Completed | Progress |
-|-------|-------|-----------|----------|
-| Phase 1: Core Intelligence | 11 | 11 | 100% ✅ |
-| Phase 2: Adaptive Behavior | 8 | 8 | 100% ✅ |
-| Phase 3: Advanced Systems | 8 | 0 | 0% |
-| Phase 4: Documentation | 3 | 0 | 0% |
-
-### **By Priority**
-| Priority | Tasks | Completed | Progress |
-|----------|-------|-----------|----------|
-| High | 16 | 15 | 94% |
-| Medium | 8 | 4 | 50% |
-| Low | 8 | 0 | 0% |
-
----
-
-## 🎉 Conclusion
-
-The multi-agent development session has been **highly successful**, implementing 12 major persona and behavior enhancements that transform acore_bot from a static response system into a **living, adaptive AI ecosystem**.
-
-### **Key Transformations Achieved**
-1. **Emotional Intelligence**: Personas now have mood states and gradual transitions
-2. **Learning Systems**: Channel activity profiling, character evolution, memory isolation
-3. **Social Dynamics**: Persona conflicts, relationships, and activity-based routing
-4. **Context Awareness**: Topic filtering, adaptive response lengths, curiosity-driven engagement
-
-### **Production Impact**
-- **User Experience**: Dramatically more natural and engaging conversations
-- **System Intelligence**: Self-learning and adaptation capabilities
-- **Performance**: Exceptional speed with minimal resource usage
-- **Maintainability**: Clean, documented, and backwards-compatible code
-
-The foundation is solid and ready for production deployment after resolving the identified integration issues. The persona system now provides **rich, adaptive, and evolving interactions** that will significantly enhance user engagement.
-
----
-
-**Status**: 🟡 **PRODUCTION READY WITH INTEGRATION FIXES NEEDED**
-
-**Next Action**: Fix import and attribute access issues, then deploy Phase 1 features to production.
-
----
-
-**Generated**: 2025-12-10  
-**Session Duration**: ~3 hours  
-**Features Implemented**: 12/30 (40% of roadmap)  
-**Quality Rating**: ⭐⭐⭐⭐⭐ (4.6/5)
+# Gestalt Status
+
+**Last Updated**: 2026-03-15
+
+## Current Direction
+
+Gestalt is being realigned around a runtime-first product surface:
+
+- `core/runtime.py`
+- `adapters/cli/*`
+- `adapters/tui/*`
+- `adapters/web/*`
+- `providers/*`
+- `tools/*`
+- `memory/*`
+
+The browser client in `adapters/desktop/*` remains a useful scaffold, but it is not yet the canonical product surface.
+
+## What Is Stable
+
+- Runtime-native CLI command flow
+- Textual TUI command deck
+- Runtime-backed web HTTP and websocket transport
+- Runtime adapter API session and social bootstrap endpoints
+- Shared runtime bootstrap and host path for maintained entrypoints through `gestalt/runtime_bootstrap.py`
+- Canonical runtime assembly now lives in `gestalt/runtime_bootstrap.py`; `adapters/runtime_factory.py` is now a compatibility shim plus legacy Discord helper exports
+- Browser client runtime-backed session and social bootstrap wiring
+- Browser client runtime-backed social-mode controls
+- Provider routing, tool policy, and memory isolation
+- Catalog-driven persona defaults on maintained CLI and web surfaces
+- Runtime-native task swarm delegation through `/swarm`, including coordinator summaries and persisted swarm outcomes
+- Runtime phase-focused multi-agent swarm presets through `/swarm --phase phaseN`
+- Runtime-owned social session state for Discord mode/status surfaces
+- Runtime-native Discord slash chat path
+- Runtime-owned Discord on-message response decision + response path
+- Normalized Discord on-message decision-fact payload into runtime
+- Discord adapter now sends a thinner normalized fact payload instead of adapter-owned response-policy flags on the maintained on-message path
+- Runtime now owns persona name extraction for maintained Discord on-message routing; the adapter no longer derives persona-name trigger semantics locally
+- Runtime-owned Discord session/channel response gates
+- Runtime now owns ignored-user response gating for the maintained Discord on-message path
+- Runtime now owns `#ignore` response gating for the maintained Discord on-message path
+- Runtime now owns muted-state and direct-unmute response policy for the maintained Discord on-message path
+- Runtime now owns non-persona bot-author response gating for the maintained Discord on-message path
+- Discord RL commands are now explicitly opt-in on the legacy startup path via `RL_ENABLED` instead of loading unconditionally
+- Discord bot-conversation commands are now explicitly opt-in on the legacy startup path via `BOT_CONVERSATION_ENABLED` instead of reading like a maintained default surface
+- Discord voice commands are now explicitly opt-in on the legacy startup path via `DISCORD_VOICE_ENABLED` and still require TTS availability
+- Discord loaded ambient chat controls are now explicitly opt-in behind `DISCORD_LEGACY_CHAT_AMBIENT_ENABLED`; runtime-backed social controls remain the maintained mode/status path
+- Discord loaded end-session chat controls are now explicitly opt-in behind `DISCORD_LEGACY_CHAT_SESSION_ENABLED`; they are not treated as maintained runtime session control
+- Discord local social mode footers are now explicitly opt-in behind `DISCORD_LEGACY_SOCIAL_MODE_FOOTER_ENABLED`; runtime-backed social mode/status remain the maintained social surface
+- Discord local facilitator/bandit status insights are now explicitly opt-in behind `DISCORD_LEGACY_SOCIAL_INSIGHTS_ENABLED`; `/social status` defaults to runtime-backed social state instead of adapter-local insight fields
+- Maintained Discord on-message runtime and legacy response execution are now explicitly separated; the runtime path no longer mutates legacy persona state
+- Maintained Discord message handling now resolves response decisions through one helper and isolates legacy fallback/persona switching behind explicit fallback helpers
+- Legacy persona-switching and `BehaviorEngine` mutation for Discord fallback now live behind `ChatCog._handle_legacy_chat_response(...)` instead of inside `MessageHandler`
+- Maintained Discord `MessageHandler` no longer carries pending legacy response-persona state; legacy persona lookup and persona-id logging now resolve through `ChatCog`
+- Legacy fallback response-decision policy no longer lives in `MessageHandler`; the maintained handler now delegates fallback response decisions through `ChatCog`
+- `ChatCog` now fronts an explicit `legacy_chat` delegate for transitional legacy service ownership instead of storing those legacy subsystems directly as peer ownership on the maintained chat path
+- Maintained Discord `MessageHandler` now treats self/system/prefixed-command filtering and duplicate suppression as explicit adapter transport hygiene; the rest of the maintained path is fact extraction, decision delegation, batching, and rendering
+- Maintained Discord message handling no longer depends on local `SessionManager` response-time tracking in the hot path
+- Maintained Discord `ChatCog` no longer initializes local session-manager support by default on the maintained path
+- Discord loaded legacy chat fallback is now explicitly opt-in behind `DISCORD_LEGACY_CHAT_FALLBACK_ENABLED`; `ChatCog` no longer initializes legacy chat support by default unless fallback or legacy ambient is enabled
+- Discord maintained runtime chat survives optional legacy init failure
+- Discord maintained runtime chat uses a dedicated adapter-side runtime response renderer
+- Discord maintained on-message runtime decision failures no longer fall through to legacy chat behavior unless legacy fallback is explicitly available and allowed
+- Launcher profile-based env loading for maintained startup paths
+- Direct `gestalt` and `python -m adapters.cli` entrypoints now apply env profiles before config-bound CLI imports
+- `gestalt runtime --stdio` and `gestalt runtime --web --port <port>` are now the maintained standalone runtime-host entrypoints for stdio and web serving
+
+## Cleanup Progress
+
+Executed cleanup slices:
+
+- Phase 1 repository hygiene is in progress:
+  - tracked desktop build artifacts are being removed from source control
+  - ignore rules are being tightened for desktop/Tauri and test/build output
+  - stale runtime API test monkeypatching has been realigned to the maintained
+    `adapters.web.adapter.create_runtime` seam
+  - maintained runtime test files (`test_web_runtime_api.py`,
+    `test_runtime_stdio.py`, `test_desktop_scaffold.py`,
+    `test_cli_productization.py`) are now explicitly unignored so migration
+    verification is not hidden behind `test_*.py` ignore patterns
+  - legacy `test_discord_social_commands.py` has been quarantined as
+    superseded runtime-first coverage so stale adapter-local social state tests
+    no longer block unit collection
+- Phase 2 web surface consolidation is complete:
+  - the legacy simple `/ws` websocket path has been removed
+  - `/api/runtime/ws` is now the only maintained runtime websocket surface
+- Phase 2 Runtime API formalization has started:
+  - `docs/RUNTIME_API.md` now defines the canonical surface-adapter contract
+  - runtime session bootstrap/listing is now exposed through maintained web and stdio paths
+  - runtime social-state bootstrap/mutation is now exposed through maintained web and stdio paths
+  - runtime session listing is now adapter-scoped for maintained usage through platform, room, and optional `user_scope` filters
+  - the browser client now consumes runtime session bootstrap/listing and social snapshots instead of relying only on local recent-session approximations
+  - the browser client can now apply and reset runtime social-mode state through the same Runtime API
+  - browser recent-session inventory is now scoped by a stable browser client `user_scope`
+  - maintained web/browser requests now carry a stable `user_id` as well as `user_scope` for request attribution
+- maintained launcher, CLI, TUI, web, stdio, and Discord runtime-chat entrypoints now share one canonical runtime assembly/helper module in `gestalt/runtime_bootstrap.py`
+- launcher CLI/web startup now uses a maintained `RuntimeHost` seam instead of each surface inventing its own runtime bootstrap
+- maintained launcher, CLI, TUI, and stdio now use the shared `RuntimeHost` lifecycle instead of each owning runtime bootstrap/close independently
+- maintained standalone runtime hosting no longer requires `launcher.py` for the web serving path; `gestalt runtime --web` now hosts the canonical Runtime API directly
+- maintained web/browser clients now propagate a stable client id through HTTP headers and websocket connect payloads
+- maintained web/browser paths now derive a server-owned authenticated actor id when API-token auth is enabled instead of trusting caller-supplied `user_id`
+- maintained web transport no longer emits local `datetime.utcnow()` fallback warnings in websocket timestamp paths
+- Launcher cleanup is complete:
+  - CLI and web launcher paths use runtime-first startup without forcing
+    `ServiceFactory`
+  - Discord now uses runtime-first startup via `GestaltDiscordBot` class
+  - `adapters/discord/discord_bot.py` provides the canonical runtime-first Discord entrypoint
+  - `main.py` is deprecated with clear warnings pointing to `launcher.py`
+- Discord migration truth is now mapped:
+  - Discord is not yet a real runtime-first surface overall
+  - some command seams are runtime-first already
+  - Discord slash chat now uses a thin runtime-native chat path
+  - Discord on-message response generation now uses the same runtime-native chat path
+  - on-message response and persona selection now route through runtime after adapter fact extraction
+  - remaining adapter-owned pre-runtime work in `MessageHandler` is now explicit transport hygiene instead of hidden response policy
+  - maintained on-message trigger facts are now normalized into one adapter payload before runtime decision
+  - runtime now owns recent-conversation and channel auto-reply gating instead of the Discord adapter
+  - runtime now respects explicit adapter gating for Discord name-trigger decisions
+  - runtime now owns muted-state, direct-unmute, and non-persona bot-author response policy for the maintained on-message path
+  - `MessageHandler` no longer carries dead pending legacy persona state; `ChatCog` now owns the remaining legacy persona lookup and fallback decision policy through an explicit `legacy_chat` delegate
+  - `ChatCog` now separates required maintained runtime-chat init from optional legacy init
+  - optional legacy chat init failure no longer blocks maintained slash/on-message runtime chat startup
+  - maintained `/list_characters` now reads persona inventory and active persona from runtime instead of legacy bot persona state
+  - maintained `interact` persona lookup now reads from the runtime persona catalog instead of `persona_router`
+  - Discord RL commands are now explicitly gated behind `RL_ENABLED` on the legacy startup path instead of loading unconditionally
+  - Discord bot-conversation commands are now explicitly gated behind `BOT_CONVERSATION_ENABLED` on the legacy startup path instead of reading like a maintained default surface
+  - Discord voice commands are now explicitly gated behind `DISCORD_VOICE_ENABLED` and TTS availability on the legacy startup path
+  - loaded chat ambient controls are now explicitly gated behind `DISCORD_LEGACY_CHAT_AMBIENT_ENABLED` so they do not compete with runtime-backed social controls by default
+  - loaded chat session controls are now explicitly gated behind `DISCORD_LEGACY_CHAT_SESSION_ENABLED` so they do not masquerade as maintained runtime session control
+  - local Discord social mode footers are now explicitly gated behind `DISCORD_LEGACY_SOCIAL_MODE_FOOTER_ENABLED` so Discord-local footer UI state does not read like part of the maintained runtime social model
+  - local Discord facilitator and bandit status insights are now explicitly gated behind `DISCORD_LEGACY_SOCIAL_INSIGHTS_ENABLED` so `/social status` defaults to runtime-backed state instead of adapter-local analytics
+  - launcher Discord startup now has a runtime-first smoke test asserting
+    `GestaltDiscordBot` is the active path and `ServiceFactory` is not required
+  - `main.py` now has an explicit deprecation/ownership guard test to prevent it
+    from silently regaining canonical startup authority
+  - `ChatCog` startup now initializes runtime-chat helpers before system-prompt
+    loading, eliminating the runtime-first startup crash where `helpers` was
+    accessed before initialization
+  - runtime lifecycle now includes `GestaltRuntime.close()`, so
+    `RuntimeHost.close()` no longer fails on maintained Discord shutdown
+  - hard run-gate verification (`launcher.py --discord --no-cli --no-web`)
+    now shows clean startup, command sync, ready state, and clean shutdown
+  - maintained Discord on-message fact extraction now uses
+    `core.interfaces.PlatformFacts` as the normalized adapter fact carrier
+    before runtime decision flags are emitted
+  - maintained web runtime-event ingress (HTTP + websocket) now uses
+    `core.interfaces.PlatformFacts` as the normalized adapter fact carrier
+    before runtime decision flags are emitted
+  - maintained Discord/Web fact-to-flag conversion now uses shared helper
+    `core.interfaces.runtime_flags_from_platform_facts(...)` to reduce
+    adapter-layer duplication without changing runtime policy ownership
+  - maintained web ingress now uses shared event builder
+    `core.interfaces.build_runtime_event_from_facts(...)` for HTTP
+    `/api/runtime/event` and websocket `send_event` paths
+  - maintained Discord chat runtime handlers now use shared event builder
+    `core.interfaces.build_runtime_event_from_facts(...)` for both
+    slash/on-message runtime response flows
+- maintained CLI runtime event ingress now uses shared event builder
+    `core.interfaces.build_runtime_event_from_facts(...)` for both
+    interactive CLI message/command routing and CLI play-mode planner prompts
+  - runtime now owns a session-scoped context cache for normalized context
+    windows with TTL/max-entry controls and cache trace metadata
+    (`context_cache` traces include hit/miss reason and token-saved estimates)
+  - maintained Runtime API now exposes context-cache snapshot/reset on web and
+    stdio transports (`/api/runtime/context`, `/api/runtime/context/reset`,
+    `get_context`, `reset_context`)
+  - runtime command surface now includes `/context` and `/context reset` for
+    operator-side cache introspection and reset
+  - runtime-backed Discord help, status, and character command modules now exist and are test-backed, but they are not on the current `main.py` startup path
+  - trigger parsing, voice, and conversation paths are still hybrid
+  - Discord social mode/status now use runtime-owned session state instead of local adapter state
+- Configuration hardening has started:
+  - launcher now supports `--env-profile`
+  - `config.py` now loads `.env` plus optional `.env.<profile>` through `gestalt/env.py`
+- Documentation pruning is complete:
+  - legacy feature packs, setup guides, workflow catalogs, and old production-readiness docs were removed
+  - `docs/` now focuses on canonical vision, audit maps, and current runtime/operator references
+- Development governance is stricter now:
+  - `docs/ENGINEERING_OPERATING_MODEL.md` defines the required product-vs-research cycle
+  - `docs/adr/` now exists for architecture decisions that change ownership or contracts
+- Canonical architecture is now explicit:
+  - `docs/ARCHITECTURE.md` defines the current layered architecture, ownership model, and realistic phase plan
+  - `docs/adr/0001-canonical-architecture-layering.md` records the layer and ownership decision
+  - `docs/adr/0002-runtime-api-for-surface-adapters.md` records the surface-adapter contract decision
+- Maintained persona-default drift was reduced:
+  - CLI and web runtime paths now resolve default personas from the loaded catalog/runtime router
+  - maintained web API schemas no longer hardcode starter persona ids
+  - the maintained browser client no longer hardcodes `tai` as its startup persona and now defers initial persona resolution to runtime bootstrap
+- Phase 2 social-state migration has started:
+  - `GestaltRuntime` now owns social session state snapshots, overrides, and facilitator decisions
+  - `adapters/discord/commands/social.py` now acts as a thin runtime client for mode/status flows
+- Phase 2 Discord chat migration is materially advanced:
+  - `adapters/discord/commands/chat/commands.py` routes slash chat through a thin runtime-native chat handler
+  - maintained on-message chat now routes response decision and response generation through runtime
+  - `MessageHandler` is now mostly explicit transport hygiene plus platform fact extraction
+  - transitional legacy chat ownership is isolated behind `ChatCog.legacy_chat`
+  - maintained Discord chat can now attach to an injected runtime or `RuntimeHost` instead of always creating its own runtime
+
+This is the first executed pruning step from the audit plan.
+
+## What Is Not Yet Stable
+
+- Browser/Tauri productization
+- Experimental embodiment code outside the canonical browser client
+- Legacy service and cog feature ownership
+
+## Discord Migration Closeout Gate
+
+**Status**: CLOSED under strict quarantine policy (2026-03-14)
+
+Closeout policy: strict quarantine. Legacy Discord surfaces can remain opt-in,
+but they are excluded from maintained-path completion criteria.
+
+- [x] Maintained Discord startup path is runtime-first via `launcher.py --discord`
+  and `adapters/discord/discord_bot.py`
+- [x] Maintained Discord chat path is runtime-owned (decision + response), with
+  adapter transport hygiene and idempotency guards
+- [x] Legacy Discord toggles remain explicit opt-in and default-off
+  (`DISCORD_LEGACY_*`)
+- [x] Runtime lifecycle close path supports maintained Discord shutdown
+  (`RuntimeHost.close()` -> `GestaltRuntime.close()` -> provider cleanup)
+- [x] Hard gate verification available: unit tests + lint + live Discord smoke
+  start/ready/stop without startup/shutdown runtime-contract failures
+- [ ] Runtime-native replacements for all legacy operator/voice/conversation
+  surfaces (intentionally not required for migration closeout under quarantine policy)
+
+### Evidence Block
+
+```bash
+# Test command
+$ uv run pytest tests/unit/test_discord_*.py -q --tb=no
+
+# Results summary
+90 passed, 1 skipped in 1.35s
+
+# Test files covered:
+# - test_discord_chat_runtime_path.py (runtime-first chat path)
+# - test_discord_chat_fallback_seam.py (legacy fallback isolation)
+# - test_discord_social_runtime.py (runtime-owned social state)
+# - test_discord_startup_boundaries.py (legacy opt-in enforcement)
+# - test_discord_character_runtime.py (runtime persona catalog)
+# - test_discord_help_runtime.py (runtime-backed help)
+# - test_discord_system_runtime.py (runtime-backed status)
+# - test_discord_operator_boundaries.py (legacy operator quarantine)
+# - test_discord_voice_runtime.py (voice surface boundaries)
+# - test_discord_profile_runtime.py (profile runtime path)
+# - test_discord_search_runtime.py (search runtime path)
+
+# Live smoke verification
+$ uv run python launcher.py --discord --no-cli --no-web
+# Startup: GestaltDiscordBot initialized with RuntimeHost
+# Ready: Command sync complete, bot ready
+# Shutdown: Clean RuntimeHost.close() -> GestaltRuntime.close()
+```
+
+## Phase 2 Next Tasks
+
+- ~~P6: Startup Consolidation for Discord migration~~ **Completed**: One canonical Discord startup path established (`adapters/discord/discord_bot.py`), runtime-first path is now the default via `launcher.py`, `main.py` deprecated with clear migration warnings.
+- ~~Move persona name extraction from Discord adapter into runtime-owned decision~~ **Completed**: runtime now owns `_extract_mentioned_persona_ids_from_text()` and the maintained Discord adapter no longer sends persona-name trigger semantics in its fact payload.
+- ~~Move facilitator logic from Discord adapter into runtime~~ **Completed**: `ModeFacilitator` removed from `SocialCommandsCog`; runtime now owns social state via `get_social_state_snapshot()`, `set_social_mode()`, `reset_social_state()`, and `record_social_routing_decision()`; Discord adapter calls runtime for mode selection.
+- ~~Remove maintained Discord chat dependence on legacy `BehaviorEngine`, `ContextManager`, and persona-router ownership from the remaining trigger and orchestration path~~ **Completed**: `_LegacyChatSupport` class moved to `adapters/discord/commands/chat/legacy_support.py`; `main.py` no longer imports legacy services at module level; runtime-only path has zero service dependencies.
+- ~~Move remaining Discord persona-management commands onto runtime-owned persona/catalog state~~ **Completed**: `HelpCog`, `SystemCog`, and `CharacterCommandsCog` now loaded on startup; runtime-backed persona commands use runtime catalog; legacy import/reload remains opt-in behind `DISCORD_LEGACY_PERSONA_ADMIN_ENABLED`.
+- ~~Live-run hardening fixes~~ **Completed**: 
+  - Added `_is_visual_question()` method to `GestaltRuntime` (fixes AttributeError in decision path)
+  - Added idempotency guard in `MessageHandler._respond_via_runtime()` with `_responding_messages` set to prevent duplicate/parallel responses for same Discord message ID
+  - Added shutdown safety checks in `_handle_runtime_chat_response()` to gracefully skip sends when bot is closed (prevents "Session is closed" exceptions)
+- Quarantine Discord legacy/research-only surfaces on startup. Partial: RL, bot-conversation, and voice are now explicit opt-in on the transitional `main.py` path, but the underlying surfaces are still legacy/transitional when enabled.
+- Apply the Discord salvage matrix in code. Partial: RL, bot-conversation, legacy operator tooling, and legacy persona import/reload tooling are now explicit opt-ins, but some runtime-backed Discord command modules are still not loaded on the current startup path, and voice replacement work plus other Discord-local replacement targets still exist.
+- Replace Discord-local operator surfaces with runtime-first equivalents. Partial: Discord help and `botstatus` now use runtime command/status truth, and legacy Discord operator tooling is now disabled by default behind `DISCORD_LEGACY_OPERATOR_ENABLED`, but runtime-native memory/admin replacements do not exist yet.
+- Tighten Runtime API identity from stable adapter-generated `user_id` toward authenticated actor identity when auth is enabled. Completed for maintained web/browser HTTP and websocket paths.
+- Keep web/browser as the reference Runtime API client while Discord continues migrating toward the same contract.
+
+## Multi-Agent Note
+
+- `/swarm --phase phase2` is now useful for bounded runtime-native delegation.
+- Swarm output is not ground truth by itself; code, tests, and canonical docs
+  still decide product truth.
+
+## Current Rule
+
+When there is a conflict between historical reports and code/tests, trust code and tests.
+Canonical audit checkpoint: `.sisyphus/VISION_REALIGNMENT_AUDIT.md`.
+
+Use [FEATURES.md](/root/acore_bot/docs/FEATURES.md) as the current platform maturity source of truth.

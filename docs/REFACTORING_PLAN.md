@@ -1,6 +1,7 @@
 # Bot Refactoring Plan: SillyTavern-Style Bot with Dynamic Personas, Voice, and Memory
 
 **Date**: 2026-01-10
+**Last Updated**: 2026-03-14
 **Status**: Draft
 **Version**: 1.0
 
@@ -1134,3 +1135,179 @@ The bot will be **production-ready** with clear separation between roleplay and 
 5. Deploy and monitor (Phase 4)
 
 **Questions or concerns? Discuss in project planning session.**
+
+---
+
+## Discord Migration Closeout Evidence (2026-03-14)
+
+**Note**: This document is a historical refactoring plan. The Discord migration closeout
+has been completed under strict quarantine policy. Legacy Discord surfaces remain
+opt-in only (`DISCORD_LEGACY_*` flags) while the maintained Discord path is now
+runtime-first.
+
+```bash
+# Test command
+$ uv run pytest tests/unit/test_discord_*.py -q --tb=no
+
+# Results summary
+90 passed, 1 skipped in 1.35s
+
+# Verification: Discord maintained path closed under quarantine criteria
+# - Runtime-first boundary enforced (no legacy bypass in maintained path)
+# - DISCORD_LEGACY_* flags remain opt-in only
+# - Unit tests verify runtime-owned decision + response paths
+
+# Governance verification
+$ uv run pytest tests/unit/test_docs_governance.py -q
+1 passed
+
+$ uv run python scripts/check_docs_governance.py
+FEATURES.md approved status labels: PASSED
+FEATURES.md legacy legend removed: PASSED
+STATUS.md canonical reference: PASSED
+reports historical markers: PASSED
+```
+
+### 2026-03-15: Phase 3 Adapter-Contract Adoption Seed (Discord Facts)
+
+Completed:
+
+- adopted `core.interfaces.PlatformFacts` in maintained Discord on-message fact
+  extraction (`MessageHandler`) as the normalized adapter fact carrier
+- kept runtime ownership unchanged: adapter emits facts only, runtime still owns
+  response decision policy
+- added focused assertion coverage for stable fact fields
+  (`channel_id`, `author_id`, `message_id`) in the maintained Discord runtime
+  path tests
+
+Result:
+
+- Phase 3 adapter-contract adoption has started with non-breaking uptake in the
+  maintained Discord path
+- Discord fact extraction is now structurally aligned with the Adapter SDK
+  contract while preserving existing runtime-first behavior
+
+### 2026-03-15: Phase 3 Adapter-Contract Adoption (Web Event Ingress)
+
+Completed:
+
+- adopted `core.interfaces.PlatformFacts` in maintained web event ingress for:
+  - HTTP `/api/runtime/event`
+  - websocket `send_event` handling
+- preserved existing runtime context flags by merging them on top of normalized
+  web platform-fact flags
+- added focused test assertions proving web runtime events now carry normalized
+  fact flags (`is_direct_mention`, `author_is_bot`) alongside existing
+  auth/client-scope flags
+
+Result:
+
+- maintained Discord and web adapters now share the same normalized adapter-fact
+  carrier pattern before runtime decision handling
+- Phase 3 adapter-contract uptake advanced without changing runtime policy
+  ownership or breaking existing surfaces
+
+### 2026-03-15: Phase 3 Shared Fact-Flag Helper Slice
+
+Completed:
+
+- introduced shared helper
+  `core.interfaces.runtime_flags_from_platform_facts(...)`
+- rewired maintained Discord and web ingress paths to use the shared helper
+  instead of duplicating local fact-to-flag merge logic
+- added contract tests verifying helper behavior for:
+  - baseline fact flag serialization
+  - extra flag merge precedence
+
+Result:
+
+- adapter contract adoption now has a shared conversion primitive across
+  maintained surfaces
+- reduced adapter duplication while preserving runtime-first ownership and
+  existing behavior
+
+### 2026-03-15: Phase 3 Shared Event-Builder Helper Slice
+
+Completed:
+
+- introduced shared helper
+  `core.interfaces.build_runtime_event_from_facts(...)`
+- rewired maintained web ingress event construction to use the shared helper for:
+  - HTTP `/api/runtime/event`
+  - websocket `send_event`
+- added contract tests for shared event builder behavior:
+  - default chat event construction
+  - slash-command promotion to `command` kind/type
+  - extra flag merge behavior
+
+Result:
+
+- Phase 3 adapter-contract adoption now covers both shared fact serialization
+  and shared ingress event construction on maintained web paths
+- reduced web adapter duplication while preserving runtime policy ownership and
+  existing behavior
+
+### 2026-03-15: Phase 3 Shared Event-Builder Adoption (Discord Chat)
+
+Completed:
+
+- rewired maintained Discord chat runtime-event construction to use
+  `core.interfaces.build_runtime_event_from_facts(...)` in both maintained
+  runtime response handlers:
+  - slash/runtime chat response flow
+  - on-message/runtime chat response flow
+- preserved runtime metadata semantics (`response_reason`, `suggested_style`,
+  and Discord surface markers) while removing inline Discord event construction
+  duplication
+
+Result:
+
+- maintained Discord and maintained web ingress now share a single event
+  construction primitive for adapter facts -> runtime events
+- adapter-side duplication is reduced without changing runtime ownership of
+  response policy
+
+### 2026-03-15: Phase 3 Shared Event-Builder Adoption (CLI)
+
+Completed:
+
+- rewired maintained CLI runtime-event construction to use
+  `core.interfaces.build_runtime_event_from_facts(...)` in:
+  - interactive CLI message/command event routing (`adapters/cli/__main__.py`)
+  - CLI play-mode LLM planner prompt event routing (`adapters/cli/play.py`)
+- preserved existing CLI metadata semantics (profile flag forwarding and
+  play-planner source/tool annotations) while removing inline event
+  construction duplication
+
+Result:
+
+- maintained Discord, web, and CLI now converge on the same normalized adapter
+  facts -> runtime event construction primitive
+- adapter surfaces stay thinner while runtime ownership boundaries remain
+  unchanged
+
+### 2026-03-15: Phase 3 Runtime Context-Cache and API Controls
+
+Completed:
+
+- added runtime-owned session context-cache entries with TTL and bounded global
+  / per-session limits in `GestaltRuntime`
+- integrated cache use into maintained chat flows (`handle_event` + streaming)
+  with `context_cache` trace spans (`cache_hit`, `cache_reason`,
+  `tokens_saved_estimate`)
+- added runtime snapshot/mutation APIs:
+  - `get_context_cache_snapshot(...)`
+  - `reset_context_cache(...)`
+- exposed context-cache controls on maintained transports:
+  - web: `POST /api/runtime/context`, `POST /api/runtime/context/reset`
+  - stdio: `get_context`, `reset_context`
+- added runtime operator commands:
+  - `/context`
+  - `/context reset`
+
+Result:
+
+- runtime now owns context-window reuse and cache lifecycle instead of leaving
+  context optimization as adapter-side behavior
+- maintained web and stdio surfaces now have parity for context-cache
+  introspection and reset workflows
