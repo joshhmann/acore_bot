@@ -1,53 +1,97 @@
-"""Web adapter for Gestalt Framework using FastAPI."""
+"""Web adapter for Gestalt Framework using FastAPI.
+
+This module provides the main WebInputAdapter class that integrates
+FastAPI, WebSocket support, and HTTP endpoints for the Gestalt runtime.
+
+The adapter delegates to separate modules:
+- auth.py: Authentication handling
+- routes.py: HTTP API routes
+- websocket.py: WebSocket handlers
+"""
+
+from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+import os
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
+from gestalt.runtime_bootstrap import create_runtime as _create_runtime
 from core.interfaces import InputAdapter, AcoreEvent
-from core.types import AcoreMessage
-from .api_schema import ChatRequest, ChatAsyncRequest, ChatResponse, HealthResponse
 
+if TYPE_CHECKING:
+    from core.runtime import GestaltRuntime
+
+# FastAPI imports with fallback
 try:
-    from fastapi import (
-        FastAPI,
-        HTTPException,
-        BackgroundTasks,
-        WebSocket,
-        WebSocketDisconnect,
-    )
-    from fastapi.middleware.cors import CORSMiddleware
-    import uvicorn
     from contextlib import asynccontextmanager
-    from pydantic import BaseModel
+    from fastapi import FastAPI, WebSocket
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.staticfiles import StaticFiles
+    from fastapi.responses import FileResponse
 
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
-    FastAPI = None
-    HTTPException = None
-    BackgroundTasks = None
-    CORSMiddleware = None
-    uvicorn = None
-    WebSocket = None
-    WebSocketDisconnect = None
+    FastAPI = object  # type: ignore
+    CORSMiddleware = object  # type: ignore
+    StaticFiles = object  # type: ignore
+    FileResponse = object  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 
-class WebInputAdapter(InputAdapter):
-    """Input adapter that exposes HTTP API for receiving messages."""
+def create_runtime(*, legacy_llm: Any | None = None) -> "GestaltRuntime":
+    """Build runtime for web adapter; patched in tests for deterministic fakes."""
+    return _create_runtime(legacy_llm=legacy_llm)
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8000):
+
+class WebInputAdapter(InputAdapter):
+    """Input adapter that exposes HTTP API for receiving messages.
+
+    Provides:
+    - REST API endpoints for chat and persona management
+    - WebSocket support for real-time streaming
+    - API key authentication
+    - Integration with GestaltRuntime
+
+    Usage:
+        adapter = WebInputAdapter(host="0.0.0.0", port=8000)
+        await adapter.start()
+        # ... run until shutdown
+        await adapter.stop()
+    """
+
+    def __init__(
+        self,
+        host: str = "0.0.0.0",
+        port: int = 8000,
+        runtime: Optional["GestaltRuntime"] = None,
+    ):
+        """Initialize the web input adapter.
+
+        Args:
+            host: Host to bind the server to (default: 0.0.0.0).
+            port: Port to listen on (default: 8000).
+            runtime: Optional GestaltRuntime instance. If not provided,
+                    one will be built using runtime_factory.
+        """
         super().__init__()
         self.host = host
         self.port = port
         self._event_callback: Optional[Callable[[AcoreEvent], None]] = None
-        self._app: Optional[Any] = None
-        self._server: Optional[Any] = None
+        self._app: Optional[FastAPI] = None
+        self._server: Any = None
         self._running = False
         self._stored_messages: List[Dict[str, Any]] = []
+        self._runtime = runtime or create_runtime()
+
+        # Load API token from environment
+        self._api_token = str(
+            os.environ.get("GESTALT_API_TOKEN")
+            or os.environ.get("ACORE_WEB_API_TOKEN")
+            or ""
+        ).strip()
 
         if not FASTAPI_AVAILABLE:
             logger.warning("FastAPI not installed. Web adapter disabled.")
@@ -55,11 +99,27 @@ class WebInputAdapter(InputAdapter):
 
         self._setup_app()
 
-    def _setup_app(self):
+    def _setup_app(self) -> None:
         """Setup FastAPI application."""
+        if not FASTAPI_AVAILABLE:
+            return
+
+        # Import modules here to avoid issues if FastAPI not installed
+        from .auth import WebAuth
+        from .routes import create_router
+        from .websocket import WebSocketManager
+
+        # Initialize auth
+        self._auth = WebAuth(self._api_token)
+        self._ws_manager = WebSocketManager(
+            runtime=self._runtime,
+            api_token=self._api_token,
+            event_callback=self._event_callback,
+        )
 
         @asynccontextmanager
-        async def lifespan(app):
+        async def lifespan(app: FastAPI):
+            """Application lifespan handler."""
             logger.info("Web adapter starting up")
             yield
             logger.info("Web adapter shutting down")
@@ -81,164 +141,57 @@ class WebInputAdapter(InputAdapter):
         )
 
         # Mount static files
-        from fastapi.staticfiles import StaticFiles
-        from fastapi.responses import FileResponse
-        import os
-
         static_dir = os.path.join(os.path.dirname(__file__), "static")
         if os.path.exists(static_dir):
             self._app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-        # Setup routes
-        self._setup_routes()
-        self._setup_websocket()
+        # Create and include router
+        router = create_router(
+            runtime=self._runtime,
+            auth=self._auth,
+            stored_messages=self._stored_messages,
+        )
+        self._app.include_router(router)
 
-        # Add root route to serve index.html
+        # Setup WebSocket routes
+        self._setup_websocket_routes()
+
+        # Add root route
         @self._app.get("/")
         async def root():
-            """Serve the chat UI."""
+            """Serve the chat UI or API info."""
             index_path = os.path.join(static_dir, "index.html")
             if os.path.exists(index_path):
                 return FileResponse(index_path)
-            return {"message": "Gestalt Framework API", "docs": "/docs"}
+            return {
+                "message": "Gestalt Framework API",
+                "docs": "/docs",
+                "version": "1.0.0",
+            }
 
-    def _setup_websocket(self):
-        """Setup WebSocket endpoint for real-time chat."""
+    def _setup_websocket_routes(self) -> None:
+        """Setup WebSocket endpoint routes."""
+        if self._app is None:
+            return
 
+        # Runtime protocol WebSocket
+        @self._app.websocket("/api/runtime/ws")
+        async def runtime_websocket(websocket: WebSocket):
+            """Runtime protocol WebSocket endpoint."""
+            await self._ws_manager.handle_runtime_websocket(websocket)
+
+        # Simple chat WebSocket
         @self._app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
-            """WebSocket endpoint for streaming chat."""
-            await websocket.accept()
-            client_id = f"ws_{id(websocket)}"
-            logger.info(f"WebSocket client connected: {client_id}")
-
-            try:
-                while True:
-                    # Receive message from client
-                    data = await websocket.receive_json()
-
-                    message_text = data.get("message", "")
-                    persona_id = data.get("persona_id", "dagoth_ur")
-                    user_id = data.get("user_id", client_id)
-
-                    if not message_text:
-                        await websocket.send_json(
-                            {"type": "error", "message": "No message provided"}
-                        )
-                        continue
-
-                    # Create AcoreMessage
-                    message = AcoreMessage(
-                        text=message_text,
-                        author_id=user_id,
-                        channel_id=client_id,
-                        timestamp=datetime.utcnow(),
-                    )
-
-                    # Create event
-                    event = AcoreEvent(
-                        type="message",
-                        payload={
-                            "message": message,
-                            "persona_id": persona_id,
-                            "websocket": websocket,
-                        },
-                        source_adapter="web",
-                    )
-
-                    # Send to event callback
-                    if self._event_callback:
-                        result = self._event_callback(event)
-                        if asyncio.iscoroutine(result):
-                            asyncio.create_task(result)
-
-                    # Send acknowledgment
-                    await websocket.send_json(
-                        {
-                            "type": "ack",
-                            "message_id": len(self._stored_messages),
-                            "timestamp": datetime.utcnow().isoformat(),
-                        }
-                    )
-
-            except WebSocketDisconnect:
-                logger.info(f"WebSocket client disconnected: {client_id}")
-            except Exception as e:
-                logger.error(f"WebSocket error for {client_id}: {e}")
-                try:
-                    await websocket.send_json({"type": "error", "message": str(e)})
-                except:
-                    pass
-
-    def _setup_routes(self):
-        """Setup API routes."""
-
-        @self._app.get("/health", response_model=HealthResponse)
-        async def health_check():
-            """Health check endpoint."""
-            return HealthResponse(
-                status="healthy",
-                personas_loaded=0,
-                uptime_seconds=0.0,
-                version="1.0.0",
-            )
-
-        @self._app.post("/chat", response_model=ChatResponse)
-        async def chat(request: ChatRequest):
-            """Synchronous chat endpoint."""
-            message_data = {
-                "message": request.message,
-                "persona_id": request.persona_id,
-                "user_id": request.user_id,
-                "channel_id": request.channel_id,
-                "context": request.context,
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-            self._stored_messages.append(message_data)
-            return ChatResponse(
-                response="Message received (processing not yet implemented)",
-                persona_id=request.persona_id or "default",
-                persona_name=request.persona_id or "default",
-                timestamp=datetime.utcnow(),
-                metadata={"stored": True, "pending": True},
-            )
-
-        @self._app.post("/chat/async")
-        async def chat_async(
-            request: ChatAsyncRequest, background_tasks: BackgroundTasks
-        ):
-            """Asynchronous chat endpoint - accepts message and returns immediately."""
-            message_data = {
-                "message": request.message,
-                "persona_id": request.persona_id,
-                "user_id": request.user_id,
-                "channel_id": request.channel_id,
-                "context": request.context,
-                "webhook_url": request.webhook_url,
-                "timestamp": datetime.utcnow().isoformat(),
-            }
-            self._stored_messages.append(message_data)
-            return {
-                "status": "accepted",
-                "message_id": len(self._stored_messages) - 1,
-                "webhook_url": request.webhook_url,
-            }
-
-        @self._app.get("/personas")
-        async def list_personas():
-            """List available personas."""
-            return {"personas": []}
-
-        @self._app.get("/messages")
-        async def get_stored_messages():
-            """Get stored messages for processing (for internal/debug use)."""
-            return {
-                "count": len(self._stored_messages),
-                "messages": self._stored_messages,
-            }
+            """Simple chat WebSocket endpoint."""
+            await self._ws_manager.handle_simple_websocket(websocket)
 
     async def start(self) -> None:
-        """Start the web server."""
+        """Start the web server.
+
+        Raises:
+            ImportError: If FastAPI/uvicorn is not installed.
+        """
         if not FASTAPI_AVAILABLE:
             logger.error("Cannot start web adapter: FastAPI not installed")
             return
@@ -250,9 +203,10 @@ class WebInputAdapter(InputAdapter):
         self._running = True
         logger.info(f"Starting WebInputAdapter on {self.host}:{self.port}")
 
-        # Run server in background
+        import uvicorn
+
         config = uvicorn.Config(
-            self._app, host=self.host, port=self.port, log_level="info"
+            self._app, host=self.host, port=self._port, log_level="info"
         )
         self._server = uvicorn.Server(config)
 
@@ -272,8 +226,15 @@ class WebInputAdapter(InputAdapter):
             await asyncio.sleep(0.5)
 
     def on_event(self, callback: Callable[[AcoreEvent], None]) -> None:
-        """Register callback for incoming events."""
+        """Register a callback to handle incoming events.
+
+        Args:
+            callback: Function called with each AcoreEvent received.
+        """
         self._event_callback = callback
+        # Update websocket manager with callback
+        if hasattr(self, "_ws_manager"):
+            self._ws_manager.event_callback = callback
         logger.debug("Event callback registered for WebInputAdapter")
 
     def get_stored_messages(self) -> List[Dict[str, Any]]:
@@ -287,3 +248,41 @@ class WebInputAdapter(InputAdapter):
     def is_running(self) -> bool:
         """Check if the web adapter is running."""
         return self._running
+
+    @property
+    def app(self) -> Optional[FastAPI]:
+        """Get the FastAPI application instance."""
+        return self._app
+
+    @property
+    def runtime(self) -> "GestaltRuntime":
+        """Get the GestaltRuntime instance."""
+        return self._runtime
+
+
+class WebOutputAdapter:
+    """Output adapter for web responses.
+
+    This is a compatibility wrapper around the existing output adapter.
+    For new code, use the one from .output module directly.
+    """
+
+    def __init__(self, event_bus: Any = None):
+        """Initialize output adapter."""
+        from .output import WebOutputAdapter as _WebOutputAdapter
+
+        self._adapter = _WebOutputAdapter(event_bus=event_bus)
+
+    async def send(self, channel_id: str, text: str, **options: Any) -> None:
+        """Send a text message."""
+        await self._adapter.send(channel_id, text, **options)
+
+    async def send_embed(self, channel_id: str, embed: dict) -> None:
+        """Send rich embedded content."""
+        await self._adapter.send_embed(channel_id, embed)
+
+
+__all__ = [
+    "WebInputAdapter",
+    "WebOutputAdapter",
+]

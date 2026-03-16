@@ -1,6 +1,7 @@
-from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, Optional
+
+from pydantic import BaseModel, Field
 
 
 class ChatRequest(BaseModel):
@@ -47,3 +48,35 @@ class HealthResponse(BaseModel):
     personas_loaded: int = Field(default=0, description="Number of loaded personas")
     uptime_seconds: float = Field(default=0.0, description="Service uptime")
     version: str = Field(default="1.0.0", description="API version")
+
+
+class RuntimeContextRequest(BaseModel):
+    session_id: str = Field(default="web:main", description="Runtime session id")
+    persona_id: str = Field(default="", description="Persona id")
+    mode: str = Field(default="", description="Optional mode override")
+    room_id: str = Field(default="web_room", description="Room id")
+    platform: str = Field(default="web", description="Adapter/platform name")
+    flags: Dict[str, Any] = Field(default_factory=dict, description="Runtime flags")
+    user_id: str = Field(default="", description="Optional user override")
+
+
+class RuntimeEventRequest(RuntimeContextRequest):
+    text: str = Field(..., description="Chat or command text")
+    kind: str = Field(default="chat", description="Event kind: chat or command")
+    message_id: str = Field(default="", description="Optional message identifier")
+
+
+class RuntimeListSessionsRequest(BaseModel):
+    limit: int = Field(default=20, description="Max sessions to return")
+    platform: str = Field(default="", description="Filter by platform")
+    room_id: str = Field(default="", description="Filter by room id")
+    user_scope: str = Field(default="", description="Filter by user scope")
+
+
+class RuntimeSocialModeRequest(RuntimeContextRequest):
+    social_mode: str = Field(..., description="Social mode override")
+
+
+class RuntimeTraceRequest(BaseModel):
+    session_id: str = Field(default="web:main", description="Runtime session id")
+    limit: int = Field(default=10, description="Trace span limit")

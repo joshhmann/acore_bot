@@ -5,6 +5,7 @@ import difflib
 import os
 import subprocess
 import hashlib
+import inspect
 from dataclasses import dataclass, field
 import json
 from time import perf_counter
@@ -300,7 +301,11 @@ class GestaltRuntime:
         self.context_cache.clear()
         # Close provider router to release aiohttp sessions
         if hasattr(self, "provider_router") and self.provider_router:
-            await self.provider_router.close()
+            close_fn = getattr(self.provider_router, "close", None)
+            if callable(close_fn):
+                result = close_fn()
+                if inspect.isawaitable(result):
+                    await result
 
     async def handle_event_envelope(self, event: Event) -> ResponseEnvelope:
         session_id = (
@@ -1529,6 +1534,24 @@ class GestaltRuntime:
             "metadata": {"flags": dict(flags or {})},
         }
 
+    def _context_cache_metrics_for_session(self, *, session_id: str) -> dict[str, Any]:
+        entries = [
+            entry
+            for entry in self.context_cache.values()
+            if entry.session_id == session_id
+        ]
+        total_hits = sum(int(entry.hit_count) for entry in entries)
+        tokens_saved_estimate = sum(
+            int(entry.context_tokens_estimate) * int(entry.hit_count)
+            for entry in entries
+        )
+        return {
+            "entry_count": len(entries),
+            "total_hits": total_hits,
+            "tokens_saved_estimate": tokens_saved_estimate,
+            "ttl_seconds": self.context_cache_ttl_seconds,
+        }
+
     def reset_context_cache(
         self,
         *,
@@ -1926,6 +1949,9 @@ class GestaltRuntime:
             "model_override": session.model_override,
             "project_context": project_context,
             "context_budget": session.context_budget.get_status() if session.context_budget else None,
+            "context_cache": self._context_cache_metrics_for_session(
+                session_id=session.session_id
+            ),
         }
 
         text = (
@@ -3087,16 +3113,12 @@ class GestaltRuntime:
         *,
         persona_id: str,
         mode_name: str,
-        summary: str,
         rag_context: str,
-        history: list[dict[str, Any]],
     ) -> str:
         payload = {
             "persona_id": persona_id,
             "mode_name": mode_name,
-            "summary": summary,
             "rag_context": rag_context,
-            "history": history,
         }
         raw = json.dumps(payload, sort_keys=True, ensure_ascii=True)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -3161,9 +3183,7 @@ class GestaltRuntime:
         signature = self._context_signature(
             persona_id=persona.persona_id,
             mode_name=mode_name,
-            summary=summary,
             rag_context=rag_context,
-            history=history,
         )
         cache_entry = self.context_cache.get(cache_key)
         cache_hit = False
@@ -3188,6 +3208,13 @@ class GestaltRuntime:
                     for item in cache_entry.base_messages
                     if str(item.get("content") or "")
                 ]
+                for message in history:
+                    role = str(message.get("role") or "user")
+                    content = str(message.get("content") or "")
+                    if content:
+                        base_messages.append(
+                            ProviderMessage(role=role, content=content)
+                        )
                 trace = self._build_span_trace(
                     trace_type="context_cache",
                     session_id=session.session_id,
@@ -3220,17 +3247,16 @@ class GestaltRuntime:
             if content:
                 base_messages.append(ProviderMessage(role=role, content=content))
 
-        context_tokens = self._estimate_messages_tokens(base_messages)
+        context_tokens = self._estimate_messages_tokens(
+            [ProviderMessage(role="system", content=system_prompt)]
+        )
         self.context_cache[cache_key] = ContextCacheEntry(
             cache_key=cache_key,
             session_id=session.session_id,
             persona_id=persona.persona_id,
             mode=mode_name,
             signature=signature,
-            base_messages=[
-                {"role": message.role, "content": message.content}
-                for message in base_messages
-            ],
+            base_messages=[{"role": "system", "content": system_prompt}],
             context_tokens_estimate=context_tokens,
             created_at=now,
             last_used_at=now,

@@ -1,0 +1,8 @@
+{
+  "name": "core_tools",
+  "version": "0.1.0",
+  "kind": "tools",
+  "entrypoint": "plugin.py",
+  "enabled_by_default": true,
+  "description": "Registers built-in runtime tools"
+}

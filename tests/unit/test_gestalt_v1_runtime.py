@@ -215,6 +215,101 @@ async def test_runtime_command_context_returns_structured_snapshot(tmp_path):
 
 @pytest.mark.unit
 @pytest.mark.asyncio
+async def test_runtime_context_cache_trace_hit_and_mode_invalidation(tmp_path):
+    runtime = _build_runtime(tmp_path)
+
+    first = await runtime.handle_event_envelope(
+        Event(
+            type="message",
+            text="cache probe",
+            user_id="u1",
+            room_id="r1",
+            platform="cli",
+            session_id="cli:r1:u1",
+            metadata={"persona_id": "dagoth_ur", "mode": "default"},
+        )
+    )
+    second = await runtime.handle_event_envelope(
+        Event(
+            type="message",
+            text="cache probe",
+            user_id="u1",
+            room_id="r1",
+            platform="cli",
+            session_id="cli:r1:u1",
+            metadata={"persona_id": "dagoth_ur", "mode": "default"},
+        )
+    )
+    third = await runtime.handle_event_envelope(
+        Event(
+            type="message",
+            text="cache probe",
+            user_id="u1",
+            room_id="r1",
+            platform="cli",
+            session_id="cli:r1:u1",
+            metadata={"persona_id": "dagoth_ur", "mode": "alt_mode"},
+        )
+    )
+
+    def _cache_hit(envelope: Any) -> bool | None:
+        for output in envelope.outputs:
+            if (
+                hasattr(output, "trace_type")
+                and getattr(output, "trace_type", "") == "context_cache"
+            ):
+                return bool(getattr(output, "data", {}).get("cache_hit"))
+        return None
+
+    assert _cache_hit(first) is False
+    assert _cache_hit(second) is True
+    assert _cache_hit(third) is False
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_runtime_status_snapshot_includes_context_cache_metrics(tmp_path):
+    runtime = _build_runtime(tmp_path)
+
+    await runtime.handle_event(
+        Event(
+            type="message",
+            text="status cache seed",
+            user_id="u1",
+            room_id="r1",
+            platform="cli",
+            session_id="cli:r1:u1",
+            metadata={"persona_id": "dagoth_ur", "mode": "default"},
+        )
+    )
+    await runtime.handle_event(
+        Event(
+            type="message",
+            text="status cache seed",
+            user_id="u1",
+            room_id="r1",
+            platform="cli",
+            session_id="cli:r1:u1",
+            metadata={"persona_id": "dagoth_ur", "mode": "default"},
+        )
+    )
+
+    snapshot = runtime.get_status_snapshot(
+        session_id="cli:r1:u1",
+        persona_id="dagoth_ur",
+        mode="default",
+        platform="cli",
+        room_id="r1",
+        flags={},
+    )
+
+    assert "context_cache" in snapshot
+    assert snapshot["context_cache"]["entry_count"] >= 1
+    assert snapshot["context_cache"]["total_hits"] >= 1
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
 async def test_memory_isolation_by_persona_room(tmp_path):
     store = LocalJsonMemoryStore(root_dir=tmp_path / "memory")
 

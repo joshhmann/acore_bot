@@ -1,0 +1,9 @@
+{
+  "name": "mcp_tool_source",
+  "version": "0.1.0",
+  "kind": "tool_source",
+  "entrypoint": "plugin.py",
+  "enabled_by_default": false,
+  "enabled_env": "GESTALT_MCP_ENABLED",
+  "description": "Registers MCP tool sources as namespaced tools"
+}

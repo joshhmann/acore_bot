@@ -10,7 +10,9 @@ import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List
+
+from core.schemas import Event, EventKind
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,64 @@ class AcoreEvent:
     payload: dict
     source_adapter: str
     timestamp: datetime = field(default_factory=datetime.utcnow)
+
+
+@dataclass(slots=True, frozen=True)
+class PlatformFacts:
+    """Normalized adapter facts passed into runtime event construction."""
+
+    text: str
+    user_id: str
+    room_id: str
+    message_id: str = ""
+    is_direct_mention: bool = False
+    is_reply_to_bot: bool = False
+    is_persona_message: bool = False
+    has_visual_context: bool = False
+    author_is_bot: bool = False
+    platform_flags: dict[str, Any] = field(default_factory=dict)
+    raw_metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def build_runtime_event_from_facts(
+    *,
+    facts: PlatformFacts,
+    platform_name: str,
+    kind: str = EventKind.CHAT.value,
+    session_id: str = "",
+    persona_id: str = "",
+    mode: str = "",
+    extra_flags: dict[str, Any] | None = None,
+) -> Event:
+    """Build canonical runtime event from adapter-level normalized facts."""
+    flags: dict[str, Any] = dict(facts.platform_flags)
+    if extra_flags:
+        flags.update(extra_flags)
+    flags.setdefault("is_direct_mention", bool(facts.is_direct_mention))
+    flags.setdefault("is_reply_to_bot", bool(facts.is_reply_to_bot))
+    flags.setdefault("is_persona_message", bool(facts.is_persona_message))
+    flags.setdefault("has_visual_context", bool(facts.has_visual_context))
+    flags.setdefault("author_is_bot", bool(facts.author_is_bot))
+    flags.setdefault("user_id", str(facts.user_id))
+    if facts.raw_metadata:
+        flags.setdefault("raw_metadata", dict(facts.raw_metadata))
+
+    event_metadata: dict[str, Any] = {
+        "persona_id": str(persona_id or ""),
+        "mode": str(mode or ""),
+        "flags": flags,
+    }
+    return Event(
+        type=str(kind or EventKind.CHAT.value),
+        kind=str(kind or EventKind.CHAT.value),
+        text=str(facts.text or ""),
+        user_id=str(facts.user_id or ""),
+        room_id=str(facts.room_id or ""),
+        message_id=str(facts.message_id or ""),
+        platform=str(platform_name or "unknown"),
+        session_id=str(session_id or ""),
+        metadata=event_metadata,
+    )
 
 
 class EventBus(ABC):
