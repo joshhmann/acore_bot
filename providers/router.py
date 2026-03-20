@@ -6,7 +6,13 @@ from typing import Any
 
 from services.interfaces.llm_interface import LLMInterface
 
-from .base import LLMProvider, LLMResponse, LLMStreamChunk, ProviderMessage
+from .base import (
+    LLMProvider,
+    LLMResponse,
+    LLMStreamChunk,
+    ProviderMessage,
+    ProviderRequestHints,
+)
 from .registry import ProviderSpec, canonical_provider_name
 
 
@@ -243,9 +249,10 @@ class LegacyLLMProvider(LLMProvider):
         messages: list[ProviderMessage],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        request_hints: ProviderRequestHints | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
-        del tools, stream, kwargs
+        del tools, stream, request_hints, kwargs
         payload = [{"role": m.role, "content": m.content} for m in messages]
         content = await self.llm.chat(messages=payload)
         return LLMResponse(content=content)
@@ -254,10 +261,15 @@ class LegacyLLMProvider(LLMProvider):
         self,
         messages: list[ProviderMessage],
         tools: list[dict[str, Any]] | None = None,
+        request_hints: ProviderRequestHints | None = None,
         **kwargs: Any,
     ):
         response = await self.chat(
-            messages=messages, tools=tools, stream=True, **kwargs
+            messages=messages,
+            tools=tools,
+            stream=True,
+            request_hints=request_hints,
+            **kwargs,
         )
         if response.content:
             yield LLMStreamChunk(kind="text_delta", text=response.content)

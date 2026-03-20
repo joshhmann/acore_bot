@@ -11,7 +11,7 @@ from memory.local_json import LocalJsonMemoryStore
 from memory.rag import RAGStore
 from memory.summary import DeterministicSummary
 from personas.loader import PersonaCatalog, PersonaDefinition
-from providers.base import LLMResponse, LLMStreamChunk, ProviderMessage
+from providers.base import LLMResponse, LLMStreamChunk, ProviderMessage, ProviderUsage
 from providers.router import ProviderRouter
 from tools.policy import ToolPolicy
 from tools.registry import ToolRegistry
@@ -32,7 +32,14 @@ class _FakeProvider:
             if message.role == "user":
                 last_user = message.content
                 break
-        return LLMResponse(content=f"echo:{last_user}")
+        return LLMResponse(
+            content=f"echo:{last_user}",
+            usage=ProviderUsage(
+                input_tokens=max(1, len(messages) * 10),
+                output_tokens=3,
+                cached_input_tokens=8,
+            ),
+        )
 
     async def stream_chat(
         self,
@@ -45,7 +52,25 @@ class _FakeProvider:
         yield LLMStreamChunk(kind="response", response=response)
 
 
-def _build_runtime(tmp_path, *, default_persona_id: str = "dagoth_ur") -> GestaltRuntime:
+class _VariableRAGStore(RAGStore):
+    async def search(
+        self,
+        query: str,
+        top_k: int = 5,
+        persona_id: str | None = None,
+        room_id: str | None = None,
+    ):
+        del top_k, persona_id, room_id
+        return [type("RAGResult", (), {"content": f"knowledge:{query}"})()]
+
+
+def _build_runtime(
+    tmp_path,
+    *,
+    default_persona_id: str = "dagoth_ur",
+    provider: Any | None = None,
+    rag_store: RAGStore | None = None,
+) -> GestaltRuntime:
     memory_store = LocalJsonMemoryStore(root_dir=tmp_path / "memory")
     summary_engine = DeterministicSummary()
     memory_manager = MemoryManager(store=memory_store, summary_engine=summary_engine)
@@ -63,13 +88,13 @@ def _build_runtime(tmp_path, *, default_persona_id: str = "dagoth_ur") -> Gestal
         persona_engine=persona_engine,
         provider_router=ProviderRouter(
             default_provider_name="fake",
-            providers={"fake": _FakeProvider()},
+            providers={"fake": provider or _FakeProvider()},
             persona_provider_map={},
         ),
         tool_runner=ToolRunner(registry=ToolRegistry(), policy=ToolPolicy()),
         memory_manager=memory_manager,
         summary_engine=summary_engine,
-        rag_store=RAGStore(),
+        rag_store=rag_store or RAGStore(),
         personas=catalog,
         tool_policy=ToolPolicy(),
     )
@@ -306,6 +331,48 @@ async def test_runtime_status_snapshot_includes_context_cache_metrics(tmp_path):
     assert "context_cache" in snapshot
     assert snapshot["context_cache"]["entry_count"] >= 1
     assert snapshot["context_cache"]["total_hits"] >= 1
+    assert snapshot["context_cache"]["provider_cached_input_tokens"] >= 8
+
+
+@pytest.mark.unit
+@pytest.mark.asyncio
+async def test_runtime_context_cache_reuses_stable_prefix_when_rag_changes(tmp_path):
+    runtime = _build_runtime(tmp_path, rag_store=_VariableRAGStore())
+
+    first = await runtime.handle_event_envelope(
+        Event(
+            type="message",
+            text="alpha query",
+            user_id="u1",
+            room_id="r1",
+            platform="cli",
+            session_id="cli:r1:u1",
+            metadata={"persona_id": "dagoth_ur", "mode": "default"},
+        )
+    )
+    second = await runtime.handle_event_envelope(
+        Event(
+            type="message",
+            text="beta query",
+            user_id="u1",
+            room_id="r1",
+            platform="cli",
+            session_id="cli:r1:u1",
+            metadata={"persona_id": "dagoth_ur", "mode": "default"},
+        )
+    )
+
+    def _cache_hit(envelope: Any) -> bool | None:
+        for output in envelope.outputs:
+            if (
+                hasattr(output, "trace_type")
+                and getattr(output, "trace_type", "") == "context_cache"
+            ):
+                return bool(getattr(output, "data", {}).get("cache_hit"))
+        return None
+
+    assert _cache_hit(first) is False
+    assert _cache_hit(second) is True
 
 
 @pytest.mark.unit

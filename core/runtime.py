@@ -32,11 +32,11 @@ from core.schemas import (
     VoiceOutputIntent,
 )
 from memory.base import MemoryNamespace
-from memory.manager import MemoryManager
+from memory.manager import MemoryContextBundle, MemoryManager
 from memory.rag import RAGStore
 from memory.summary import DeterministicSummary
 from personas.loader import PersonaCatalog, PersonaDefinition
-from providers.base import ProviderMessage
+from providers.base import ProviderMessage, ProviderRequestHints, ProviderUsage
 from providers.router import ProviderRouter
 from providers.registry import canonical_provider_name
 from tools.mcp_source import MCPToolSource
@@ -69,18 +69,28 @@ class RuntimeSessionState:
     last_error_at: datetime | None = None
     last_persona_text: str = ""
     context_budget: "ContextBudget | None" = None
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cached_input_tokens: int = 0
+    last_context_cache_key: str = ""
+    last_context_cache_hit: bool = False
+    last_context_cache_reason: str = ""
+    last_context_memory_revision: str = ""
 
 
 @dataclass(slots=True)
 class ContextCacheEntry:
-    """Cached normalized context window for a runtime session/persona/mode."""
+    """Cached stable prompt prefix for a runtime session/persona/mode/provider."""
 
     cache_key: str
     session_id: str
     persona_id: str
     mode: str
+    provider_name: str
+    model_name: str
+    tool_manifest_digest: str
     signature: str
-    base_messages: list[dict[str, str]]
+    stable_prefix_messages: list[dict[str, str]]
     context_tokens_estimate: int
     created_at: datetime
     last_used_at: datetime
@@ -395,38 +405,24 @@ class GestaltRuntime:
         namespace = MemoryNamespace(
             persona_id=persona.persona_id, room_id=event.room_id or "default"
         )
-
-        history, summary = await self.memory_manager.load_context(
-            namespace=namespace, limit=12
-        )
+        memory_context = await self.memory_manager.load_context(namespace=namespace, limit=12)
         rag_results = await self.rag_store.search(
             persona_id=persona.persona_id,
             room_id=namespace.room_id,
             query=event.text,
         )
         rag_context = "\n".join([r.content for r in rag_results])
-
         mode_name = session.mode or self._default_mode_for_persona(persona)
-        provider_messages, cache_trace = await self._build_provider_messages_with_cache(
-            session=session,
-            persona=persona,
-            namespace=namespace,
-            history=history,
-            summary=summary,
-            rag_context=rag_context,
-            mode_name=mode_name,
+        provider_name = (
+            session.provider_override
+            or self.provider_router.resolve_provider_name(persona.persona_id, session.mode)
         )
-
-        if event.type == "tick":
-            provider_messages.append(
-                ProviderMessage(
-                    role="user",
-                    content="Decide if you should act right now. If not, answer with 'pass'.",
-                )
-            )
-        else:
-            provider_messages.append(ProviderMessage(role="user", content=event.text))
-
+        provider = self.provider_router.providers.get(provider_name)
+        if provider is None:
+            provider_name = self.provider_router.default_provider_name
+            provider = self.provider_router.providers[provider_name]
+        model_override = session.model_override.strip() or None
+        model = model_override or self._provider_model(provider)
         allowed_tools = self.tool_policy.allowed_tools(
             persona_id=persona.persona_id,
             environment=event.platform,
@@ -439,6 +435,28 @@ class GestaltRuntime:
                 str(schema.get("name") or ""), allowed_tools
             )
         ]
+        provider_messages, cache_trace, request_hints = (
+            await self._build_provider_messages_with_cache(
+                session=session,
+                persona=persona,
+                memory_context=memory_context,
+                rag_context=rag_context,
+                mode_name=mode_name,
+                provider_name=provider_name,
+                model_name=model,
+                tool_schemas=tool_schemas,
+            )
+        )
+
+        if event.type == "tick":
+            provider_messages.append(
+                ProviderMessage(
+                    role="user",
+                    content="Decide if you should act right now. If not, answer with 'pass'.",
+                )
+            )
+        else:
+            provider_messages.append(ProviderMessage(role="user", content=event.text))
 
         root_span_id = str(uuid.uuid4())
         decision_trace = self._build_span_trace(
@@ -453,17 +471,6 @@ class GestaltRuntime:
                 "dangerous_enabled": self.tool_policy.dangerous_enabled,
             },
         )
-
-        provider_name = (
-            session.provider_override
-            or self.provider_router.resolve_provider_name(persona.persona_id, session.mode)
-        )
-        provider = self.provider_router.providers.get(provider_name)
-        if provider is None:
-            provider_name = self.provider_router.default_provider_name
-            provider = self.provider_router.providers[provider_name]
-        model_override = session.model_override.strip() or None
-        model = model_override or self._provider_model(provider)
 
         # Initialize budget tracking
         budget_traces: list[TraceOutput] = []
@@ -512,16 +519,20 @@ class GestaltRuntime:
             messages=provider_messages,
             tools=tool_schemas,
             model_override=model_override,
+            request_hints=request_hints,
         )
         provider_duration = int((perf_counter() - provider_started) * 1000)
+        combined_usage = self._normalize_provider_usage(
+            response=provider_response,
+            request_messages=provider_messages,
+            response_text=provider_response.content or "",
+        )
+        self._record_session_provider_usage(session=session, usage=combined_usage)
 
         # Record usage in budget
         if session.context_budget is not None:
-            # Estimate tokens from messages
-            estimated_input = sum(len(m.content.split()) for m in provider_messages)
-            estimated_output = len(provider_response.content.split()) if provider_response.content else 0
             result = session.context_budget.record_usage(
-                tokens=estimated_input + estimated_output,
+                tokens=combined_usage.input_tokens + combined_usage.output_tokens,
                 cost_usd=0.0,  # Will be estimated by budget
                 provider=provider_name,
                 model=model,
@@ -547,6 +558,9 @@ class GestaltRuntime:
                 "model": model,
                 "duration_ms": provider_duration,
                 "tool_call_count": len(provider_response.tool_calls),
+                "input_tokens": combined_usage.input_tokens,
+                "output_tokens": combined_usage.output_tokens,
+                "cached_input_tokens": combined_usage.cached_input_tokens,
                 "budget_checked": session.context_budget is not None,
                 "budget_status": session.context_budget.get_status() if session.context_budget else None,
             },
@@ -594,8 +608,23 @@ class GestaltRuntime:
                 messages=provider_messages,
                 tools=[],
                 model_override=model_override,
+                request_hints=request_hints,
             )
             follow_duration = int((perf_counter() - follow_started) * 1000)
+            follow_usage = self._normalize_provider_usage(
+                response=follow_up,
+                request_messages=provider_messages,
+                response_text=follow_up.content or "",
+            )
+            self._record_session_provider_usage(session=session, usage=follow_usage)
+            combined_usage = self._merge_provider_usage(combined_usage, follow_usage)
+            if session.context_budget is not None:
+                session.context_budget.record_usage(
+                    tokens=follow_usage.input_tokens + follow_usage.output_tokens,
+                    cost_usd=0.0,
+                    provider=provider_name,
+                    model=model,
+                )
             tool_traces.append(
                 self._build_span_trace(
                     trace_type="provider",
@@ -606,6 +635,9 @@ class GestaltRuntime:
                         "model": model,
                         "duration_ms": follow_duration,
                         "stage": "post_tool_follow_up",
+                        "input_tokens": follow_usage.input_tokens,
+                        "output_tokens": follow_usage.output_tokens,
+                        "cached_input_tokens": follow_usage.cached_input_tokens,
                     },
                 )
             )
@@ -670,6 +702,11 @@ class GestaltRuntime:
                 "room_id": event.room_id,
                 "provider": provider_name,
                 "model": model,
+                "usage": {
+                    "input_tokens": combined_usage.input_tokens,
+                    "output_tokens": combined_usage.output_tokens,
+                    "cached_input_tokens": combined_usage.cached_input_tokens,
+                },
                 "tool_results": [
                     {
                         "name": r.name,
@@ -701,7 +738,7 @@ class GestaltRuntime:
         namespace = MemoryNamespace(
             persona_id=persona.persona_id, room_id=event.room_id or "default"
         )
-        history, summary = await self.memory_manager.load_context(namespace=namespace, limit=12)
+        memory_context = await self.memory_manager.load_context(namespace=namespace, limit=12)
         rag_results = await self.rag_store.search(
             persona_id=persona.persona_id,
             room_id=namespace.room_id,
@@ -709,17 +746,16 @@ class GestaltRuntime:
         )
         rag_context = "\n".join([r.content for r in rag_results])
         mode_name = session.mode or self._default_mode_for_persona(persona)
-        provider_messages, cache_trace = await self._build_provider_messages_with_cache(
-            session=session,
-            persona=persona,
-            namespace=namespace,
-            history=history,
-            summary=summary,
-            rag_context=rag_context,
-            mode_name=mode_name,
+        provider_name = (
+            session.provider_override
+            or self.provider_router.resolve_provider_name(persona.persona_id, session.mode)
         )
-        provider_messages.append(ProviderMessage(role="user", content=event.text))
-
+        provider = self.provider_router.providers.get(provider_name)
+        if provider is None:
+            provider_name = self.provider_router.default_provider_name
+            provider = self.provider_router.providers[provider_name]
+        model_override = session.model_override.strip() or None
+        model = model_override or self._provider_model(provider)
         allowed_tools = self.tool_policy.allowed_tools(
             persona_id=persona.persona_id,
             environment=event.platform,
@@ -732,6 +768,19 @@ class GestaltRuntime:
                 str(schema.get("name") or ""), allowed_tools
             )
         ]
+        provider_messages, cache_trace, request_hints = (
+            await self._build_provider_messages_with_cache(
+                session=session,
+                persona=persona,
+                memory_context=memory_context,
+                rag_context=rag_context,
+                mode_name=mode_name,
+                provider_name=provider_name,
+                model_name=model,
+                tool_schemas=tool_schemas,
+            )
+        )
+        provider_messages.append(ProviderMessage(role="user", content=event.text))
         root_span_id = str(uuid.uuid4())
         decision_trace = self._build_span_trace(
             trace_type="decision",
@@ -746,17 +795,6 @@ class GestaltRuntime:
             },
         )
         yield {"type": "trace", "trace": decision_trace}
-
-        provider_name = (
-            session.provider_override
-            or self.provider_router.resolve_provider_name(persona.persona_id, session.mode)
-        )
-        provider = self.provider_router.providers.get(provider_name)
-        if provider is None:
-            provider_name = self.provider_router.default_provider_name
-            provider = self.provider_router.providers[provider_name]
-        model_override = session.model_override.strip() or None
-        model = model_override or self._provider_model(provider)
         stream_chat = getattr(provider, "stream_chat", None)
         if not callable(stream_chat):
             response, traces = await self._run_chat_flow(event=event, session=session)
@@ -770,6 +808,7 @@ class GestaltRuntime:
             messages=provider_messages,
             tools=tool_schemas,
             model_override=model_override,
+            request_hints=request_hints,
         ):
             if chunk.kind == "text_delta" and chunk.text:
                 content += chunk.text
@@ -792,6 +831,12 @@ class GestaltRuntime:
             return
 
         provider_duration = int((perf_counter() - provider_started) * 1000)
+        combined_usage = self._normalize_provider_usage(
+            response=provider_response,
+            request_messages=provider_messages,
+            response_text=provider_response.content or content,
+        )
+        self._record_session_provider_usage(session=session, usage=combined_usage)
         provider_trace = self._build_span_trace(
             trace_type="provider",
             session_id=session.session_id,
@@ -801,6 +846,9 @@ class GestaltRuntime:
                 "model": model,
                 "duration_ms": provider_duration,
                 "tool_call_count": len(provider_response.tool_calls),
+                "input_tokens": combined_usage.input_tokens,
+                "output_tokens": combined_usage.output_tokens,
+                "cached_input_tokens": combined_usage.cached_input_tokens,
                 "streamed": True,
             },
         )
@@ -838,8 +886,16 @@ class GestaltRuntime:
                 messages=provider_messages,
                 tools=[],
                 model_override=model_override,
+                request_hints=request_hints,
             )
             follow_duration = int((perf_counter() - follow_started) * 1000)
+            follow_usage = self._normalize_provider_usage(
+                response=follow_up,
+                request_messages=provider_messages,
+                response_text=follow_up.content or "",
+            )
+            self._record_session_provider_usage(session=session, usage=follow_usage)
+            combined_usage = self._merge_provider_usage(combined_usage, follow_usage)
             tool_traces.append(
                 self._build_span_trace(
                     trace_type="provider",
@@ -850,6 +906,9 @@ class GestaltRuntime:
                         "model": model,
                         "duration_ms": follow_duration,
                         "stage": "post_tool_follow_up",
+                        "input_tokens": follow_usage.input_tokens,
+                        "output_tokens": follow_usage.output_tokens,
+                        "cached_input_tokens": follow_usage.cached_input_tokens,
                     },
                 )
             )
@@ -911,6 +970,11 @@ class GestaltRuntime:
                 "provider": provider_name,
                 "model": model,
                 "streamed": True,
+                "usage": {
+                    "input_tokens": combined_usage.input_tokens,
+                    "output_tokens": combined_usage.output_tokens,
+                    "cached_input_tokens": combined_usage.cached_input_tokens,
+                },
                 "tool_results": [
                     {
                         "name": r.name,
@@ -1439,6 +1503,11 @@ class GestaltRuntime:
             else None,
             "last_persona_text": session.last_persona_text,
             "autopilot_active": bool(session.autopilot_active),
+            "provider_usage": {
+                "input_tokens": session.total_input_tokens,
+                "output_tokens": session.total_output_tokens,
+                "cached_input_tokens": session.total_cached_input_tokens,
+            },
         }
 
     def list_sessions_snapshot(
@@ -1500,6 +1569,7 @@ class GestaltRuntime:
         flags: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del platform, room_id
+        session = self.session_states.get(session_id)
         entries = [
             entry
             for entry in self.context_cache.values()
@@ -1515,15 +1585,37 @@ class GestaltRuntime:
             "persona_id": persona_id,
             "mode": mode,
             "cache_enabled": True,
+            "cache_model": "stable_prefix",
             "entry_count": len(entries),
             "ttl_seconds": self.context_cache_ttl_seconds,
             "total_hits": total_hits,
             "tokens_saved_estimate": total_tokens_saved,
+            "provider_cached_input_tokens": (
+                int(session.total_cached_input_tokens) if session else 0
+            ),
+            "provider_usage": {
+                "input_tokens": int(session.total_input_tokens) if session else 0,
+                "output_tokens": int(session.total_output_tokens) if session else 0,
+                "cached_input_tokens": (
+                    int(session.total_cached_input_tokens) if session else 0
+                ),
+            },
+            "last_cache_key": str(session.last_context_cache_key or "") if session else "",
+            "last_cache_hit": bool(session.last_context_cache_hit) if session else False,
+            "last_cache_reason": (
+                str(session.last_context_cache_reason or "") if session else ""
+            ),
+            "memory_revision": (
+                str(session.last_context_memory_revision or "") if session else ""
+            ),
             "entries": [
                 {
                     "cache_key": entry.cache_key,
                     "persona_id": entry.persona_id,
                     "mode": entry.mode,
+                    "provider": entry.provider_name,
+                    "model": entry.model_name,
+                    "tool_manifest_digest": entry.tool_manifest_digest[:12],
                     "context_tokens_estimate": entry.context_tokens_estimate,
                     "hit_count": entry.hit_count,
                     "created_at": entry.created_at.isoformat(),
@@ -1535,6 +1627,7 @@ class GestaltRuntime:
         }
 
     def _context_cache_metrics_for_session(self, *, session_id: str) -> dict[str, Any]:
+        session = self.session_states.get(session_id)
         entries = [
             entry
             for entry in self.context_cache.values()
@@ -1546,10 +1639,19 @@ class GestaltRuntime:
             for entry in entries
         )
         return {
+            "cache_model": "stable_prefix",
             "entry_count": len(entries),
             "total_hits": total_hits,
             "tokens_saved_estimate": tokens_saved_estimate,
             "ttl_seconds": self.context_cache_ttl_seconds,
+            "provider_cached_input_tokens": (
+                int(session.total_cached_input_tokens) if session else 0
+            ),
+            "last_cache_key": str(session.last_context_cache_key or "") if session else "",
+            "last_cache_hit": bool(session.last_context_cache_hit) if session else False,
+            "last_cache_reason": (
+                str(session.last_context_cache_reason or "") if session else ""
+            ),
         }
 
     def reset_context_cache(
@@ -1957,6 +2059,7 @@ class GestaltRuntime:
         text = (
             f"persona={status_payload['persona']} mode={status_payload['mode']} "
             f"provider={provider_name}/{model} budget_remaining={status_payload['budget_remaining']} "
+            f"cached_input_tokens={status_payload['context_cache']['provider_cached_input_tokens']} "
             f"yolo={'on' if session.yolo_enabled else 'off'} "
             f"repo={'git' if project_context['is_git_repo'] else 'none'}"
         )
@@ -2002,7 +2105,8 @@ class GestaltRuntime:
                 text=(
                     f"context cache entries={snapshot['entry_count']} "
                     f"hits={snapshot['total_hits']} "
-                    f"tokens_saved_estimate={snapshot['tokens_saved_estimate']}"
+                    f"tokens_saved_estimate={snapshot['tokens_saved_estimate']} "
+                    f"provider_cached_input_tokens={snapshot['provider_cached_input_tokens']}"
                 ),
                 persona_id="system",
             ),
@@ -2137,16 +2241,16 @@ class GestaltRuntime:
             persona_id=persona_id,
             room_id=event.room_id or "default",
         )
-        history, summary = await self.memory_manager.load_context(
+        memory_context = await self.memory_manager.load_context(
             namespace=namespace, limit=12
         )
         recent = [
             str(message.get("content") or "")
-            for message in history[-6:]
+            for message in memory_context.recent_history[-6:]
             if isinstance(message, dict)
         ]
-        if summary.strip():
-            recap_text = summary.strip()
+        if memory_context.summary.strip():
+            recap_text = memory_context.summary.strip()
         else:
             recap_text = "\n".join([line for line in recent if line])
         if not recap_text.strip():
@@ -2157,8 +2261,8 @@ class GestaltRuntime:
                 kind="command_recap",
                 data={
                     "session_id": session.session_id,
-                    "summary": summary,
-                    "message_count": len(history),
+                    "summary": memory_context.summary,
+                    "message_count": len(memory_context.recent_history),
                 },
             ),
         ]
@@ -3105,20 +3209,35 @@ class GestaltRuntime:
                 return "retry"
         return "continue"
 
-    def _context_cache_key(self, *, session_id: str, persona_id: str, mode: str) -> str:
-        return f"{session_id}:{persona_id}:{mode or 'default'}"
+    def _context_cache_key(
+        self,
+        *,
+        session_id: str,
+        persona_id: str,
+        mode: str,
+        provider_name: str,
+        model_name: str,
+    ) -> str:
+        return (
+            f"{session_id}:{persona_id}:{mode or 'default'}:"
+            f"{provider_name}:{model_name or 'default'}"
+        )
 
     @staticmethod
     def _context_signature(
         *,
         persona_id: str,
         mode_name: str,
-        rag_context: str,
+        provider_name: str,
+        model_name: str,
+        tool_manifest_digest: str,
     ) -> str:
         payload = {
             "persona_id": persona_id,
             "mode_name": mode_name,
-            "rag_context": rag_context,
+            "provider_name": provider_name,
+            "model_name": model_name,
+            "tool_manifest_digest": tool_manifest_digest,
         }
         raw = json.dumps(payload, sort_keys=True, ensure_ascii=True)
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
@@ -3129,6 +3248,53 @@ class GestaltRuntime:
         for message in messages:
             total += len(str(message.content or "").split())
         return total
+
+    @staticmethod
+    def _tool_manifest_digest(tool_schemas: list[dict[str, Any]]) -> str:
+        raw = json.dumps(tool_schemas, sort_keys=True, ensure_ascii=True)
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+    @staticmethod
+    def _normalize_provider_usage(
+        *,
+        response: Any,
+        request_messages: list[ProviderMessage],
+        response_text: str,
+    ) -> ProviderUsage:
+        usage = getattr(response, "usage", ProviderUsage())
+        if not isinstance(usage, ProviderUsage):
+            usage = ProviderUsage()
+        input_tokens = int(usage.input_tokens or 0)
+        output_tokens = int(usage.output_tokens or 0)
+        cached_input_tokens = int(usage.cached_input_tokens or 0)
+        if input_tokens <= 0:
+            input_tokens = GestaltRuntime._estimate_messages_tokens(request_messages)
+        if output_tokens <= 0 and response_text.strip():
+            output_tokens = len(response_text.split())
+        return ProviderUsage(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cached_input_tokens=min(cached_input_tokens, input_tokens),
+        )
+
+    @staticmethod
+    def _merge_provider_usage(*items: ProviderUsage) -> ProviderUsage:
+        merged = ProviderUsage()
+        for item in items:
+            merged.input_tokens += int(item.input_tokens or 0)
+            merged.output_tokens += int(item.output_tokens or 0)
+            merged.cached_input_tokens += int(item.cached_input_tokens or 0)
+        return merged
+
+    @staticmethod
+    def _record_session_provider_usage(
+        *,
+        session: RuntimeSessionState,
+        usage: ProviderUsage,
+    ) -> None:
+        session.total_input_tokens += int(usage.input_tokens or 0)
+        session.total_output_tokens += int(usage.output_tokens or 0)
+        session.total_cached_input_tokens += int(usage.cached_input_tokens or 0)
 
     def _prune_context_cache(self) -> None:
         if len(self.context_cache) <= self.context_cache_max_entries:
@@ -3168,27 +3334,44 @@ class GestaltRuntime:
         *,
         session: RuntimeSessionState,
         persona: PersonaDefinition,
-        namespace: MemoryNamespace,
-        history: list[dict[str, Any]],
-        summary: str,
+        memory_context: MemoryContextBundle,
         rag_context: str,
         mode_name: str,
-    ) -> tuple[list[ProviderMessage], TraceOutput]:
+        provider_name: str,
+        model_name: str,
+        tool_schemas: list[dict[str, Any]],
+    ) -> tuple[list[ProviderMessage], TraceOutput, ProviderRequestHints]:
         now = datetime.now(timezone.utc)
+        tool_manifest_digest = self._tool_manifest_digest(tool_schemas)
         cache_key = self._context_cache_key(
             session_id=session.session_id,
             persona_id=persona.persona_id,
             mode=mode_name,
+            provider_name=provider_name,
+            model_name=model_name,
         )
         signature = self._context_signature(
             persona_id=persona.persona_id,
             mode_name=mode_name,
-            rag_context=rag_context,
+            provider_name=provider_name,
+            model_name=model_name,
+            tool_manifest_digest=tool_manifest_digest,
         )
         cache_entry = self.context_cache.get(cache_key)
         cache_hit = False
         tokens_saved_estimate = 0
         reason = "miss"
+        dynamic_context_prompt = self.persona_engine.build_runtime_context_prompt(
+            summary=memory_context.summary,
+            rag_context=rag_context,
+            facts=memory_context.facts,
+            persona_state=memory_context.persona_state,
+        )
+        dynamic_messages: list[ProviderMessage] = []
+        if dynamic_context_prompt:
+            dynamic_messages.append(
+                ProviderMessage(role="system", content=dynamic_context_prompt)
+            )
 
         if cache_entry is not None:
             expired = (now - cache_entry.last_used_at) > timedelta(
@@ -3198,23 +3381,28 @@ class GestaltRuntime:
                 cache_hit = True
                 cache_entry.last_used_at = now
                 cache_entry.hit_count += 1
-                reason = "signature_match"
+                reason = "stable_prefix_match"
                 tokens_saved_estimate = int(cache_entry.context_tokens_estimate)
-                base_messages = [
+                provider_messages = [
                     ProviderMessage(
                         role=str(item.get("role") or "user"),
                         content=str(item.get("content") or ""),
                     )
-                    for item in cache_entry.base_messages
+                    for item in cache_entry.stable_prefix_messages
                     if str(item.get("content") or "")
                 ]
-                for message in history:
+                provider_messages.extend(dynamic_messages)
+                for message in memory_context.recent_history:
                     role = str(message.get("role") or "user")
                     content = str(message.get("content") or "")
                     if content:
-                        base_messages.append(
+                        provider_messages.append(
                             ProviderMessage(role=role, content=content)
                         )
+                session.last_context_cache_key = cache_key
+                session.last_context_cache_hit = True
+                session.last_context_cache_reason = reason
+                session.last_context_memory_revision = memory_context.revision
                 trace = self._build_span_trace(
                     trace_type="context_cache",
                     session_id=session.session_id,
@@ -3222,41 +3410,56 @@ class GestaltRuntime:
                         "cache_hit": True,
                         "cache_key": cache_key,
                         "cache_reason": reason,
+                        "cache_scope": "stable_prefix",
+                        "memory_revision": memory_context.revision[:12],
+                        "provider": provider_name,
+                        "model": model_name,
+                        "tool_manifest_digest": tool_manifest_digest[:12],
+                        "prefix_token_estimate": tokens_saved_estimate,
                         "tokens_saved_estimate": tokens_saved_estimate,
                         "cache_size": len(self.context_cache),
                     },
                 )
-                return base_messages, trace
+                return (
+                    provider_messages,
+                    trace,
+                    ProviderRequestHints(
+                        cache_key=cache_key,
+                        prefix_token_estimate=tokens_saved_estimate,
+                        allow_provider_prefix_cache=True,
+                    ),
+                )
             reason = "expired" if expired else "signature_mismatch"
 
-        system_prompt = await self.persona_engine.build_system_prompt(
+        core_system_prompt = self.persona_engine.build_core_system_prompt(persona)
+        core_system_prompt = self._inject_mode_prompt(
             persona=persona,
-            namespace=namespace,
-            summary=summary,
-            rag_context=rag_context,
-        )
-        system_prompt = self._inject_mode_prompt(
-            persona=persona,
-            base_prompt=system_prompt,
+            base_prompt=core_system_prompt,
             mode_name=mode_name,
         )
-        base_messages = [ProviderMessage(role="system", content=system_prompt)]
-        for message in history:
+        provider_messages = [ProviderMessage(role="system", content=core_system_prompt)]
+        provider_messages.extend(dynamic_messages)
+        for message in memory_context.recent_history:
             role = str(message.get("role") or "user")
             content = str(message.get("content") or "")
             if content:
-                base_messages.append(ProviderMessage(role=role, content=content))
+                provider_messages.append(ProviderMessage(role=role, content=content))
 
         context_tokens = self._estimate_messages_tokens(
-            [ProviderMessage(role="system", content=system_prompt)]
+            [ProviderMessage(role="system", content=core_system_prompt)]
         )
         self.context_cache[cache_key] = ContextCacheEntry(
             cache_key=cache_key,
             session_id=session.session_id,
             persona_id=persona.persona_id,
             mode=mode_name,
+            provider_name=provider_name,
+            model_name=model_name,
+            tool_manifest_digest=tool_manifest_digest,
             signature=signature,
-            base_messages=[{"role": "system", "content": system_prompt}],
+            stable_prefix_messages=[
+                {"role": "system", "content": core_system_prompt},
+            ],
             context_tokens_estimate=context_tokens,
             created_at=now,
             last_used_at=now,
@@ -3264,6 +3467,10 @@ class GestaltRuntime:
         )
         self._prune_session_context_cache(session_id=session.session_id)
         self._prune_context_cache()
+        session.last_context_cache_key = cache_key
+        session.last_context_cache_hit = False
+        session.last_context_cache_reason = reason
+        session.last_context_memory_revision = memory_context.revision
 
         trace = self._build_span_trace(
             trace_type="context_cache",
@@ -3272,11 +3479,25 @@ class GestaltRuntime:
                 "cache_hit": cache_hit,
                 "cache_key": cache_key,
                 "cache_reason": reason,
+                "cache_scope": "stable_prefix",
+                "memory_revision": memory_context.revision[:12],
+                "provider": provider_name,
+                "model": model_name,
+                "tool_manifest_digest": tool_manifest_digest[:12],
+                "prefix_token_estimate": context_tokens,
                 "tokens_saved_estimate": tokens_saved_estimate,
                 "cache_size": len(self.context_cache),
             },
         )
-        return base_messages, trace
+        return (
+            provider_messages,
+            trace,
+            ProviderRequestHints(
+                cache_key=cache_key,
+                prefix_token_estimate=context_tokens,
+                allow_provider_prefix_cache=True,
+            ),
+        )
 
     def _get_or_create_session(self, event: Event) -> RuntimeSessionState:
         existing = self.session_states.get(event.session_id)

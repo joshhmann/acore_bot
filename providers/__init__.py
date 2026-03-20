@@ -1,4 +1,11 @@
-from .base import ProviderMessage, LLMResponse, ProviderToolCall, LLMProvider
+from .base import (
+    LLMProvider,
+    LLMResponse,
+    ProviderMessage,
+    ProviderRequestHints,
+    ProviderToolCall,
+    ProviderUsage,
+)
 from .openai_compat import OpenAICompatProvider
 from .router import LegacyLLMProvider, ProviderRouter
 
@@ -7,6 +14,8 @@ __all__ = [
     "ProviderToolCall",
     "LLMResponse",
     "LLMProvider",
+    "ProviderUsage",
+    "ProviderRequestHints",
     "OpenAICompatProvider",
     "LegacyLLMProvider",
     "ProviderRouter",

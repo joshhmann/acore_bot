@@ -39,6 +39,7 @@ Approved status labels:
 - Runtime command registry (`core/commands.py`): `Verified active`
 - Runtime `/swarm` delegation flow: `Verified active`
 - Runtime context cache introspection/reset: `Verified active`
+- Runtime stable-prefix prompt cache and provider cached-token telemetry: `Verified active`
 
 ## Transitional and Legacy Areas
 

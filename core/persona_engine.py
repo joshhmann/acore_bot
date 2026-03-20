@@ -10,28 +10,52 @@ class PersonaEngine:
     def __init__(self, memory_manager: MemoryManager) -> None:
         self.memory_manager = memory_manager
 
-    async def build_system_prompt(
-        self,
-        persona: PersonaDefinition,
-        namespace: MemoryNamespace,
-        summary: str,
-        rag_context: str,
-    ) -> str:
-        state = await self.memory_manager.get_persona_state(namespace)
-        mood = state.mood
+    @staticmethod
+    def build_core_system_prompt(persona: PersonaDefinition) -> str:
         parts = [
             f"You are {persona.display_name}.",
             persona.description,
             persona.personality,
             persona.scenario,
             persona.system_prompt,
-            f"Current mood: {mood}.",
         ]
+        return "\n\n".join([p for p in parts if p])
+
+    @staticmethod
+    def build_runtime_context_prompt(
+        *,
+        summary: str,
+        rag_context: str,
+        facts: list[str] | None,
+        persona_state: PersonaState,
+    ) -> str:
+        parts = [f"Current mood: {persona_state.mood}."]
         if summary:
             parts.append(f"Conversation summary:\n{summary}")
+        if facts:
+            parts.append("Remembered facts:\n" + "\n".join(f"- {fact}" for fact in facts))
         if rag_context:
             parts.append(f"Relevant knowledge:\n{rag_context}")
         return "\n\n".join([p for p in parts if p])
+
+    async def build_system_prompt(
+        self,
+        persona: PersonaDefinition,
+        namespace: MemoryNamespace,
+        summary: str,
+        rag_context: str,
+        facts: list[str] | None = None,
+        persona_state: PersonaState | None = None,
+    ) -> str:
+        state = persona_state or await self.memory_manager.get_persona_state(namespace)
+        core_prompt = self.build_core_system_prompt(persona)
+        context_prompt = self.build_runtime_context_prompt(
+            summary=summary,
+            rag_context=rag_context,
+            facts=facts,
+            persona_state=state,
+        )
+        return "\n\n".join([part for part in [core_prompt, context_prompt] if part])
 
     async def update_state(
         self,

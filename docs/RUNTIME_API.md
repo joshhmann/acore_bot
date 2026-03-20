@@ -1,6 +1,6 @@
 # Gestalt Runtime API
 
-**Last Updated**: 2026-03-15
+**Last Updated**: 2026-03-19
 
 ## Purpose
 
@@ -142,6 +142,13 @@ Allow operators and surfaces to introspect/reset runtime-owned context caching:
 - stdio `reset_context`
 - runtime commands `/context` and `/context reset`
 
+The maintained runtime cache model is `stable-prefix`:
+
+- runtime caches reusable prompt prefixes owned by persona/mode/provider/tool state
+- dynamic memory context, recent history, and the current user turn remain outside the cached prefix
+- adapters do not participate in cache-key construction or prompt segmentation
+- provider-native prompt caching may be used opportunistically on top of this when the backend reports cached-token usage
+
 ### Streaming
 
 Live adapters use the runtime websocket stream for:
@@ -231,6 +238,10 @@ Implemented in the maintained product path:
 - stdio parity for the same core snapshots
 - explicit social-state routes
 - explicit context-cache snapshot/reset routes
+- stable-prefix prompt assembly that separates reusable system/persona/mode
+  prompt content from dynamic memory context and recent turns
+- provider usage telemetry including cached-input token reporting when the
+  backend exposes it
 - session bootstrap and adapter-scoped recent-session listing
 - browser runtime bridge adoption for session bootstrap, recent-session listing,
   social snapshot rendering, and social-mode mutation

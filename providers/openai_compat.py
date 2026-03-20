@@ -10,7 +10,9 @@ from .base import (
     LLMResponse,
     LLMStreamChunk,
     ProviderMessage,
+    ProviderRequestHints,
     ProviderToolCall,
+    ProviderUsage,
 )
 
 
@@ -47,8 +49,10 @@ class OpenAICompatProvider(LLMProvider):
         messages: list[ProviderMessage],
         tools: list[dict[str, Any]] | None = None,
         stream: bool = False,
+        request_hints: ProviderRequestHints | None = None,
         **kwargs: Any,
     ) -> LLMResponse:
+        del request_hints
         model = str(kwargs.get("model_override") or self.model)
         payload: dict[str, Any] = {
             "model": model,
@@ -79,6 +83,7 @@ class OpenAICompatProvider(LLMProvider):
                     return LLMResponse(
                         content="",
                         tool_calls=[],
+                        usage=ProviderUsage(),
                         raw={"error": f"status={resp.status}", "body": body},
                     )
                 data = await resp.json()
@@ -86,12 +91,13 @@ class OpenAICompatProvider(LLMProvider):
             return LLMResponse(
                 content="",
                 tool_calls=[],
+                usage=ProviderUsage(),
                 raw={"error": str(exc)},
             )
 
         choices = data.get("choices") or []
         if not choices:
-            return LLMResponse(content="", raw=data)
+            return LLMResponse(content="", usage=self._parse_usage(data), raw=data)
 
         message = choices[0].get("message") or {}
         content = str(message.get("content") or "")
@@ -115,14 +121,21 @@ class OpenAICompatProvider(LLMProvider):
                 )
             )
 
-        return LLMResponse(content=content, tool_calls=parsed_tool_calls, raw=data)
+        return LLMResponse(
+            content=content,
+            tool_calls=parsed_tool_calls,
+            usage=self._parse_usage(data),
+            raw=data,
+        )
 
     async def stream_chat(
         self,
         messages: list[ProviderMessage],
         tools: list[dict[str, Any]] | None = None,
+        request_hints: ProviderRequestHints | None = None,
         **kwargs: Any,
     ):
+        del request_hints
         model = str(kwargs.get("model_override") or self.model)
         payload: dict[str, Any] = {
             "model": model,
@@ -144,6 +157,7 @@ class OpenAICompatProvider(LLMProvider):
         url = f"{self.base_url}/chat/completions"
         content_parts: list[str] = []
         tool_chunks: dict[int, dict[str, Any]] = {}
+        usage = ProviderUsage()
         try:
             async with session.post(
                 url,
@@ -155,6 +169,7 @@ class OpenAICompatProvider(LLMProvider):
                     response = LLMResponse(
                         content="",
                         tool_calls=[],
+                        usage=ProviderUsage(),
                         raw={"error": f"status={resp.status}", "body": body},
                     )
                     yield LLMStreamChunk(kind="response", response=response, raw=dict(response.raw))
@@ -173,6 +188,8 @@ class OpenAICompatProvider(LLMProvider):
                         data = json.loads(data_text)
                     except json.JSONDecodeError:
                         continue
+                    if data.get("usage"):
+                        usage = self._parse_usage(data)
                     choices = data.get("choices") or []
                     if not choices:
                         continue
@@ -199,7 +216,12 @@ class OpenAICompatProvider(LLMProvider):
                         if fn.get("arguments"):
                             target["arguments"] += str(fn.get("arguments"))
         except Exception as exc:
-            response = LLMResponse(content="", tool_calls=[], raw={"error": str(exc)})
+            response = LLMResponse(
+                content="",
+                tool_calls=[],
+                usage=ProviderUsage(),
+                raw={"error": str(exc)},
+            )
             yield LLMStreamChunk(kind="response", response=response, raw=dict(response.raw))
             return
 
@@ -220,6 +242,21 @@ class OpenAICompatProvider(LLMProvider):
         response = LLMResponse(
             content="".join(content_parts),
             tool_calls=parsed_tool_calls,
+            usage=usage,
             raw={"streamed": True, "model": model},
         )
         yield LLMStreamChunk(kind="response", response=response, raw=dict(response.raw))
+
+    @staticmethod
+    def _parse_usage(payload: dict[str, Any]) -> ProviderUsage:
+        usage = payload.get("usage")
+        if not isinstance(usage, dict):
+            return ProviderUsage()
+        prompt_details = usage.get("prompt_tokens_details")
+        if not isinstance(prompt_details, dict):
+            prompt_details = {}
+        return ProviderUsage(
+            input_tokens=int(usage.get("prompt_tokens") or 0),
+            output_tokens=int(usage.get("completion_tokens") or 0),
+            cached_input_tokens=int(prompt_details.get("cached_tokens") or 0),
+        )

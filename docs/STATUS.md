@@ -67,6 +67,8 @@ The browser client in `adapters/desktop/*` remains a useful scaffold, but it is 
 - Launcher profile-based env loading for maintained startup paths
 - Direct `gestalt` and `python -m adapters.cli` entrypoints now apply env profiles before config-bound CLI imports
 - `gestalt runtime --stdio` and `gestalt runtime --web --port <port>` are now the maintained standalone runtime-host entrypoints for stdio and web serving
+- runtime context caching now uses a stable-prefix model, so persona/mode/provider/tool prompt prefixes can be reused without invalidating on normal turn-by-turn memory growth
+- runtime status/session/context surfaces now expose provider cached-input token telemetry when supported by the backing provider
 
 ## Cleanup Progress
 
@@ -166,9 +168,15 @@ Executed cleanup slices:
 - maintained CLI runtime event ingress now uses shared event builder
     `core.interfaces.build_runtime_event_from_facts(...)` for both
     interactive CLI message/command routing and CLI play-mode planner prompts
-  - runtime now owns a session-scoped context cache for normalized context
-    windows with TTL/max-entry controls and cache trace metadata
-    (`context_cache` traces include hit/miss reason and token-saved estimates)
+  - runtime now owns a session-scoped stable-prefix context cache with
+    TTL/max-entry controls and cache trace metadata
+    (`context_cache` traces include hit/miss reason, stable-prefix scope,
+    and token-saved estimates)
+  - runtime now separates cached stable prompt prefixes from dynamic memory
+    context so normal summary/fact/retrieval changes do not invalidate the
+    reusable prefix
+  - provider usage telemetry now records cached input tokens where supported
+    and surfaces that data through runtime status, session, and context views
   - maintained Runtime API now exposes context-cache snapshot/reset on web and
     stdio transports (`/api/runtime/context`, `/api/runtime/context/reset`,
     `get_context`, `reset_context`)

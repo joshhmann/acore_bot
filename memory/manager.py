@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any
 
@@ -7,6 +9,15 @@ from memory.base import MemoryNamespace, MemoryStore
 from memory.summary import DeterministicSummary
 from memory.episodes import EpisodicMemory, Episode
 from personas.state import PersonaState
+
+
+@dataclass(slots=True)
+class MemoryContextBundle:
+    recent_history: list[dict[str, Any]]
+    summary: str
+    facts: list[str]
+    persona_state: PersonaState
+    revision: str
 
 
 @dataclass(slots=True)
@@ -25,10 +36,34 @@ class MemoryManager:
         self,
         namespace: MemoryNamespace,
         limit: int = 12,
-    ) -> tuple[list[dict[str, Any]], str]:
+    ) -> MemoryContextBundle:
         history = await self.store.get_short_term(namespace, limit=limit)
         summary = await self.store.get_long_term_summary(namespace)
-        return history, summary
+        payload = await self.store.get_state(self._state_namespace(namespace))
+        facts = [
+            str(item).strip()
+            for item in list(payload.get("facts") or [])
+            if str(item).strip()
+        ][-12:]
+        persona_state = PersonaState.from_dict(payload)
+        revision = hashlib.sha256(
+            json.dumps(
+                {
+                    "summary": summary,
+                    "facts": facts,
+                    "persona_state": persona_state.to_dict(),
+                },
+                sort_keys=True,
+                ensure_ascii=True,
+            ).encode("utf-8")
+        ).hexdigest()
+        return MemoryContextBundle(
+            recent_history=history,
+            summary=summary,
+            facts=facts,
+            persona_state=persona_state,
+            revision=revision,
+        )
 
     async def write_buffer_message(
         self,
