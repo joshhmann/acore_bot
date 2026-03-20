@@ -49,6 +49,7 @@ Gestalt should become:
 - a runtime-first agentic framework for personal use
 - multi-persona by design
 - able to assist, remember, plan, act, and learn
+- able to adapt to a specific user over time through memory, feedback, and repeated interaction
 - able to operate across CLI, web, and Discord
 - extensible through MCP and multiple model/voice providers
 - eventually embodied through browser-based VRM/scene interaction
@@ -75,10 +76,12 @@ That means the framework must support:
 
 - multi-persona behavior
 - memory and recall
+- user adaptation and personalization
 - autonomy and planning
 - tool use and action
 - provider flexibility
 - media I/O
+- workflow and skill development over time
 - learning systems
 - future embodiment
 
@@ -120,8 +123,10 @@ That includes:
 - short-term conversational memory
 - long-term episodic memory
 - user and environment preferences
+- adaptation to the user's language, tone, and interaction style
 - recap and summarization
 - successful action trajectory memory
+- recurring workflow and automation memory
 - later skill/procedural memory
 
 Learning should start with explicit memory and feedback, not magic claims.
@@ -135,6 +140,7 @@ Gestalt should be able to:
 - continue bounded work
 - reflect and retry
 - act proactively for the user
+- automate recurring tasks and checks when the user wants that behavior
 
 Autonomy should remain:
 
@@ -153,6 +159,7 @@ Gestalt should support many backends and integrations:
 - STT
 - MCP servers
 - connectors like Home Assistant and other apps
+- bounded environment bridges for digital worlds, simulations, and game-like systems
 
 MCP is not peripheral. It is one of the main extensibility mechanisms.
 
@@ -167,6 +174,7 @@ The right path is:
 - VRMA motion support
 - authored scenes
 - bounded action vocabularies
+- runtime-driven expression, action, and presence outputs
 - later scene learning and RL-style training
 
 Embodiment should be built on the runtime, not beside it.
@@ -263,6 +271,7 @@ Long term, Gestalt should support:
 - skill learning
 - scene interaction
 - RL-style embodied training in bounded environments
+- bounded environment adapters for learning and action
 - app/home automation connectors
 - personal agent workflows
 - bounded self-improvement and self-development
