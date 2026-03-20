@@ -1,0 +1,9 @@
+services:
+  rs-mcp-bridge:
+    build: .
+    container_name: rs-mcp-bridge
+    env_file:
+      - .env
+    ports:
+      - "7007:7007"
+    restart: unless-stopped

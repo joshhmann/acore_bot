@@ -66,6 +66,8 @@ adapters/desktop/src-tauri/target/
 
 # Nested vendored repository metadata
 external/**/.git/
+external/**/.git.local
+external/**/.git.local/
 
 # OS
 .DS_Store
