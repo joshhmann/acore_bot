@@ -26,8 +26,13 @@ class SystemCog(commands.Cog):
     def _runtime(self) -> Any | None:
         if self.gestalt_runtime is not None:
             return self.gestalt_runtime
+        runtime_cog = self.bot.get_cog("RuntimeChatCog")
+        if runtime_cog is not None:
+            return getattr(runtime_cog, "gestalt_runtime", None)
         chat_cog = self.bot.get_cog("ChatCog")
-        return getattr(chat_cog, "gestalt_runtime", None)
+        if chat_cog is not None:
+            return getattr(chat_cog, "gestalt_runtime", None)
+        return vars(self.bot).get("runtime")
 
     @staticmethod
     def _session_id(interaction: discord.Interaction) -> str:
@@ -88,6 +93,11 @@ class SystemCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot) -> None:
-    chat_cog = bot.get_cog("ChatCog")
-    runtime = getattr(chat_cog, "gestalt_runtime", None)
+    runtime_cog = bot.get_cog("RuntimeChatCog")
+    runtime = getattr(runtime_cog, "gestalt_runtime", None)
+    if runtime is None:
+        chat_cog = bot.get_cog("ChatCog")
+        runtime = getattr(chat_cog, "gestalt_runtime", None)
+    if runtime is None:
+        runtime = vars(bot).get("runtime")
     await bot.add_cog(SystemCog(bot, runtime=runtime))

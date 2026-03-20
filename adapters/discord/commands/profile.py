@@ -262,8 +262,13 @@ class ProfileCommandsCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot) -> None:
-    runtime_cog = bot.get_cog("RuntimeChatCog") or bot.get_cog("ChatCog")
+    runtime_cog = bot.get_cog("RuntimeChatCog")
     runtime = getattr(runtime_cog, "gestalt_runtime", None)
+    if runtime is None:
+        chat_cog = bot.get_cog("ChatCog")
+        runtime = getattr(chat_cog, "gestalt_runtime", None)
+    if runtime is None:
+        runtime = vars(bot).get("runtime")
     user_profiles = getattr(runtime_cog, "user_profiles", None)
     await bot.add_cog(
         ProfileCommandsCog(

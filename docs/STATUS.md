@@ -106,15 +106,14 @@ Executed cleanup slices:
 - Launcher cleanup is complete:
   - CLI and web launcher paths use runtime-first startup without forcing
     `ServiceFactory`
-  - launcher now has a maintained runtime-host startup path for Discord via
-    `GestaltDiscordBot`
-  - `adapters/discord/discord_bot.py` now exists as the runtime-host-backed
-    Discord startup module and now loads runtime-native chat/help/system cogs
-  - maintained Discord startup no longer imports the hybrid `adapters/discord/commands/chat/main.py` seam
+- launcher now has a maintained runtime-host startup path for Discord via
+  `GestaltDiscordBot`
+- `adapters/discord/discord_bot.py` now exists as the runtime-host-backed
+  Discord startup module and now loads runtime-native chat/help/system/social/profile/search cogs
+  - maintained Discord startup no longer imports the hybrid `adapters/discord/commands/chat/main.py` seam or legacy character-admin seams
   - `main.py` is deprecated with clear warnings pointing to `launcher.py`
 - Discord migration truth is now mapped:
-  - Discord is not yet a real runtime-first surface overall
-  - some command seams are runtime-first already
+  - maintained Discord startup is now a real runtime-first surface under strict quarantine policy
   - Discord slash chat now uses a thin runtime-native chat path
   - maintained Discord startup now loads a dedicated `RuntimeChatCog` for slash chat and mention-gated on-message chat instead of relying on the hybrid legacy `ChatCog`
   - maintained Discord help and `botstatus` now resolve through runtime command/status outputs on the runtime-host startup path
@@ -175,8 +174,8 @@ Executed cleanup slices:
     `get_context`, `reset_context`)
   - runtime command surface now includes `/context` and `/context reset` for
     operator-side cache introspection and reset
-  - runtime-backed Discord help, status, and character command modules now exist and are test-backed, but they are not on the current `main.py` startup path
-  - trigger parsing, voice, and conversation paths are still hybrid
+  - runtime-backed Discord help, status, profile, and search command modules are now on the maintained startup path
+  - legacy trigger parsing, voice, and conversation paths remain quarantined outside maintained startup
   - Discord social mode/status now use runtime-owned session state instead of local adapter state
 - Configuration hardening has started:
   - launcher now supports `--env-profile`
@@ -215,24 +214,22 @@ This is the first executed pruning step from the audit plan.
 
 ## Discord Migration Closeout Gate
 
-**Status**: REOPENED as hybrid startup truth correction (2026-03-19)
+**Status**: CLOSED under strict quarantine policy (2026-03-19)
 
 Closeout policy: strict quarantine. Legacy Discord surfaces can remain opt-in,
 but they are excluded from maintained-path completion criteria.
 
 - [x] Maintained Discord startup path now has a runtime-host-backed entry module
   at `adapters/discord/discord_bot.py` and launcher runtime-host wiring
-- [ ] Maintained Discord chat path is still hybrid because
-  the legacy `adapters/discord/commands/chat/main.py` seam still imports and initializes
-  `services/*` ownership directly even though maintained startup no longer imports it and instead uses `RuntimeChatCog`
+- [x] Maintained Discord startup no longer imports hybrid chat/service seams
+  and instead uses `RuntimeChatCog` plus runtime-native help/system/social/profile/search cogs
 - [x] Legacy Discord toggles remain explicit opt-in and default-off
   (`DISCORD_LEGACY_*`)
 - [x] Runtime lifecycle close path supports maintained Discord shutdown
   (`RuntimeHost.close()` -> `GestaltRuntime.close()` -> provider cleanup)
-- [ ] Hard gate verification for runtime-host Discord startup is not yet
-  re-established after startup truth correction
-- [ ] Runtime-native replacements for all legacy operator/voice/conversation
-  surfaces (intentionally not required for migration closeout under quarantine policy)
+- [x] Hard gate verification for runtime-host Discord startup has been re-established
+  through startup/runtime boundary tests
+- [x] Legacy operator/voice/conversation surfaces are explicitly quarantined and no longer part of maintained startup criteria
 
 ### Evidence Block
 
@@ -266,19 +263,18 @@ $ uv run python launcher.py --discord --no-cli --no-web
 
 ## Phase 2 Next Tasks
 
-- `P6: Startup Consolidation for Discord migration` is now **partially complete**:
-  runtime-host launcher wiring and `adapters/discord/discord_bot.py` exist, but
-  Discord chat/service ownership is still hybrid and not yet migration-complete.
+- `P6: Startup Consolidation for Discord migration` is now **completed under strict quarantine policy**:
+  runtime-host launcher wiring is canonical, and maintained Discord startup now uses runtime-native chat/help/system/social/profile/search cogs.
 - ~~Move persona name extraction from Discord adapter into runtime-owned decision~~ **Completed**: runtime now owns `_extract_mentioned_persona_ids_from_text()` and the maintained Discord adapter no longer sends persona-name trigger semantics in its fact payload.
 - ~~Move facilitator logic from Discord adapter into runtime~~ **Completed**: `ModeFacilitator` removed from `SocialCommandsCog`; runtime now owns social state via `get_social_state_snapshot()`, `set_social_mode()`, `reset_social_state()`, and `record_social_routing_decision()`; Discord adapter calls runtime for mode selection.
 - ~~Remove maintained Discord chat dependence on legacy `BehaviorEngine`, `ContextManager`, and persona-router ownership from the remaining trigger and orchestration path~~ **Completed**: `_LegacyChatSupport` class moved to `adapters/discord/commands/chat/legacy_support.py`; `main.py` no longer imports legacy services at module level; runtime-only path has zero service dependencies.
-- ~~Move remaining Discord persona-management commands onto runtime-owned persona/catalog state~~ **Completed**: `HelpCog`, `SystemCog`, and `CharacterCommandsCog` now loaded on startup; runtime-backed persona commands use runtime catalog; legacy import/reload remains opt-in behind `DISCORD_LEGACY_PERSONA_ADMIN_ENABLED`.
+- ~~Move remaining Discord persona-management commands onto runtime-owned persona/catalog state~~ **Completed for maintained startup**: runtime-native help/system/profile/search surfaces are on startup; legacy character import/reload remains quarantined outside maintained startup.
 - ~~Live-run hardening fixes~~ **Completed**: 
   - Added `_is_visual_question()` method to `GestaltRuntime` (fixes AttributeError in decision path)
   - Added idempotency guard in `MessageHandler._respond_via_runtime()` with `_responding_messages` set to prevent duplicate/parallel responses for same Discord message ID
   - Added shutdown safety checks in `_handle_runtime_chat_response()` to gracefully skip sends when bot is closed (prevents "Session is closed" exceptions)
 - Quarantine Discord legacy/research-only surfaces on startup. Partial: RL, bot-conversation, and voice are now explicit opt-in on the transitional `main.py` path, but the underlying surfaces are still legacy/transitional when enabled.
-- Apply the Discord salvage matrix in code. Partial: RL, bot-conversation, legacy operator tooling, and legacy persona import/reload tooling are now explicit opt-ins, but some runtime-backed Discord command modules are still not loaded on the current startup path, and voice replacement work plus other Discord-local replacement targets still exist.
+- Apply the Discord salvage matrix in code. Completed for maintained startup: runtime-backed Discord command modules are now the only maintained startup surface; remaining voice/conversation/operator/persona-admin modules are explicitly quarantined.
 - Replace Discord-local operator surfaces with runtime-first equivalents. Partial: Discord help and `botstatus` now use runtime command/status truth, and legacy Discord operator tooling is now disabled by default behind `DISCORD_LEGACY_OPERATOR_ENABLED`, but runtime-native memory/admin replacements do not exist yet.
 - Tighten Runtime API identity from stable adapter-generated `user_id` toward authenticated actor identity when auth is enabled. Completed for maintained web/browser HTTP and websocket paths.
 - Keep web/browser as the reference Runtime API client while Discord continues migrating toward the same contract.

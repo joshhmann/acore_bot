@@ -8,9 +8,6 @@ from typing import Any
 import discord
 from discord.ext import commands
 
-from config import Config
-
-
 logger = logging.getLogger(__name__)
 
 
@@ -35,19 +32,32 @@ class GestaltDiscordBot(commands.Bot):
         from adapters.discord.commands.runtime_chat import RuntimeChatCog
         from adapters.discord.commands.social import SocialCommandsCog
         from adapters.discord.commands.help import HelpCog
+        from adapters.discord.commands.profile import ProfileCommandsCog
+        from adapters.discord.commands.search import SearchCommandsCog
         from adapters.discord.commands.system import SystemCog
-        from adapters.discord.commands.character import CharacterCommandsCog
 
         await self.add_cog(RuntimeChatCog(self, runtime=self.runtime))
         await self.add_cog(HelpCog(self, runtime=self.runtime))
         await self.add_cog(SystemCog(self, runtime=self.runtime))
         await self.add_cog(SocialCommandsCog(self, runtime=self.runtime))
-
-        if getattr(Config, "DISCORD_LEGACY_PERSONA_ADMIN_ENABLED", False):
-            await self.add_cog(CharacterCommandsCog(self))
-            logger.info("Loaded CharacterCommandsCog (legacy persona admin enabled)")
-        else:
-            logger.info("Skipped CharacterCommandsCog (legacy persona admin enabled)")
+        await self.add_cog(
+            ProfileCommandsCog(
+                self,
+                user_profiles=None,
+                gestalt_runtime=self.runtime,
+            )
+        )
+        await self.add_cog(
+            SearchCommandsCog(
+                self,
+                web_search=None,
+                system_prompt="",
+                gestalt_runtime=self.runtime,
+            )
+        )
+        logger.info(
+            "Legacy Discord character/persona admin remains quarantined behind legacy entrypoints"
+        )
 
         try:
             await self.tree.sync()

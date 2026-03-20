@@ -101,7 +101,7 @@ Current maintained launcher status:
 
 - CLI: runtime-backed
 - Web: runtime-backed
-- Discord: runtime-host-backed startup module exists, but command/chat ownership is still hybrid
+- Discord: runtime-host-backed and runtime-native on the maintained startup path
 
 ### Deprecated startup
 
@@ -128,14 +128,11 @@ Status: `Verified active`
 
 ### Discord
 
-Status: `Present but not fully migrated`
+Status: `Verified active`
 
 - startup now has a runtime-host-backed module at `adapters/discord/discord_bot.py`
-- some runtime-native command seams exist
-- chat and command ownership are still hybrid where `services/*` are imported directly
-
-Discord should not be described as fully runtime-first until those imports and
-local policy seams are removed from maintained paths.
+- maintained startup loads runtime-native chat/help/system/social/profile/search cogs
+- legacy Discord chat, voice, conversation, and persona-admin modules remain quarantined outside maintained startup
 
 ## Legacy And Quarantine
 

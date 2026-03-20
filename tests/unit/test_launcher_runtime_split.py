@@ -184,7 +184,7 @@ def test_main_py_is_explicitly_deprecated_shim() -> None:
     assert "from adapters.discord.discord_bot import GestaltDiscordBot" in launcher_text
 
 
-def test_discord_runtime_startup_loads_maintained_cogs_with_legacy_persona_gate() -> None:
+def test_discord_runtime_startup_loads_runtime_native_cogs_only() -> None:
     discord_bot_text = Path("adapters/discord/discord_bot.py").read_text(
         encoding="utf-8"
     )
@@ -193,8 +193,9 @@ def test_discord_runtime_startup_loads_maintained_cogs_with_legacy_persona_gate(
     assert "from adapters.discord.commands.social import SocialCommandsCog" in discord_bot_text
     assert "from adapters.discord.commands.help import HelpCog" in discord_bot_text
     assert "from adapters.discord.commands.system import SystemCog" in discord_bot_text
-    assert "DISCORD_LEGACY_PERSONA_ADMIN_ENABLED" in discord_bot_text
-    assert "Skipped CharacterCommandsCog (legacy persona admin enabled)" in discord_bot_text
+    assert "from adapters.discord.commands.profile import ProfileCommandsCog" in discord_bot_text
+    assert "from adapters.discord.commands.search import SearchCommandsCog" in discord_bot_text
+    assert "CharacterCommandsCog" not in discord_bot_text
 
 
 def test_discord_runtime_startup_does_not_import_hybrid_chat_seam() -> None:
@@ -204,3 +205,12 @@ def test_discord_runtime_startup_does_not_import_hybrid_chat_seam() -> None:
 
     assert "from adapters.discord.commands.chat.main import ChatCog" not in discord_bot_text
     assert "from services." not in discord_bot_text
+
+
+def test_discord_commands_package_does_not_reexport_hybrid_chat() -> None:
+    commands_init = Path("adapters/discord/commands/__init__.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "from .chat import ChatCog" not in commands_init
+    assert "RuntimeChatCog" in commands_init

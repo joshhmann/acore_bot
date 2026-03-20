@@ -1,12 +1,21 @@
-"""Discord command cogs (migrated from cogs/)."""
+"""Maintained Discord command surface exports.
 
-from .chat import ChatCog
+Legacy hybrid chat and admin seams remain under explicit modules and are not
+re-exported from this package.
+"""
 
-__all__ = ["ChatCog"]
+from .help import HelpCog
+from .profile import ProfileCommandsCog
+from .runtime_chat import RuntimeChatCog
+from .search import SearchCommandsCog
+from .social import SocialCommandsCog
+from .system import SystemCog
 
-try:
-    from .voice import VoiceCog
-
-    __all__.append("VoiceCog")
-except ImportError:
-    pass
+__all__ = [
+    "HelpCog",
+    "ProfileCommandsCog",
+    "RuntimeChatCog",
+    "SearchCommandsCog",
+    "SocialCommandsCog",
+    "SystemCog",
+]

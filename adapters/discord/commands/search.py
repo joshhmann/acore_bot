@@ -122,25 +122,23 @@ class SearchCommandsCog(commands.Cog):
             return
 
         try:
-            if not self.web_search:
-                await interaction.followup.send(
-                    "❌ Web search is not enabled on this bot.", ephemeral=True
-                )
-                return
+            search_context = ""
+            prompt = query
+            if self.web_search:
+                search_context = await self.web_search.get_context(query, max_length=1000)
+                if not search_context:
+                    await interaction.followup.send(
+                        f"❌ No search results found for: **{query}**"
+                    )
+                    return
 
-            search_context = await self.web_search.get_context(query, max_length=1000)
-            if not search_context:
-                await interaction.followup.send(
-                    f"❌ No search results found for: **{query}**"
+                prompt = (
+                    "[IMPORTANT - REAL-TIME WEB SEARCH RESULTS - USE THIS CURRENT INFORMATION "
+                    f"TO ANSWER THE QUESTION]\n{search_context}\n"
+                    "[END WEB SEARCH RESULTS - Base your response on these actual current facts]\n\n"
+                    f"User question: {query}"
                 )
-                return
 
-            prompt = (
-                "[IMPORTANT - REAL-TIME WEB SEARCH RESULTS - USE THIS CURRENT INFORMATION "
-                f"TO ANSWER THE QUESTION]\n{search_context}\n"
-                "[END WEB SEARCH RESULTS - Base your response on these actual current facts]\n\n"
-                f"User question: {query}"
-            )
             event = self._build_command_event(
                 interaction=interaction,
                 command="search",
@@ -211,8 +209,13 @@ class SearchCommandsCog(commands.Cog):
 
 
 async def setup(bot: commands.Bot) -> None:
-    runtime_cog = bot.get_cog("RuntimeChatCog") or bot.get_cog("ChatCog")
+    runtime_cog = bot.get_cog("RuntimeChatCog")
     runtime = getattr(runtime_cog, "gestalt_runtime", None)
+    if runtime is None:
+        chat_cog = bot.get_cog("ChatCog")
+        runtime = getattr(chat_cog, "gestalt_runtime", None)
+    if runtime is None:
+        runtime = vars(bot).get("runtime")
     web_search = getattr(runtime_cog, "web_search", None)
     system_prompt = getattr(runtime_cog, "system_prompt", "")
     await bot.add_cog(
