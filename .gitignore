@@ -51,6 +51,17 @@ poetry.lock
 *.code-workspace
 .claude/
 
+# Generated evidence and local planning artifacts
+.sisyphus/evidence/
+
+# Desktop build artifacts
+adapters/desktop/node_modules/
+adapters/desktop/dist/
+adapters/desktop/src-tauri/target/
+
+# Nested vendored repository metadata
+external/**/.git/
+
 # OS
 .DS_Store
 Thumbs.db

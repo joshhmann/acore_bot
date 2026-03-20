@@ -38,3 +38,21 @@ __all__ = [
     "RL_CONTEXT_MAX_AGE",
     "RL_MAX_AGENTS_PER_CHANNEL",
 ]
+
+
+# Bandit exports
+from .bandit import LinUCBBandit as LinUCBBandit
+from .bandit_reward import compute_mode_switch_reward as compute_mode_switch_reward
+from .bandit_types import (
+    BanditConfig as BanditConfig,
+    BanditContext as BanditContext,
+    ModeSwitchAction as ModeSwitchAction,
+)
+
+__all__.extend([
+    "LinUCBBandit",
+    "ModeSwitchAction",
+    "BanditContext",
+    "BanditConfig",
+    "compute_mode_switch_reward",
+])

@@ -28,6 +28,12 @@ from .constants import (
 from .persistence import RLStorage
 from .safety import SafetyLayer
 
+
+# Bandit imports
+from .bandit import LinUCBBandit
+from .bandit_storage import BanditStorage
+from .bandit_types import ModeSwitchAction, BanditContext, BanditConfig
+from .bandit_reward import compute_mode_switch_reward
 logger = logging.getLogger(__name__)
 
 
@@ -136,6 +142,16 @@ class RLService:
         self._channel_activity: Dict[int, Dict[str, Any]] = {}
         self._activity_window_seconds = 3600  # 1 hour window
 
+        # Contextual bandit for mode switching
+        self.bandits: Dict[Tuple[int, int], LinUCBBandit] = {}
+        self.bandit_storage = BanditStorage(self.data_dir)
+        self.bandit_config = BanditConfig(
+            feature_dim=7,
+            alpha=1.0,
+            reply_bonus=1.0,
+            no_reply_penalty=-0.5,
+        )
+
         logger.info(f"RLService initialized with algorithm='{self.algorithm}'")
 
     async def start(self):
@@ -148,6 +164,13 @@ class RLService:
             logger.info(f"RL Service loaded {len(self.agents)} agents")
         except Exception as e:
             logger.error(f"Failed to load agents: {e}")
+
+        try:
+            loaded_bandits = await asyncio.to_thread(self.bandit_storage.load)
+            self.bandits.update(loaded_bandits)
+            logger.info(f"RL Service loaded {len(self.bandits)} bandits")
+        except Exception as e:
+            logger.error(f"Failed to load bandits: {e}")
 
         if self._bg_task is None:
             self._bg_task = asyncio.create_task(self._persistence_loop())
@@ -543,14 +566,18 @@ class RLService:
     async def _save_all_dirty(self):
         """Save all agents marked as dirty."""
         any_dirty = any(a.dirty for a in self.agents.values())
-        if not any_dirty:
+        if not any_dirty and not self.bandits:
             return
 
         try:
-            await asyncio.to_thread(self.storage.save, self.agents)
+            if any_dirty:
+                await asyncio.to_thread(self.storage.save, self.agents)
 
-            for agent in self.agents.values():
-                agent.dirty = False
+                for agent in self.agents.values():
+                    agent.dirty = False
+
+            if self.bandits:
+                await asyncio.to_thread(self.bandit_storage.save, self.bandits)
 
         except Exception as e:
             logger.error(f"Failed to save RL agents: {e}")
@@ -660,8 +687,6 @@ class RLService:
         Returns:
             Potentially boosted epsilon value
         """
-        import time
-
         if not self.exploration_mode:
             return base_epsilon
 
@@ -669,7 +694,6 @@ class RLService:
             return base_epsilon
 
         activity = self._channel_activity[channel_id]
-        current_time = time.time()
 
         # Check if we should apply boost
         if self._is_low_activity(channel_id):
@@ -685,3 +709,56 @@ class RLService:
                 activity["last_boosted_epsilon"] = decayed
                 return decayed
             return base_epsilon
+
+    # ========== Contextual Bandit Methods ==========
+
+    def _get_bandit(self, channel_id: int, user_id: int) -> LinUCBBandit:
+        """Get or create bandit for (channel_id, user_id)."""
+        key = (channel_id, user_id)
+        if key not in self.bandits:
+            self.bandits[key] = LinUCBBandit(self.bandit_config)
+        return self.bandits[key]
+
+    async def select_mode_switch_action(
+        self,
+        channel_id: int,
+        user_id: int,
+        context: BanditContext,
+    ) -> ModeSwitchAction:
+        """Select mode switch action using contextual bandit."""
+        bandit = self._get_bandit(channel_id, user_id)
+        action, confidence = bandit.select_action(context)
+        logger.debug(f"Selected action {action.name} with confidence {confidence:.3f}")
+        return action
+
+    async def update_bandit(
+        self,
+        channel_id: int,
+        user_id: int,
+        action: ModeSwitchAction,
+        context: BanditContext,
+        reward: float,
+    ) -> None:
+        """Update bandit after observing reward."""
+        bandit = self._get_bandit(channel_id, user_id)
+        bandit.update(action, context, reward)
+        logger.debug(f"Updated bandit with reward {reward:.3f}")
+
+    def compute_mode_switch_reward(
+        self,
+        replied_within_5min: bool,
+        engagement_quality: Optional[float] = None,
+    ) -> float:
+        """Compute reward for mode switch decision."""
+        return compute_mode_switch_reward(
+            replied_within_5min,
+            engagement_quality,
+            self.bandit_config,
+        )
+
+    def get_bandit_stats(self, channel_id: int, user_id: int) -> Dict[str, Any]:
+        """Get statistics for a bandit."""
+        key = (channel_id, user_id)
+        if key not in self.bandits:
+            return {"error": "No bandit found for this user"}
+        return self.bandits[key].get_stats()

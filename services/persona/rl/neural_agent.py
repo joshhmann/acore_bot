@@ -1,5 +1,7 @@
 """Neural RL Agent with Double DQN implementation."""
 
+# ruff: noqa: E402
+
 import io
 import logging
 import time
@@ -486,25 +488,34 @@ if TORCH_AVAILABLE:
             Args:
                 path: Output file path (.onnx)
                 opset_version: ONNX opset version (default 14)
+
+            Raises:
+                RuntimeError: If ONNX export dependencies are not available.
             """
             self.online_network.eval()
 
             dummy_input = torch.randn(1, self.state_dim, device=self.device)
 
-            torch.onnx.export(
-                self.online_network,
-                dummy_input,
-                path,
-                export_params=True,
-                opset_version=opset_version,
-                do_constant_folding=True,
-                input_names=["state"],
-                output_names=["q_values"],
-                dynamic_axes={
-                    "state": {0: "batch_size"},
-                    "q_values": {0: "batch_size"},
-                },
-            )
+            try:
+                torch.onnx.export(
+                    self.online_network,
+                    dummy_input,
+                    path,
+                    export_params=True,
+                    opset_version=opset_version,
+                    do_constant_folding=True,
+                    input_names=["state"],
+                    output_names=["q_values"],
+                    dynamic_axes={
+                        "state": {0: "batch_size"},
+                        "q_values": {0: "batch_size"},
+                    },
+                )
+            except ModuleNotFoundError as e:
+                raise RuntimeError(
+                    f"ONNX export requires additional dependencies: {e}. "
+                    "Install with: uv pip install onnxscript onnx"
+                ) from e
 
             logger.info(f"Exported neural agent to ONNX: {path}")
 
@@ -517,26 +528,35 @@ if TORCH_AVAILABLE:
 
             Returns:
                 ONNX model as bytes
+
+            Raises:
+                RuntimeError: If ONNX export dependencies are not available.
             """
             buffer = io.BytesIO()
             self.online_network.eval()
 
             dummy_input = torch.randn(1, self.state_dim, device=self.device)
 
-            torch.onnx.export(
-                self.online_network,
-                dummy_input,
-                buffer,
-                export_params=True,
-                opset_version=opset_version,
-                do_constant_folding=True,
-                input_names=["state"],
-                output_names=["q_values"],
-                dynamic_axes={
-                    "state": {0: "batch_size"},
-                    "q_values": {0: "batch_size"},
-                },
-            )
+            try:
+                torch.onnx.export(
+                    self.online_network,
+                    dummy_input,
+                    buffer,
+                    export_params=True,
+                    opset_version=opset_version,
+                    do_constant_folding=True,
+                    input_names=["state"],
+                    output_names=["q_values"],
+                    dynamic_axes={
+                        "state": {0: "batch_size"},
+                        "q_values": {0: "batch_size"},
+                    },
+                )
+            except ModuleNotFoundError as e:
+                raise RuntimeError(
+                    f"ONNX export requires additional dependencies: {e}. "
+                    "Install with: uv pip install onnxscript onnx"
+                ) from e
 
             return buffer.getvalue()
 
