@@ -53,6 +53,11 @@ poetry.lock
 
 # Generated evidence and local planning artifacts
 .sisyphus/evidence/
+.sisyphus/*.md
+
+# Local nested agent instructions; keep root AGENTS.md tracked
+**/AGENTS.md
+!/AGENTS.md
 
 # Desktop build artifacts
 adapters/desktop/node_modules/
