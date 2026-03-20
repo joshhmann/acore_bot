@@ -1,6 +1,6 @@
 # Gestalt Status
 
-**Last Updated**: 2026-03-15
+**Last Updated**: 2026-03-19
 
 ## Current Direction
 
@@ -32,6 +32,8 @@ The browser client in `adapters/desktop/*` remains a useful scaffold, but it is 
 - Runtime phase-focused multi-agent swarm presets through `/swarm --phase phaseN`
 - Runtime-owned social session state for Discord mode/status surfaces
 - Runtime-native Discord slash chat path
+- Maintained Discord startup now loads a dedicated runtime-native chat cog (`adapters/discord/commands/runtime_chat.py`)
+- Maintained Discord help and `botstatus` commands now route through runtime command/status outputs on the runtime-host startup path
 - Runtime-owned Discord on-message response decision + response path
 - Normalized Discord on-message decision-fact payload into runtime
 - Discord adapter now sends a thinner normalized fact payload instead of adapter-owned response-policy flags on the maintained on-message path
@@ -106,12 +108,14 @@ Executed cleanup slices:
   - launcher now has a maintained runtime-host startup path for Discord via
     `GestaltDiscordBot`
   - `adapters/discord/discord_bot.py` now exists as the runtime-host-backed
-    Discord startup module, but Discord command/chat ownership remains hybrid
+    Discord startup module and now loads runtime-native chat/help/system cogs
   - `main.py` is deprecated with clear warnings pointing to `launcher.py`
 - Discord migration truth is now mapped:
   - Discord is not yet a real runtime-first surface overall
   - some command seams are runtime-first already
   - Discord slash chat now uses a thin runtime-native chat path
+  - maintained Discord startup now loads a dedicated `RuntimeChatCog` for slash chat and mention-gated on-message chat instead of relying on the hybrid legacy `ChatCog`
+  - maintained Discord help and `botstatus` now resolve through runtime command/status outputs on the runtime-host startup path
   - Discord on-message response generation now uses the same runtime-native chat path
   - on-message response and persona selection now route through runtime after adapter fact extraction
   - remaining adapter-owned pre-runtime work in `MessageHandler` is now explicit transport hygiene instead of hidden response policy
@@ -216,8 +220,8 @@ but they are excluded from maintained-path completion criteria.
 - [x] Maintained Discord startup path now has a runtime-host-backed entry module
   at `adapters/discord/discord_bot.py` and launcher runtime-host wiring
 - [ ] Maintained Discord chat path is still hybrid because
-  `adapters/discord/commands/chat/main.py` imports and initializes
-  `services/*` ownership directly
+  the legacy `adapters/discord/commands/chat/main.py` seam still imports and initializes
+  `services/*` ownership directly even though maintained startup now uses `RuntimeChatCog`
 - [x] Legacy Discord toggles remain explicit opt-in and default-off
   (`DISCORD_LEGACY_*`)
 - [x] Runtime lifecycle close path supports maintained Discord shutdown

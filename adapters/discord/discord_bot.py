@@ -33,6 +33,7 @@ class GestaltDiscordBot(commands.Bot):
 
     async def setup_hook(self) -> None:
         from adapters.discord.commands.chat.main import ChatCog
+        from adapters.discord.commands.runtime_chat import RuntimeChatCog
         from adapters.discord.commands.social import SocialCommandsCog
         from adapters.discord.commands.help import HelpCog
         from adapters.discord.commands.system import SystemCog
@@ -40,8 +41,9 @@ class GestaltDiscordBot(commands.Bot):
 
         del ChatCog  # Runtime startup remains explicit while chat migration stays hybrid.
 
-        await self.add_cog(HelpCog(self))
-        await self.add_cog(SystemCog(self))
+        await self.add_cog(RuntimeChatCog(self, runtime=self.runtime))
+        await self.add_cog(HelpCog(self, runtime=self.runtime))
+        await self.add_cog(SystemCog(self, runtime=self.runtime))
         await self.add_cog(SocialCommandsCog(self, runtime=self.runtime))
 
         if getattr(Config, "DISCORD_LEGACY_PERSONA_ADMIN_ENABLED", False):

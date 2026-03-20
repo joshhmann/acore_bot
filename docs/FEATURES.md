@@ -25,8 +25,8 @@ Approved status labels:
 - TUI runtime command deck (`adapters/tui/*`): `Verified active`
 - Standalone stdio runtime hosting (`gestalt/cli_entry.py`, `adapters/runtime_stdio.py`): `Verified active`
 - Discord runtime-host startup module (`adapters/discord/discord_bot.py`): `Verified active`
-- Discord slash/on-message runtime chat path: `Present but not loaded`
-  The maintained startup module exists, but the chat command seam remains hybrid because `adapters/discord/commands/chat/main.py` still imports and initializes `services/*` fallback ownership.
+- Discord maintained runtime chat surface (`adapters/discord/commands/runtime_chat.py`): `Verified active`
+- Discord legacy hybrid chat seam (`adapters/discord/commands/chat/main.py`): `Deprecated candidate`
 - Browser/Tauri client (`adapters/desktop/*`): `Present but not loaded`
 
 ## Runtime-Native Features
