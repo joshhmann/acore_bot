@@ -91,6 +91,47 @@
             flex-direction: column;
             gap: 15px;
         }
+
+        .runtime-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+            gap: 12px;
+            padding: 16px 20px;
+            background: #fbfbfd;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .runtime-card {
+            background: white;
+            border: 1px solid #e6e9ef;
+            border-radius: 14px;
+            padding: 12px 14px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.05);
+        }
+
+        .runtime-card .label {
+            display: block;
+            color: #6c757d;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin-bottom: 6px;
+        }
+
+        .runtime-card .value {
+            color: #212529;
+            font-size: 18px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .runtime-card .meta {
+            margin-top: 6px;
+            color: #6c757d;
+            font-size: 12px;
+            line-height: 1.4;
+        }
         
         .message {
             max-width: 80%;
@@ -223,6 +264,29 @@
         </div>
         
         <div class="error" id="error"></div>
+
+        <div class="runtime-panel" id="runtimePanel">
+            <div class="runtime-card">
+                <span class="label">Cache Model</span>
+                <div class="value" id="cacheModel">loading</div>
+                <div class="meta" id="cacheReason">Waiting for runtime snapshot</div>
+            </div>
+            <div class="runtime-card">
+                <span class="label">Prefix Cache</span>
+                <div class="value" id="cacheHit">--</div>
+                <div class="meta" id="cacheKey">No cache key yet</div>
+            </div>
+            <div class="runtime-card">
+                <span class="label">Saved Tokens</span>
+                <div class="value" id="tokensSaved">0</div>
+                <div class="meta" id="providerCached">provider cached input 0</div>
+            </div>
+            <div class="runtime-card">
+                <span class="label">Provider Usage</span>
+                <div class="value" id="providerUsage">0 / 0</div>
+                <div class="meta" id="providerModel">No model reported</div>
+            </div>
+        </div>
         
         <div class="messages" id="messages">
             <div class="message bot">
@@ -247,8 +311,76 @@
         const typingDiv = document.getElementById('typing');
         const errorDiv = document.getElementById('error');
         const sendBtn = document.getElementById('sendBtn');
+        const cacheModelEl = document.getElementById('cacheModel');
+        const cacheReasonEl = document.getElementById('cacheReason');
+        const cacheHitEl = document.getElementById('cacheHit');
+        const cacheKeyEl = document.getElementById('cacheKey');
+        const tokensSavedEl = document.getElementById('tokensSaved');
+        const providerCachedEl = document.getElementById('providerCached');
+        const providerUsageEl = document.getElementById('providerUsage');
+        const providerModelEl = document.getElementById('providerModel');
         
         let isProcessing = false;
+
+        function runtimePayload() {
+            return {
+                session_id: 'web:main',
+                persona_id: personaSelect.value,
+                room_id: 'web_chat',
+                platform: 'web',
+                mode: '',
+                flags: {},
+                user_id: userIdInput.value || 'web_user'
+            };
+        }
+
+        function formatCacheHit(lastHit) {
+            if (lastHit === true) return 'hit';
+            if (lastHit === false) return 'miss';
+            return '--';
+        }
+
+        function updateRuntimePanel(statusSnapshot, contextSnapshot) {
+            const providerUsage = statusSnapshot?.provider_usage || {};
+            const context = contextSnapshot || {};
+            cacheModelEl.textContent = context.cache_model || 'stable_prefix';
+            cacheReasonEl.textContent = context.last_cache_reason || 'No cache activity yet';
+            cacheHitEl.textContent = formatCacheHit(context.last_cache_hit);
+            cacheKeyEl.textContent = context.last_cache_key || 'No cache key yet';
+            tokensSavedEl.textContent = String(context.tokens_saved_estimate || 0);
+            providerCachedEl.textContent = `provider cached input ${context.provider_cached_input_tokens || 0}`;
+            providerUsageEl.textContent = `${providerUsage.input_tokens || 0} / ${providerUsage.output_tokens || 0}`;
+            providerModelEl.textContent = `${statusSnapshot?.provider || 'unknown'} · ${statusSnapshot?.model || 'unknown'}`;
+        }
+
+        async function refreshRuntimePanel() {
+            try {
+                const payload = runtimePayload();
+                const [statusResponse, contextResponse] = await Promise.all([
+                    fetch('/api/runtime/status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    }),
+                    fetch('/api/runtime/context', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    })
+                ]);
+
+                if (!statusResponse.ok || !contextResponse.ok) {
+                    throw new Error('Failed to load runtime telemetry');
+                }
+
+                const statusData = await statusResponse.json();
+                const contextData = await contextResponse.json();
+                updateRuntimePanel(statusData.snapshot, contextData.snapshot);
+            } catch (error) {
+                console.error('Runtime telemetry error:', error);
+                cacheReasonEl.textContent = 'Runtime telemetry unavailable';
+            }
+        }
         
         // Load personas on startup
         async function loadPersonas() {
@@ -313,6 +445,7 @@
                 
                 const data = await response.json();
                 addMessage(data.response, false, data.persona_name);
+                await refreshRuntimePanel();
                 
             } catch (error) {
                 console.error('Error:', error);
@@ -333,6 +466,7 @@
         
         // Load personas when page loads
         loadPersonas();
+        refreshRuntimePanel();
         
         // Focus input on load
         messageInput.focus();

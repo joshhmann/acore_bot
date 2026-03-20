@@ -69,7 +69,17 @@ class _FakeRuntime:
         ]
 
     def get_status_snapshot(self, **kwargs: Any) -> dict[str, Any]:
-        return {"persona": kwargs["persona_id"], "session_id": kwargs["session_id"]}
+        return {
+            "persona": kwargs["persona_id"],
+            "session_id": kwargs["session_id"],
+            "provider": "fake",
+            "model": "fake-model",
+            "provider_usage": {
+                "input_tokens": 42,
+                "output_tokens": 9,
+                "cached_input_tokens": 12,
+            },
+        }
 
     def get_session_snapshot(self, **kwargs: Any) -> dict[str, Any]:
         return {
@@ -135,9 +145,15 @@ class _FakeRuntime:
     def get_context_cache_snapshot(self, **kwargs: Any) -> dict[str, Any]:
         return {
             "session_id": kwargs["session_id"],
+            "cache_model": "stable_prefix",
             "entry_count": 1,
             "total_hits": 3,
             "tokens_saved_estimate": 72,
+            "provider_cached_input_tokens": 12,
+            "last_cache_key": "web:main:alpha:fake:fake-model",
+            "last_cache_hit": True,
+            "last_cache_reason": "stable_prefix_reused",
+            "memory_revision": "rev-1",
             "entries": [
                 {
                     "cache_key": "web:main:alpha:tai",
@@ -348,10 +364,13 @@ def test_runtime_snapshot_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert status.status_code == 200
     assert status.json()["snapshot"]["persona"] == "tai"
+    assert status.json()["snapshot"]["provider_usage"]["cached_input_tokens"] == 12
     assert session.json()["session"]["platform"] == "web"
     assert sessions.json()["sessions"][0]["session_id"] == "web:main"
     assert tools.json()["tools"][0]["name"] == "shell"
     assert context.json()["snapshot"]["entry_count"] == 1
+    assert context.json()["snapshot"]["cache_model"] == "stable_prefix"
+    assert context.json()["snapshot"]["last_cache_reason"] == "stable_prefix_reused"
     assert context_reset.json()["snapshot"]["cleared"] == 1
     assert trace.json()["trace"]["spans"][0]["limit"] == 3
     assert presence.json()["snapshot"]["avatar_format"] == "vrm"
@@ -682,6 +701,16 @@ def test_runtime_websocket_uses_authenticated_actor_id_when_auth_enabled(
         runtime.received_events[-1].metadata["flags"]["user_id"]
         == "authenticated:web:browser-scope"
     )
+
+
+def test_root_ui_includes_runtime_panel(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _build_client(monkeypatch)
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert "Cache Model" in response.text
+    assert "Saved Tokens" in response.text
+    assert "refreshRuntimePanel" in response.text
 
 
 def test_runtime_websocket_uses_authenticated_actor_when_auth_enabled(
