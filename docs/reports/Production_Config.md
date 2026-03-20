@@ -1,5 +1,7 @@
 # Production-Ready Feature Configuration Summary
 
+> HISTORICAL SNAPSHOT: superseded by canonical runtime-first docs in `docs/STATUS.md` and `docs/FEATURES.md`.
+
 **Date**: 2025-12-11 08:41  
 **Status**: ✅ **CONFIGURATION COMPLETE - ALL FEATURES ENABLED**
 

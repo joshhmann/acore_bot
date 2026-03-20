@@ -1,5 +1,7 @@
 # Production Review & Fixes Summary
 
+> HISTORICAL SNAPSHOT: superseded by canonical runtime-first docs in `docs/STATUS.md` and `docs/FEATURES.md`.
+
 **Date**: 2025-12-11  
 **Review Type**: Multiagent Production Readiness Assessment  
 **Status**: ✅ **COMPLETE - PRODUCTION READY**

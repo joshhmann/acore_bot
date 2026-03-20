@@ -10,8 +10,8 @@ from typing import Sequence
 
 from adapters.cli.adapter import CLIInputAdapter, CLIOutputAdapter
 from adapters.cli.play import PlayConfig, PlayRunner
-from adapters.runtime_factory import build_gestalt_runtime
-from core.interfaces import AcoreEvent
+from core.interfaces import AcoreEvent, PlatformFacts, build_runtime_event_from_facts
+from gestalt.runtime_bootstrap import create_runtime
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,53 +20,58 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-async def handle_event(event: AcoreEvent) -> None:
-    """Handle incoming events from the CLI input adapter."""
-    logger.info(f"Received event: type={event.type}, source={event.source_adapter}")
+async def _handle_cli_event(runtime, output: CLIOutputAdapter, event: AcoreEvent) -> None:
+    """Route CLI adapter messages through the maintained runtime path."""
+    if event.type != "message":
+        return
 
-    if event.type == "message":
-        payload = event.payload
-        message = payload.get("message")
-        persona_id = payload.get("persona_id")
+    payload = event.payload
+    message = payload.get("message")
+    persona_id = str(payload.get("persona_id") or "default")
+    if message is None:
+        return
 
-        if message:
-            logger.info(f"Message from {message.author_id}: {message.text}")
-            logger.info(f"Target persona: {persona_id}")
-            output = CLIOutputAdapter()
-            response_text = f"Received: '{message.text}' (targeting @{persona_id})"
-            await output.send(
-                channel_id=message.channel_id,
-                text=response_text,
-                persona_id="cli_bot",
-                display_name="CLI Bot",
-            )
+    runtime_event = build_runtime_event_from_facts(
+        facts=PlatformFacts(
+            text=str(message.text or ""),
+            user_id=str(message.author_id or "cli_user"),
+            room_id=str(message.channel_id or "cli_channel"),
+        ),
+        platform_name="cli",
+        persona_id=persona_id,
+    )
+    response = await runtime.handle_event(runtime_event)
+    await output.send(
+        channel_id=str(message.channel_id or "cli_channel"),
+        text=str(response.text or ""),
+        persona_id=str(response.persona_id or ""),
+    )
 
 
-def handle_event_sync(event: AcoreEvent) -> None:
-    asyncio.create_task(handle_event(event))
+def _build_event_handler(runtime, output: CLIOutputAdapter):
+    def _handler(event: AcoreEvent) -> None:
+        asyncio.create_task(_handle_cli_event(runtime, output, event))
+
+    return _handler
 
 
 async def main() -> None:
     """Main entry point for CLI adapter."""
     logger.info("Starting CLI adapter...")
-
-    # Create input adapter
+    runtime = create_runtime()
     input_adapter = CLIInputAdapter()
-
-    # Register event handler
-    input_adapter.on_event(handle_event_sync)
-
-    # Start input adapter
+    output_adapter = CLIOutputAdapter()
+    input_adapter.on_event(_build_event_handler(runtime, output_adapter))
     await input_adapter.start()
 
     try:
-        # Wait for input processing to complete (EOF or interrupt)
         while input_adapter._running:
             await asyncio.sleep(0.1)
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     finally:
         await input_adapter.stop()
+        await runtime.close()
         logger.info("CLI adapter stopped")
 
 
@@ -123,9 +128,12 @@ def _build_play_config(args: argparse.Namespace) -> PlayConfig:
 
 async def _run_play(args: argparse.Namespace) -> int:
     config = _build_play_config(args)
-    runtime = build_gestalt_runtime(legacy_llm=None)
+    runtime = create_runtime()
     runner = PlayRunner(runtime=runtime, config=config)
-    return await runner.run()
+    try:
+        return await runner.run()
+    finally:
+        await runtime.close()
 
 
 async def _dispatch(argv: Sequence[str] | None = None) -> int:

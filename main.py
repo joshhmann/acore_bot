@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Discord bot with Ollama chat and TTS/RVC voice features.
+"""DEPRECATED: legacy Discord startup entrypoint.
+
+main.py is deprecated. Use `launcher.py --discord` for maintained startup.
+
+Discord bot with Ollama chat and TTS/RVC voice features.
 
 A simple, clean Discord bot that:
 - Uses Ollama for AI-powered conversations
@@ -19,7 +23,6 @@ import sys
 import asyncio
 import signal
 import os
-from pathlib import Path
 from typing import cast, Optional, Dict, Any, Set
 from datetime import datetime
 
@@ -32,13 +35,7 @@ from adapters.discord.commands.rl import RLCommands
 from adapters.discord.commands.conversation import ConversationCommandsCog
 
 # Setup logging with structured JSON support
-from utils.logging_config import (
-    setup_logging,
-    log_with_context,
-    TraceContext,
-    get_trace_id,
-    set_trace_id,
-)
+from utils.logging_config import setup_logging
 
 # Setup production logging configuration
 setup_logging(
@@ -71,6 +68,20 @@ logger.info(
 
 class OllamaBot(commands.Bot):
     """Main bot class."""
+
+    @staticmethod
+    def _should_load_rl_commands() -> bool:
+        """Keep RL command loading explicit on the legacy startup path."""
+        return bool(Config.RL_ENABLED)
+
+    @staticmethod
+    def _should_load_conversation_commands() -> bool:
+        """Keep bot-conversation loading explicit on the legacy startup path."""
+        return bool(Config.BOT_CONVERSATION_ENABLED)
+
+    def _should_load_voice_cog(self) -> bool:
+        """Require both explicit opt-in and TTS availability for voice."""
+        return bool(Config.DISCORD_VOICE_ENABLED and self.tts)
 
     def __init__(self) -> None:
         """Initialize the bot."""
@@ -170,7 +181,7 @@ class OllamaBot(commands.Bot):
         logger.info("Loaded ChatCog")
 
         # Load VoiceCog (only if TTS is available)
-        if self.tts:
+        if self._should_load_voice_cog():
             await self.add_cog(
                 VoiceCog(
                     self,
@@ -187,11 +198,12 @@ class OllamaBot(commands.Bot):
             logger.info("Loaded VoiceCog")
 
         # Load RL Commands
-        await self.add_cog(RLCommands(self))
-        logger.info("Loaded RLCommands")
+        if self._should_load_rl_commands():
+            await self.add_cog(RLCommands(self))
+            logger.info("Loaded RLCommands")
 
         # Load Conversation Commands (bot-to-bot conversations)
-        if Config.BOT_CONVERSATION_ENABLED:
+        if self._should_load_conversation_commands():
             await self.add_cog(ConversationCommandsCog(self))
             logger.info("Loaded ConversationCommandsCog")
 

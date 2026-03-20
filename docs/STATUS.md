@@ -103,8 +103,10 @@ Executed cleanup slices:
 - Launcher cleanup is complete:
   - CLI and web launcher paths use runtime-first startup without forcing
     `ServiceFactory`
-  - Discord now uses runtime-first startup via `GestaltDiscordBot` class
-  - `adapters/discord/discord_bot.py` provides the canonical runtime-first Discord entrypoint
+  - launcher now has a maintained runtime-host startup path for Discord via
+    `GestaltDiscordBot`
+  - `adapters/discord/discord_bot.py` now exists as the runtime-host-backed
+    Discord startup module, but Discord command/chat ownership remains hybrid
   - `main.py` is deprecated with clear warnings pointing to `launcher.py`
 - Discord migration truth is now mapped:
   - Discord is not yet a real runtime-first surface overall
@@ -206,32 +208,34 @@ This is the first executed pruning step from the audit plan.
 
 ## Discord Migration Closeout Gate
 
-**Status**: CLOSED under strict quarantine policy (2026-03-14)
+**Status**: REOPENED as hybrid startup truth correction (2026-03-19)
 
 Closeout policy: strict quarantine. Legacy Discord surfaces can remain opt-in,
 but they are excluded from maintained-path completion criteria.
 
-- [x] Maintained Discord startup path is runtime-first via `launcher.py --discord`
-  and `adapters/discord/discord_bot.py`
-- [x] Maintained Discord chat path is runtime-owned (decision + response), with
-  adapter transport hygiene and idempotency guards
+- [x] Maintained Discord startup path now has a runtime-host-backed entry module
+  at `adapters/discord/discord_bot.py` and launcher runtime-host wiring
+- [ ] Maintained Discord chat path is still hybrid because
+  `adapters/discord/commands/chat/main.py` imports and initializes
+  `services/*` ownership directly
 - [x] Legacy Discord toggles remain explicit opt-in and default-off
   (`DISCORD_LEGACY_*`)
 - [x] Runtime lifecycle close path supports maintained Discord shutdown
   (`RuntimeHost.close()` -> `GestaltRuntime.close()` -> provider cleanup)
-- [x] Hard gate verification available: unit tests + lint + live Discord smoke
-  start/ready/stop without startup/shutdown runtime-contract failures
+- [ ] Hard gate verification for runtime-host Discord startup is not yet
+  re-established after startup truth correction
 - [ ] Runtime-native replacements for all legacy operator/voice/conversation
   surfaces (intentionally not required for migration closeout under quarantine policy)
 
 ### Evidence Block
 
 ```bash
-# Test command
-$ uv run pytest tests/unit/test_discord_*.py -q --tb=no
+# Startup truth tests
+$ uv run pytest tests/unit/test_launcher_runtime_split.py -q --tb=no
+$ uv run pytest tests/unit/test_cli_runtime_routing.py -q --tb=no
 
 # Results summary
-90 passed, 1 skipped in 1.35s
+# launcher + CLI runtime routing now pass on the maintained startup slice
 
 # Test files covered:
 # - test_discord_chat_runtime_path.py (runtime-first chat path)
@@ -255,7 +259,9 @@ $ uv run python launcher.py --discord --no-cli --no-web
 
 ## Phase 2 Next Tasks
 
-- ~~P6: Startup Consolidation for Discord migration~~ **Completed**: One canonical Discord startup path established (`adapters/discord/discord_bot.py`), runtime-first path is now the default via `launcher.py`, `main.py` deprecated with clear migration warnings.
+- `P6: Startup Consolidation for Discord migration` is now **partially complete**:
+  runtime-host launcher wiring and `adapters/discord/discord_bot.py` exist, but
+  Discord chat/service ownership is still hybrid and not yet migration-complete.
 - ~~Move persona name extraction from Discord adapter into runtime-owned decision~~ **Completed**: runtime now owns `_extract_mentioned_persona_ids_from_text()` and the maintained Discord adapter no longer sends persona-name trigger semantics in its fact payload.
 - ~~Move facilitator logic from Discord adapter into runtime~~ **Completed**: `ModeFacilitator` removed from `SocialCommandsCog`; runtime now owns social state via `get_social_state_snapshot()`, `set_social_mode()`, `reset_social_state()`, and `record_social_routing_decision()`; Discord adapter calls runtime for mode selection.
 - ~~Remove maintained Discord chat dependence on legacy `BehaviorEngine`, `ContextManager`, and persona-router ownership from the remaining trigger and orchestration path~~ **Completed**: `_LegacyChatSupport` class moved to `adapters/discord/commands/chat/legacy_support.py`; `main.py` no longer imports legacy services at module level; runtime-only path has zero service dependencies.

@@ -26,3 +26,29 @@ class DiscordConfig(BaseConfig):
 
     # User Ignore List
     IGNORED_USERS: list = BaseConfig._get_env_int_list("IGNORED_USERS")
+
+    # Legacy Discord seams remain explicit opt-in only.
+    DISCORD_LEGACY_OPERATOR_ENABLED: bool = BaseConfig._get_env_bool(
+        "DISCORD_LEGACY_OPERATOR_ENABLED", False
+    )
+    DISCORD_LEGACY_PERSONA_ADMIN_ENABLED: bool = BaseConfig._get_env_bool(
+        "DISCORD_LEGACY_PERSONA_ADMIN_ENABLED", False
+    )
+    DISCORD_LEGACY_CHAT_AMBIENT_ENABLED: bool = BaseConfig._get_env_bool(
+        "DISCORD_LEGACY_CHAT_AMBIENT_ENABLED", False
+    )
+    DISCORD_LEGACY_CHAT_SESSION_ENABLED: bool = BaseConfig._get_env_bool(
+        "DISCORD_LEGACY_CHAT_SESSION_ENABLED", False
+    )
+    DISCORD_LEGACY_CHAT_FALLBACK_ENABLED: bool = BaseConfig._get_env_bool(
+        "DISCORD_LEGACY_CHAT_FALLBACK_ENABLED", False
+    )
+    DISCORD_LEGACY_SOCIAL_MODE_FOOTER_ENABLED: bool = BaseConfig._get_env_bool(
+        "DISCORD_LEGACY_SOCIAL_MODE_FOOTER_ENABLED", False
+    )
+    DISCORD_LEGACY_SOCIAL_INSIGHTS_ENABLED: bool = BaseConfig._get_env_bool(
+        "DISCORD_LEGACY_SOCIAL_INSIGHTS_ENABLED", False
+    )
+    DISCORD_VOICE_ENABLED: bool = BaseConfig._get_env_bool(
+        "DISCORD_VOICE_ENABLED", False
+    )
