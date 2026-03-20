@@ -269,23 +269,42 @@ $ uv run python launcher.py --discord --no-cli --no-web
 # Shutdown: Clean RuntimeHost.close() -> GestaltRuntime.close()
 ```
 
-## Phase 2 Next Tasks
+## Phase 3 Focus
 
-- `P6: Startup Consolidation for Discord migration` is now **completed under strict quarantine policy**:
-  runtime-host launcher wiring is canonical, and maintained Discord startup now uses runtime-native chat/help/system/social/profile/search cogs.
-- ~~Move persona name extraction from Discord adapter into runtime-owned decision~~ **Completed**: runtime now owns `_extract_mentioned_persona_ids_from_text()` and the maintained Discord adapter no longer sends persona-name trigger semantics in its fact payload.
-- ~~Move facilitator logic from Discord adapter into runtime~~ **Completed**: `ModeFacilitator` removed from `SocialCommandsCog`; runtime now owns social state via `get_social_state_snapshot()`, `set_social_mode()`, `reset_social_state()`, and `record_social_routing_decision()`; Discord adapter calls runtime for mode selection.
-- ~~Remove maintained Discord chat dependence on legacy `BehaviorEngine`, `ContextManager`, and persona-router ownership from the remaining trigger and orchestration path~~ **Completed**: `_LegacyChatSupport` class moved to `adapters/discord/commands/chat/legacy_support.py`; `main.py` no longer imports legacy services at module level; runtime-only path has zero service dependencies.
-- ~~Move remaining Discord persona-management commands onto runtime-owned persona/catalog state~~ **Completed for maintained startup**: runtime-native help/system/profile/search surfaces are on startup; legacy character import/reload remains quarantined outside maintained startup.
-- ~~Live-run hardening fixes~~ **Completed**: 
-  - Added `_is_visual_question()` method to `GestaltRuntime` (fixes AttributeError in decision path)
-  - Added idempotency guard in `MessageHandler._respond_via_runtime()` with `_responding_messages` set to prevent duplicate/parallel responses for same Discord message ID
-  - Added shutdown safety checks in `_handle_runtime_chat_response()` to gracefully skip sends when bot is closed (prevents "Session is closed" exceptions)
-- Quarantine Discord legacy/research-only surfaces on startup. Partial: RL, bot-conversation, and voice are now explicit opt-in on the transitional `main.py` path, but the underlying surfaces are still legacy/transitional when enabled.
-- Apply the Discord salvage matrix in code. Completed for maintained startup: runtime-backed Discord command modules are now the only maintained startup surface; remaining voice/conversation/operator/persona-admin modules are explicitly quarantined.
-- Replace Discord-local operator surfaces with runtime-first equivalents. Partial: Discord help and `botstatus` now use runtime command/status truth, and legacy Discord operator tooling is now disabled by default behind `DISCORD_LEGACY_OPERATOR_ENABLED`, but runtime-native memory/admin replacements do not exist yet.
-- Tighten Runtime API identity from stable adapter-generated `user_id` toward authenticated actor identity when auth is enabled. Completed for maintained web/browser HTTP and websocket paths.
-- Keep web/browser as the reference Runtime API client while Discord continues migrating toward the same contract.
+Phase 3 is now the active development focus.
+
+Near-term priorities:
+
+- formalize the adapter SDK around the existing `PlatformFacts` ingress and
+  maintained Runtime API contract
+- build runtime-owned trace emission and make it the backbone of operator
+  introspection
+- introduce a runtime-owned memory coordinator over typed memory classes
+  (`ShortTermTurn`, `Episode`, `Fact`, `Preference`, `Procedure`,
+  `ActionRecord`)
+- standardize memory scoping as:
+  - per-persona by default
+  - separate runtime-owned shared-memory tier for relationship and social state
+- harden prompt assembly into a cache-aware context pipeline with explicit
+  revision and invalidation behavior
+- implement tool risk tiers, approval queues, and action records before
+  expanding autonomy
+- expand the web operator surface around runtime health, sessions, traces,
+  memory/context inspection, approvals, and provider/cache telemetry
+- standardize runtime session lifecycle behavior across maintained surfaces
+- strengthen runtime-owned security boundaries for:
+  - secret handling and redaction
+  - untrusted tool/MCP output handling
+  - actor/session attribution
+
+Explicit defer list for the current phase:
+
+- VRM or embodiment renderer implementation
+- scene systems
+- game/environment bridges
+- RL-style embodied learning
+- broad multi-agent orchestration expansion
+- fine-tuning/distillation pipelines
 
 ## Multi-Agent Note
 

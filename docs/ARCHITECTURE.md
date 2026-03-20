@@ -157,7 +157,16 @@ maintained surfaces.
 
 The next architecture cuts should prioritize:
 
-1. finishing launcher/runtime-host ownership cleanup
-2. keeping CLI and web on shared runtime contracts
-3. reducing Discord hybrid seams
-4. shrinking legacy `services/*` authority in maintained paths
+1. formalizing the adapter SDK around the existing `PlatformFacts` and Runtime
+   API contract
+2. building runtime-owned trace emission as the backbone of operator
+   introspection
+3. unifying memory, context assembly, and cache behavior under one
+   runtime-owned coordination layer
+4. implementing tool risk tiers, approval queues, and action records before
+   expanding autonomy
+5. expanding the web operator surface around sessions, traces, memory, and
+   approvals
+6. shrinking remaining `services/*` authority in maintained paths
+7. deferring embodiment and environment bridges until the runtime phase is
+   hardened

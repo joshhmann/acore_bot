@@ -256,17 +256,28 @@ Implemented in the maintained product path:
 
 Still partial or deferred:
 
-- ~~a formal adapter SDK~~ (see Adapter SDK Contract below)
+- stronger typed SDK surfaces over the existing contract
 - identity-specific snapshots
 - scene/action observation extensions
 - stronger cross-transport schema centralization
 - full Discord migration onto this contract
+- runtime-owned approval queue and action-record surfaces
+- richer trace and memory-inspection transport schemas
 
 ## Adapter SDK Contract (v1.0)
 
 The adapter SDK defines a four-phase lifecycle contract for platform adapters.
 This contract enforces runtime-first boundaries while providing clear extension
 points for new platforms (Slack, Telegram, etc.).
+
+Near-term formalization direction:
+
+- extend the existing `PlatformFacts` ingress contract rather than inventing a
+  parallel adapter stack
+- standardize adapter capability declaration and response-envelope typing on top
+  of the current maintained web/stdio contract
+- keep approval, memory, trace, and session mutation surfaces runtime-owned and
+  transport-agnostic
 
 ### Design Principles
 
