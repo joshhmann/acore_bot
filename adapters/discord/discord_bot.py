@@ -32,14 +32,11 @@ class GestaltDiscordBot(commands.Bot):
         self.runtime = runtime_host.runtime
 
     async def setup_hook(self) -> None:
-        from adapters.discord.commands.chat.main import ChatCog
         from adapters.discord.commands.runtime_chat import RuntimeChatCog
         from adapters.discord.commands.social import SocialCommandsCog
         from adapters.discord.commands.help import HelpCog
         from adapters.discord.commands.system import SystemCog
         from adapters.discord.commands.character import CharacterCommandsCog
-
-        del ChatCog  # Runtime startup remains explicit while chat migration stays hybrid.
 
         await self.add_cog(RuntimeChatCog(self, runtime=self.runtime))
         await self.add_cog(HelpCog(self, runtime=self.runtime))

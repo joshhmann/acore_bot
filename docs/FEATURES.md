@@ -26,6 +26,8 @@ Approved status labels:
 - Standalone stdio runtime hosting (`gestalt/cli_entry.py`, `adapters/runtime_stdio.py`): `Verified active`
 - Discord runtime-host startup module (`adapters/discord/discord_bot.py`): `Verified active`
 - Discord maintained runtime chat surface (`adapters/discord/commands/runtime_chat.py`): `Verified active`
+- Discord maintained runtime profile/status surface (`adapters/discord/commands/profile.py`): `Verified active`
+- Discord maintained runtime ask/search surface (`adapters/discord/commands/search.py`): `Verified active`
 - Discord legacy hybrid chat seam (`adapters/discord/commands/chat/main.py`): `Deprecated candidate`
 - Browser/Tauri client (`adapters/desktop/*`): `Present but not loaded`
 

@@ -1,4 +1,8 @@
-"""Chat cog for Ollama-powered conversations."""
+"""Legacy hybrid Discord chat seam.
+
+This module remains in the repository for legacy/experimental Discord flows.
+It is not part of the maintained runtime-host startup path.
+"""
 
 import discord
 from discord import app_commands
