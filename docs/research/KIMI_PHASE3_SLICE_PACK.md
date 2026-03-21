@@ -1,6 +1,6 @@
 # Kimi Phase 3 Slice Pack
 
-**Last Updated**: 2026-03-20
+**Last Updated**: 2026-03-21
 
 ## Purpose
 
@@ -16,6 +16,10 @@ Canonical direction remains:
 - `docs/RUNTIME_API.md`
 - `docs/VISION.md`
 
+Known corrective review artifact:
+
+- `docs/research/KIMI_SLICE_1_2_REVIEW.md`
+
 ## Recommended Order
 
 1. Adapter SDK formalization
@@ -27,11 +31,79 @@ Canonical direction remains:
 
 Parallelism:
 
-- Slice 1 can run in parallel with Slice 2
+- Slice 1 should be completed and reviewed before Slice 2 is merged
 - Slices 2, 3, and 4 should not run in parallel because they are likely to
   overlap in runtime ownership and `core/runtime.py`
 - Slice 5 depends on slices 2-4
 - Slice 6 should come after slices 2-5
+
+## Non-Negotiable Invariants
+
+These invariants apply to every Phase 3 slice:
+
+- Single authority rule:
+  - if a concept already exists canonically in `core/*`, extend it there
+  - do not define a second authority for the same concept in adapters, helpers,
+    or tests
+- Signature match rule:
+  - all new helper or subsystem integrations must match real function and method
+    signatures in code
+  - do not infer parameter names; verify them against the current implementation
+- Maintained path rule:
+  - a slice is not complete unless at least one maintained runtime path exercises
+    it
+  - isolated helper tests are not enough
+- No silent semantic drift:
+  - do not change the meaning of a shared contract method in only one adapter or
+    subsystem
+  - if a shared contract must change, update it centrally and update every
+    affected implementation, test, and doc
+- Preserve maintained behavior:
+  - if an existing maintained path has environment-driven, config-driven, or
+    runtime-driven behavior, do not hardcode a different default in a new path
+
+## Forbidden Patterns
+
+The following are slice failures unless explicitly requested:
+
+- defining duplicate dataclasses, enums, contracts, or schema types for an
+  existing concept
+- introducing a second abstraction stack beside the maintained runtime path
+- adapter-local policy ownership
+- web-only or adapter-only exceptions to shared runtime contracts
+- changing public contract semantics without centralizing the change
+- broad rewrites justified as "cleanup" when the slice is bounded
+
+## Required Preflight And Postflight Checks
+
+Every Kimi slice must include these checks before claiming completion:
+
+### Preflight
+
+- read the relevant canonical docs for the slice before making changes
+- list the canonical files that already own the concepts being changed
+- list the maintained paths that must continue to work after the slice
+- state which shared contracts are being extended, if any
+
+### Postflight
+
+- re-check the relevant canonical docs and confirm the implementation still
+  matches them, or update them if product truth changed
+- duplicate-authority grep:
+  - run `rg` for new or modified canonical type names to confirm there is only
+    one authority unless intentional compatibility types already existed
+- signature check:
+  - list touched public methods and confirm all new call sites match the actual
+    signatures
+- maintained-path validation:
+  - run at least one maintained runtime integration test or endpoint test that
+    exercises the new behavior
+- behavior-drift check:
+  - explicitly state whether any maintained default behavior changed
+  - if yes, justify it and update canonical docs
+- API/surface check:
+  - if a new subsystem emits data for operators, prove that the maintained API
+    or maintained surface can actually see it
 
 ## Shared Instructions For Kimi
 
@@ -47,10 +119,16 @@ Treat these as canonical:
 - docs/RUNTIME_API.md -> maintained runtime contract
 - docs/VISION.md -> product direction
 
+Read the relevant canonical docs before making changes.
+Re-check the relevant canonical docs before claiming completion.
+
 Treat these as supporting research only:
 - docs/research/research_runtime_synthesis.md
 - docs/research/research_gestalt_brief.md
 - docs/research/research_deep_report.md
+
+If you are working on Slice 1 or Slice 2, also read:
+- docs/research/KIMI_SLICE_1_2_REVIEW.md
 
 Important constraints:
 - Gestalt is runtime-first
@@ -64,18 +142,56 @@ Important constraints:
 - do not reintroduce services/* authority in maintained paths
 - update canonical docs only if code truth changes
 - keep docs honest; do not claim work is complete if it is partial
+- preserve single authority for canonical types and contracts
+- do not define duplicate dataclasses, enums, or ABCs for the same concept
+- do not change shared contract semantics in only one implementation
+- verify new call sites against real method signatures before completion
+- prove maintained-path integration, not only isolated helper tests
 
 Required output:
 1. what changed
 2. changed files
 3. tests run
 4. remaining gaps or follow-ups
+5. canonical files extended
+6. duplicate-authority grep results
+7. maintained-path validation performed
+8. whether any maintained behavior changed
 
 Verification expectations:
 - run the smallest relevant tests first
 - run focused unit tests for the touched surface
 - run ruff on touched Python files
+- run at least one maintained-path test for the touched surface
+- verify no duplicate type or contract authorities were introduced
+- verify all new call sites match touched public method signatures
 ```
+
+## Corrective Guidance For Slice 1 And Slice 2
+
+The first attempted implementations of Slice 1 and Slice 2 produced concrete
+architectural failures that must not be repeated.
+
+Before attempting a corrective pass for Slice 1 or Slice 2, read:
+
+- `docs/research/KIMI_SLICE_1_2_REVIEW.md`
+
+Corrective priorities:
+
+- Slice 1:
+  - centralize adapter-contract authority in `core/interfaces.py`
+  - preserve maintained CLI behavior
+  - do not let web redefine shared contract semantics locally
+- Slice 2:
+  - centralize trace-model authority
+  - verify runtime call sites against emitter signatures
+  - ensure emitted traces are visible through the maintained trace API
+
+Corrective output must explicitly state:
+
+- which duplicate authorities were removed or avoided
+- which maintained-path behaviors were preserved
+- which maintained runtime/API tests proved the fix
 
 ## Slice 1: Adapter SDK Formalization
 
@@ -111,18 +227,25 @@ Constraints:
 - do not change runtime authority
 - do not redesign transports
 - do not touch embodiment or scene systems
+- do not define `RuntimeDecision`, `AdapterConfig`, or
+  `AdapterLifecycleContract` outside `core/interfaces.py`
+- do not change maintained default persona behavior unless explicitly requested
 
 Acceptance criteria:
 - existing contract is clearer and more strongly typed
 - RUNTIME_API docs match code truth
 - focused adapter/runtime boundary tests pass
 - existing maintained adapters remain compatible
+- no duplicate adapter SDK authorities exist outside `core/interfaces.py`
+- maintained CLI and web behavior remain consistent with canonical defaults
 
 Report back with:
 - what changed
 - changed files
 - tests run
 - any contract gaps still left for later slices
+- exact grep results proving no duplicate SDK authorities exist
+- how maintained-path behavior was preserved
 ```
 
 ## Slice 2: Trace Emitter Hardening
@@ -161,18 +284,27 @@ Constraints:
 - extend the current trace system; do not replace it wholesale
 - avoid changing adapter contracts unless necessary for trace exposure
 - do not broaden into approval queue UI or memory redesign
+- do not create a second trace schema authority beside the maintained trace
+  model
+- do not add emitter-only traces that are invisible to the maintained trace API
+- do not add runtime call sites unless their argument names are verified against
+  emitter signatures
 
 Acceptance criteria:
 - trace events are more consistent and operator-useful
 - trace snapshot surfaces remain maintained and clearer
 - focused runtime/web/stdio trace tests pass
 - no maintained adapter gains policy ownership
+- maintained trace APIs actually surface the new emitted traces
+- no duplicate trace schema/model authority exists
 
 Report back with:
 - what changed
 - changed files
 - tests run
 - trace taxonomy added or standardized
+- exact maintained-path tests that exercised emitted traces
+- exact grep results proving trace model authority is not duplicated
 ```
 
 ## Slice 3: Memory Coordinator + Memory Scoping
@@ -212,18 +344,22 @@ Constraints:
 - do not move memory policy into adapters
 - do not build embodiment memory or game/environment memory
 - do not overreach into unrelated legacy service migration
+- do not create duplicate memory model types if equivalent canonical types
+  already exist
 
 Acceptance criteria:
 - memory ownership is clearer and more runtime-centered
 - per-persona vs shared-memory scope is explicit in code
 - focused memory/runtime tests pass
 - prompt/context work becomes easier for later slices
+- maintained runtime context assembly still works after the refactor
 
 Report back with:
 - what changed
 - changed files
 - tests run
 - what memory types and scopes are now explicit
+- how maintained prompt/context behavior was verified
 ```
 
 ## Slice 4: Tool Policy + Approval / Action Record Foundation
@@ -262,18 +398,21 @@ Constraints:
 - do not create adapter-owned approval behavior
 - do not bury approvals inside web-only logic
 - do not redesign the adapter contract here
+- do not create approval or action-record models in multiple canonical places
 
 Acceptance criteria:
 - tool policy is more explicit and safer
 - effectful operations can be traced and reviewed as action records
 - runtime has approval-ready state for later UI work
 - focused tool/runtime tests pass
+- maintained runtime surfaces can inspect the new approval/action-record state
 
 Report back with:
 - what changed
 - changed files
 - tests run
 - what approval/action-record surfaces now exist
+- how maintained runtime surfaces were validated
 ```
 
 ## Slice 5: Web Operator Surface Expansion
@@ -311,6 +450,8 @@ Constraints:
 - do not add adapter-local policy logic
 - do not invent a second orchestration layer in the browser
 - do not turn this into a design-only refactor with no operator value
+- do not reconstruct runtime state locally in the browser if the runtime can
+  expose it directly
 
 Acceptance criteria:
 - default operator view answers:
@@ -320,12 +461,15 @@ Acceptance criteria:
   - what changed
 - focused web runtime tests pass
 - the UI uses runtime truth instead of local reconstruction
+- at least one maintained API test proves the UI-facing data is coming from the
+  runtime contract
 
 Report back with:
 - what changed
 - changed files
 - tests run
 - what operator capabilities the web UI now exposes
+- which maintained endpoints/snapshots the UI now depends on
 ```
 
 ## Slice 6: Security Hardening
@@ -356,18 +500,21 @@ Constraints:
 - do not build multi-tenant architecture in this slice
 - do not shift trust decisions into adapters
 - do not broaden into general infra/security theory
+- do not leak secrets in traces, snapshots, or operator-facing structured output
 
 Acceptance criteria:
 - operator-visible traces/logs redact sensitive values
 - untrusted tool/MCP content is treated more defensively
 - actor/session attribution is clearer in maintained paths
 - focused runtime/web tests pass
+- maintained trace and operator surfaces were explicitly checked for redaction
 
 Report back with:
 - what changed
 - changed files
 - tests run
 - what concrete security boundaries are now enforced
+- where redaction/trust-boundary checks were verified
 ```
 
 ## Review Protocol
@@ -386,3 +533,5 @@ Review criteria:
 - no adapter-local policy drift
 - canonical docs still truthful
 - no scope creep into deferred embodiment or broad autonomy work
+- no duplicate canonical authorities created
+- maintained-path behavior explicitly preserved and verified

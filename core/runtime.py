@@ -45,6 +45,7 @@ from tools.runner import ToolRunner
 
 from .persona_engine import PersonaEngine
 from .router import Router
+from .trace import TraceEmitter
 
 
 @dataclass(slots=True)
@@ -229,6 +230,7 @@ class GestaltRuntime:
     context_cache_max_per_session: int = 3
     scheduler: Any = None
     _goal_scheduling_enabled: bool = False
+    trace_emitter: TraceEmitter = field(default_factory=TraceEmitter)
 
     async def handle_event(self, event: Event) -> Response:
         envelope = await self.handle_event_envelope(event)
@@ -309,6 +311,9 @@ class GestaltRuntime:
         """Release runtime-owned transient state for adapter shutdown."""
         self.session_states.clear()
         self.context_cache.clear()
+        # Clear trace emitter state
+        if hasattr(self, "trace_emitter") and self.trace_emitter:
+            self.trace_emitter.clear_all()
         # Close provider router to release aiohttp sessions
         if hasattr(self, "provider_router") and self.provider_router:
             close_fn = getattr(self.provider_router, "close", None)
@@ -324,6 +329,21 @@ class GestaltRuntime:
         event.session_id = session_id
         session = self._get_or_create_session(event)
         mutations = self._apply_event_metadata(session=session, event=event)
+
+        # Emit adapter ingress trace
+        ingress_span_id = str(uuid.uuid4())
+        self.trace_emitter.emit_adapter_ingress(
+            session_id=session_id,
+            span_id=ingress_span_id,
+            data={
+                "event_type": event.type,
+                "platform": event.platform,
+                "text_preview": event.text[:200] if event.text else "",
+                "kind": event.kind,
+                "user_id": event.user_id,
+                "room_id": event.room_id,
+            },
+        )
 
         is_command = event.kind == EventKind.COMMAND.value or event.type == "command"
         if event.text.strip().startswith("/"):
@@ -406,6 +426,23 @@ class GestaltRuntime:
             persona_id=persona.persona_id, room_id=event.room_id or "default"
         )
         memory_context = await self.memory_manager.load_context(namespace=namespace, limit=12)
+        
+        # Emit memory assembly trace
+        root_span_id = str(uuid.uuid4())
+        mem_span_id = str(uuid.uuid4())
+        self.trace_emitter.emit_memory_assembly(
+            session_id=session.session_id,
+            span_id=mem_span_id,
+            memory_type="context_build",
+            data={
+                "persona_id": persona.persona_id,
+                "message_count": len(memory_context.recent_history),
+                "summary_length": len(memory_context.summary),
+                "fact_count": len(memory_context.facts),
+            },
+            parent_span_id=root_span_id,
+        )
+        
         rag_results = await self.rag_store.search(
             persona_id=persona.persona_id,
             room_id=namespace.room_id,
@@ -458,7 +495,7 @@ class GestaltRuntime:
         else:
             provider_messages.append(ProviderMessage(role="user", content=event.text))
 
-        root_span_id = str(uuid.uuid4())
+        # root_span_id already set above
         decision_trace = self._build_span_trace(
             trace_type="decision",
             session_id=session.session_id,
@@ -470,6 +507,20 @@ class GestaltRuntime:
                 "network_enabled": self.tool_policy.network_enabled,
                 "dangerous_enabled": self.tool_policy.dangerous_enabled,
             },
+        )
+        
+        # Emit provider request trace via emitter
+        req_span_id = str(uuid.uuid4())
+        self.trace_emitter.emit_provider_request(
+            session_id=session.session_id,
+            span_id=req_span_id,
+            provider=provider_name,
+            model=model,
+            data={
+                "tool_count": len(tool_schemas),
+                "message_count": len(provider_messages),
+            },
+            parent_span_id=root_span_id,
         )
 
         # Initialize budget tracking
@@ -507,6 +558,16 @@ class GestaltRuntime:
 
         # If budget exceeded, return early with error
         if budget_exceeded:
+            # Emit error trace
+            err_span_id = str(uuid.uuid4())
+            self.trace_emitter.emit_error(
+                session_id=session.session_id,
+                span_id=err_span_id,
+                error_code="BUDGET_EXCEEDED",
+                message="Context budget exceeded",
+                data=session.context_budget.get_status() if session.context_budget else {},
+                parent_span_id=root_span_id,
+            )
             error_response = Response(
                 text="Context budget exceeded. Please check usage with /status.",
                 persona_id=session.persona_id or "system",
@@ -565,6 +626,23 @@ class GestaltRuntime:
                 "budget_status": session.context_budget.get_status() if session.context_budget else None,
             },
         )
+        
+        # Emit provider response trace via emitter
+        resp_span_id = str(uuid.uuid4())
+        self.trace_emitter.emit_provider_response(
+            session_id=session.session_id,
+            span_id=resp_span_id,
+            provider=provider_name,
+            model=model,
+            data={
+                "duration_ms": provider_duration,
+                "input_tokens": combined_usage.input_tokens,
+                "output_tokens": combined_usage.output_tokens,
+                "cached_input_tokens": combined_usage.cached_input_tokens,
+                "tool_call_count": len(provider_response.tool_calls),
+            },
+            parent_span_id=root_span_id,
+        )
 
         tool_calls = [
             ToolCall(name=t.name, arguments=t.arguments)
@@ -574,6 +652,16 @@ class GestaltRuntime:
         tool_traces: list[TraceOutput] = []
 
         if tool_calls:
+            # Emit tool call traces
+            for tc in tool_calls:
+                tool_span_id = str(uuid.uuid4())
+                self.trace_emitter.emit_tool_call(
+                    session_id=session.session_id,
+                    span_id=tool_span_id,
+                    tool_name=tc.name,
+                    arguments=tc.arguments,
+                    parent_span_id=root_span_id,
+                )
             executed_results, trace_dicts = await self.tool_runner.execute_with_trace(
                 persona_id=persona.persona_id,
                 environment=event.platform,
@@ -872,6 +960,18 @@ class GestaltRuntime:
                 )
                 for item in trace_dicts
             ]
+            
+            # Emit tool result traces via emitter
+            for result in executed_results:
+                result_span_id = str(uuid.uuid4())
+                self.trace_emitter.emit_tool_result(
+                    session_id=session.session_id,
+                    span_id=result_span_id,
+                    tool_name=result.name,
+                    output=str(result.output)[:200] if result.output else "",
+                    error=result.error,
+                    parent_span_id=root_span_id,
+                )
             tool_output_lines = []
             for result in executed_results:
                 if result.error:
@@ -999,6 +1099,18 @@ class GestaltRuntime:
     ]:
         registry = self._build_command_registry()
         parsed = registry.parse(event.text)
+        
+        # Emit command dispatch trace
+        command_name = ""
+        if not isinstance(parsed, ErrorOutput):
+            command_name = parsed.name if hasattr(parsed, 'name') else ""
+        cmd_span_id = str(uuid.uuid4())
+        self.trace_emitter.emit_command_dispatch(
+            session_id=session.session_id,
+            span_id=cmd_span_id,
+            command=command_name or "unknown",
+            args=parsed.args if hasattr(parsed, 'args') else {},
+        )
         if isinstance(parsed, ErrorOutput):
             return [parsed], []
 
@@ -1680,14 +1792,70 @@ class GestaltRuntime:
         session_id: str,
         limit: int = 10,
     ) -> dict[str, Any]:
+        """Get trace snapshot for a session.
+        
+        This method returns a unified view that includes both legacy
+        trace_spans and any traces collected in the snapshot.
+        """
+        from core.trace import TraceSnapshot
+
+        snapshot = TraceSnapshot(session_id=session_id, max_traces=200)
+        seen_span_ids: set[str] = set()
         session = self.session_states.get(session_id)
-        if session is None:
-            return {"session_id": session_id, "count": 0, "spans": []}
-        outputs = self._command_trace(session=session, limit=limit)
-        for output in outputs:
-            if isinstance(output, StructuredOutput) and output.kind == "command_trace":
-                return dict(output.data)
-        return {"session_id": session_id, "count": 0, "spans": []}
+
+        emitter_snapshot = self.trace_emitter.get_snapshot(session_id)
+        if emitter_snapshot is not None:
+            for span in emitter_snapshot.get_recent(limit=max(1, min(200, int(limit)))):
+                if span.span_id in seen_span_ids:
+                    continue
+                snapshot.add_trace(span)
+                seen_span_ids.add(span.span_id)
+
+        if session and session.trace_spans:
+            bounded = max(1, min(100, int(limit)))
+            for span in session.trace_spans[-bounded:]:
+                if span.span_id in seen_span_ids:
+                    continue
+                snapshot.add_trace(span)
+                seen_span_ids.add(span.span_id)
+
+        return snapshot.to_dict()
+
+    def get_all_traces(self) -> dict[str, Any]:
+        """Get trace snapshots for all sessions.
+
+        Returns a mapping of session_id to trace snapshot dict for all
+        sessions that have trace data.
+        """
+        from core.trace import TraceSnapshot
+
+        result: dict[str, Any] = {}
+        session_ids = set(self.session_states.keys())
+        session_ids.update(getattr(self.trace_emitter, "_snapshots", {}).keys())
+
+        for session_id in session_ids:
+            snapshot = TraceSnapshot(session_id=session_id, max_traces=200)
+            seen_span_ids: set[str] = set()
+            emitter_snapshot = self.trace_emitter.get_snapshot(session_id)
+            if emitter_snapshot is not None:
+                for span in emitter_snapshot.get_recent(limit=200):
+                    if span.span_id in seen_span_ids:
+                        continue
+                    snapshot.add_trace(span)
+                    seen_span_ids.add(span.span_id)
+
+            session = self.session_states.get(session_id)
+            if session and session.trace_spans:
+                for span in session.trace_spans:
+                    if span.span_id in seen_span_ids:
+                        continue
+                    snapshot.add_trace(span)
+                    seen_span_ids.add(span.span_id)
+
+            if snapshot.get_trace_count() > 0:
+                result[session_id] = snapshot.to_dict()
+
+        return result
 
     def get_presence_snapshot(
         self,
@@ -3523,6 +3691,20 @@ class GestaltRuntime:
             context_budget=ContextBudget.from_env(),
         )
         self.session_states[event.session_id] = created
+        
+        # Emit session lifecycle trace
+        session_span_id = str(uuid.uuid4())
+        self.trace_emitter.emit_session_start(
+            session_id=event.session_id,
+            span_id=session_span_id,
+            data={
+                "persona_id": persona_id,
+                "mode": mode,
+                "platform": event.platform,
+                "room_id": event.room_id or "default",
+            },
+        )
+        
         return created
 
     def _apply_event_metadata(
