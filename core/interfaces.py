@@ -11,7 +11,7 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Generic, List, TypeVar
 
 from core.schemas import Event, EventKind, Response
@@ -33,7 +33,7 @@ class AcoreEvent:
     type: str
     payload: dict
     source_adapter: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass(slots=True, frozen=True)

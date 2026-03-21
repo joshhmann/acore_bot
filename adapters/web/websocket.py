@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional
 
 from core.interfaces import PlatformFacts, build_runtime_event_from_facts
@@ -82,10 +82,10 @@ def _trace_payload(output: Any) -> Dict[str, Any]:
         "session_id": str(getattr(output, "session_id", "") or ""),
         "span_id": str(getattr(output, "span_id", "") or ""),
         "parent_span_id": getattr(output, "parent_span_id", None),
-        "start_ts": getattr(output, "start_ts", datetime.utcnow()).isoformat()
+        "start_ts": getattr(output, "start_ts", datetime.now(timezone.utc)).isoformat()
         if hasattr(getattr(output, "start_ts", None), "isoformat")
         else str(getattr(output, "start_ts", "")),
-        "end_ts": getattr(output, "end_ts", datetime.utcnow()).isoformat()
+        "end_ts": getattr(output, "end_ts", datetime.now(timezone.utc)).isoformat()
         if hasattr(getattr(output, "end_ts", None), "isoformat")
         else str(getattr(output, "end_ts", "")),
         "data": data,
@@ -625,7 +625,7 @@ class WebSocketManager:
                         text=message_text,
                         author_id=user_id,
                         channel_id=client_id,
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(timezone.utc),
                     )
                     event = AcoreEvent(
                         type="message",
@@ -666,7 +666,7 @@ class WebSocketManager:
                     {
                         "type": "ack",
                         "message_id": id(data),
-                        "timestamp": datetime.utcnow().isoformat(),
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
                 )
 

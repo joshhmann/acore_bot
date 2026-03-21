@@ -5,7 +5,7 @@ in the core services, enabling multi-platform support and MCP compatibility.
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 
@@ -25,7 +25,7 @@ class AcoreMessage:
     text: str
     author_id: str
     channel_id: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     attachments: List[Dict[str, Any]] = field(default_factory=list)
 
 
@@ -114,7 +114,7 @@ class PersonaSpokeEvent:
     display_name: str
     avatar_url: str
     content: str
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
