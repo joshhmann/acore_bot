@@ -19,10 +19,12 @@ bot.log
 
 # Test files and outputs
 test_*.py
+!tests/**/test_*.py
 test_*.wav
 test_*.txt
 test_profiles/
 check_*.py
+!tests/**/check_*.py
 nul
 
 # RVC/TTS model files (large binaries)
