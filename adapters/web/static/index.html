@@ -132,6 +132,106 @@
             font-size: 12px;
             line-height: 1.4;
         }
+
+        .approvals-panel {
+            padding: 16px 20px;
+            background: #f8fafc;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .approvals-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .approvals-header h2 {
+            color: #212529;
+            font-size: 16px;
+        }
+
+        .approvals-header .meta {
+            color: #6c757d;
+            font-size: 13px;
+        }
+
+        .approval-list {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .approval-item {
+            background: white;
+            border: 1px solid #e6e9ef;
+            border-radius: 14px;
+            padding: 12px 14px;
+            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
+        }
+
+        .approval-item.empty {
+            color: #6c757d;
+            font-size: 14px;
+        }
+
+        .approval-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 12px;
+            margin-bottom: 6px;
+        }
+
+        .approval-tool {
+            color: #212529;
+            font-size: 15px;
+            font-weight: 700;
+        }
+
+        .approval-id {
+            color: #6c757d;
+            font-size: 12px;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+
+        .approval-meta {
+            color: #495057;
+            font-size: 13px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .approval-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+
+        .approval-actions button {
+            border: none;
+            border-radius: 999px;
+            padding: 8px 14px;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+        }
+
+        .approval-actions button.approve {
+            background: #198754;
+            color: white;
+        }
+
+        .approval-actions button.reject {
+            background: #dc3545;
+            color: white;
+        }
+
+        .approval-actions button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
         
         .message {
             max-width: 80%;
@@ -287,6 +387,16 @@
                 <div class="meta" id="providerModel">No model reported</div>
             </div>
         </div>
+
+        <div class="approvals-panel" id="approvalsPanel">
+            <div class="approvals-header">
+                <h2>Pending Approvals</h2>
+                <div class="meta" id="approvalSummary">Checking runtime approval queue</div>
+            </div>
+            <div class="approval-list" id="approvalList">
+                <div class="approval-item empty">No pending approvals</div>
+            </div>
+        </div>
         
         <div class="messages" id="messages">
             <div class="message bot">
@@ -319,8 +429,11 @@
         const providerCachedEl = document.getElementById('providerCached');
         const providerUsageEl = document.getElementById('providerUsage');
         const providerModelEl = document.getElementById('providerModel');
+        const approvalSummaryEl = document.getElementById('approvalSummary');
+        const approvalListEl = document.getElementById('approvalList');
         
         let isProcessing = false;
+        let approvalActionInFlight = false;
 
         function runtimePayload() {
             return {
@@ -353,6 +466,49 @@
             providerModelEl.textContent = `${statusSnapshot?.provider || 'unknown'} · ${statusSnapshot?.model || 'unknown'}`;
         }
 
+        function escapeHtml(value) {
+            return String(value)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function formatApprovalArgs(args) {
+            if (!args || typeof args !== 'object' || Object.keys(args).length === 0) {
+                return 'No arguments';
+            }
+            return Object.entries(args)
+                .map(([key, value]) => `${key}: ${typeof value === 'string' ? value : JSON.stringify(value)}`)
+                .join('\n');
+        }
+
+        function updateApprovalPanel(statusSnapshot) {
+            const pendingApprovals = statusSnapshot?.pending_approvals || {};
+            const items = Array.isArray(pendingApprovals.items) ? pendingApprovals.items : [];
+            approvalSummaryEl.textContent = `${pendingApprovals.count || 0} pending approval${(pendingApprovals.count || 0) === 1 ? '' : 's'}`;
+
+            if (items.length === 0) {
+                approvalListEl.innerHTML = '<div class="approval-item empty">No pending approvals</div>';
+                return;
+            }
+
+            approvalListEl.innerHTML = items.map((item) => `
+                <div class="approval-item">
+                    <div class="approval-item-header">
+                        <div class="approval-tool">${escapeHtml(item.tool_name || 'unknown_tool')}</div>
+                        <div class="approval-id">${escapeHtml(item.approval_id || '')}</div>
+                    </div>
+                    <div class="approval-meta">${escapeHtml(formatApprovalArgs(item.arguments || {}))}</div>
+                    <div class="approval-actions">
+                        <button class="approve" onclick="applyApproval('${escapeHtml(item.approval_id || '')}')">Apply</button>
+                        <button class="reject" onclick="rejectApproval('${escapeHtml(item.approval_id || '')}')">Reject</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
         async function refreshRuntimePanel() {
             try {
                 const payload = runtimePayload();
@@ -376,10 +532,46 @@
                 const statusData = await statusResponse.json();
                 const contextData = await contextResponse.json();
                 updateRuntimePanel(statusData.snapshot, contextData.snapshot);
+                updateApprovalPanel(statusData.snapshot);
             } catch (error) {
                 console.error('Runtime telemetry error:', error);
                 cacheReasonEl.textContent = 'Runtime telemetry unavailable';
+                approvalSummaryEl.textContent = 'Runtime approvals unavailable';
             }
+        }
+
+        async function submitApprovalAction(approvalId, action) {
+            if (!approvalId || approvalActionInFlight) return;
+            approvalActionInFlight = true;
+            try {
+                const response = await fetch(`/api/runtime/approvals/${action}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ...runtimePayload(),
+                        approval_id: approvalId
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to ${action} approval`);
+                }
+
+                await refreshRuntimePanel();
+            } catch (error) {
+                console.error(`Approval ${action} error:`, error);
+                showError(`Failed to ${action} approval ${approvalId}`);
+            } finally {
+                approvalActionInFlight = false;
+            }
+        }
+
+        async function applyApproval(approvalId) {
+            await submitApprovalAction(approvalId, 'apply');
+        }
+
+        async function rejectApproval(approvalId) {
+            await submitApprovalAction(approvalId, 'reject');
         }
         
         // Load personas on startup

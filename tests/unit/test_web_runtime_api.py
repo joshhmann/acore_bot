@@ -722,6 +722,9 @@ def test_root_ui_includes_runtime_panel(monkeypatch: pytest.MonkeyPatch) -> None
     assert response.status_code == 200
     assert "Cache Model" in response.text
     assert "Saved Tokens" in response.text
+    assert "Pending Approvals" in response.text
+    assert "applyApproval" in response.text
+    assert "rejectApproval" in response.text
     assert "refreshRuntimePanel" in response.text
 
 
