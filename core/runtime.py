@@ -32,8 +32,10 @@ from core.schemas import (
     VoiceOutputIntent,
 )
 from memory.base import MemoryNamespace
+from memory.coordinator import MemoryCoordinator
 from memory.manager import MemoryContextBundle, MemoryManager
 from memory.rag import RAGStore
+from memory.types import Fact, ShortTermTurn, TypedMemoryContext
 from memory.summary import DeterministicSummary
 from personas.loader import PersonaCatalog, PersonaDefinition
 from providers.base import ProviderMessage, ProviderRequestHints, ProviderUsage
@@ -231,6 +233,7 @@ class GestaltRuntime:
     scheduler: Any = None
     _goal_scheduling_enabled: bool = False
     trace_emitter: TraceEmitter = field(default_factory=TraceEmitter)
+    memory_coordinator: MemoryCoordinator | None = None
 
     async def handle_event(self, event: Event) -> Response:
         envelope = await self.handle_event_envelope(event)
@@ -306,6 +309,149 @@ class GestaltRuntime:
         self.context_cache_ttl_seconds = max(30, ttl_raw)
         self.context_cache_max_entries = max(20, max_entries_raw)
         self.context_cache_max_per_session = max(1, max_per_session_raw)
+        # Initialize memory_coordinator if not provided (backward compatibility)
+        if self.memory_coordinator is None:
+            self.memory_coordinator = MemoryCoordinator(manager=self.memory_manager)
+
+    # ------------------------------------------------------------------
+    # Memory Coordinator methods (Phase 3 Slice 3: Memory Scoping)
+    # ------------------------------------------------------------------
+
+    async def get_typed_memory_context(
+        self,
+        session_id: str,
+        namespace: MemoryNamespace,
+        limit: int = 12,
+    ) -> TypedMemoryContext:
+        """Get typed memory context for a session.
+
+        This method provides access to strongly-typed memory context through
+        the memory coordinator. It returns recent turns, facts, preferences,
+        procedures, and action history as typed objects.
+
+        Args:
+            session_id: Session identifier for tracking
+            namespace: Memory namespace (persona_id + room_id)
+            limit: Maximum number of recent turns to load
+
+        Returns:
+            TypedMemoryContext with all typed memory elements
+        """
+        del session_id  # Reserved for future session-scoped context
+        if self.memory_coordinator is None:
+            raise RuntimeError("Memory coordinator not initialized")
+        return await self.memory_coordinator.get_typed_context(
+            namespace=namespace, limit=limit
+        )
+
+    async def record_turn(
+        self,
+        session_id: str,
+        namespace: MemoryNamespace,
+        role: str,
+        content: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> "ShortTermTurn":
+        """Record a conversation turn via the coordinator.
+
+        Args:
+            session_id: Session identifier for grouping
+            namespace: Memory namespace
+            role: Speaker role ("user", "assistant", or "system")
+            content: The message content
+            metadata: Additional turn metadata
+
+        Returns:
+            The created ShortTermTurn
+        """
+        if self.memory_coordinator is None:
+            raise RuntimeError("Memory coordinator not initialized")
+        return await self.memory_coordinator.record_turn(
+            namespace=namespace,
+            role=role,
+            content=content,
+            session_id=session_id,
+            metadata=metadata,
+        )
+
+    async def store_memory_fact(
+        self,
+        session_id: str,
+        namespace: MemoryNamespace,
+        content: str,
+        source: str = "runtime",
+        confidence: float = 1.0,
+    ) -> "Fact":
+        """Store a fact via the coordinator.
+
+        Args:
+            session_id: Session identifier for tracking
+            namespace: Memory namespace
+            content: The fact content
+            source: Origin of the fact
+            confidence: Reliability score (0.0-1.0)
+
+        Returns:
+            The created Fact
+        """
+        del session_id  # Reserved for future session-scoped tracking
+        if self.memory_coordinator is None:
+            raise RuntimeError("Memory coordinator not initialized")
+        from memory.types import MemoryScope
+
+        return await self.memory_coordinator.store_fact(
+            namespace=namespace,
+            content=content,
+            source=source,
+            confidence=confidence,
+            scope=MemoryScope.PERSONA,
+        )
+
+    async def get_memory_facts(
+        self,
+        session_id: str,
+        namespace: MemoryNamespace,
+        limit: int = 50,
+    ) -> list["Fact"]:
+        """Get facts via the coordinator.
+
+        Args:
+            session_id: Session identifier for tracking
+            namespace: Memory namespace
+            limit: Maximum number of facts to return
+
+        Returns:
+            List of Facts
+        """
+        del session_id  # Reserved for future session-scoped filtering
+        if self.memory_coordinator is None:
+            raise RuntimeError("Memory coordinator not initialized")
+        from memory.types import MemoryScope
+
+        return await self.memory_coordinator.get_facts(
+            namespace=namespace,
+            scope=MemoryScope.PERSONA,
+            limit=limit,
+        )
+
+    async def to_memory_context_bundle(
+        self,
+        typed_context: TypedMemoryContext,
+    ) -> MemoryContextBundle:
+        """Convert TypedMemoryContext to legacy MemoryContextBundle.
+
+        This helper enables backward compatibility with existing code that
+        expects the legacy bundle format.
+
+        Args:
+            typed_context: The typed memory context to convert
+
+        Returns:
+            MemoryContextBundle for backward compatibility
+        """
+        if self.memory_coordinator is None:
+            raise RuntimeError("Memory coordinator not initialized")
+        return self.memory_coordinator.to_memory_context_bundle(typed_context)
 
     async def close(self) -> None:
         """Release runtime-owned transient state for adapter shutdown."""

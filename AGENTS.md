@@ -1,6 +1,6 @@
 # ACORE BOT AGENT GUIDE
 
-Last updated: 2026-02-28 PST
+Last updated: 2026-03-22 PST
 Scope: root-level instructions for coding agents.
 
 ## Purpose
@@ -128,6 +128,64 @@ Notes:
 - During iteration, run the smallest relevant tests first (single-file/single-test).
 - Before finalizing non-trivial changes, run `uv run pytest -m unit -v --tb=short` at minimum.
 - For command/tooling changes, run impacted scripts under `scripts/`.
+
+## External Agent Guardrails
+Use this section for delegated coding agents such as Kimi or other sub-agents.
+
+### Required Reading Before Editing
+- Read the relevant canonical docs first:
+  - `docs/STATUS.md`
+  - `docs/ARCHITECTURE.md`
+  - `docs/RUNTIME_API.md`
+  - `docs/VISION.md` if the task touches product direction
+- If the task comes from `docs/research/`, treat research docs as supporting context only.
+- Re-check canonical docs before claiming completion if the change touches runtime contracts, memory, tracing, tools, auth, or adapter boundaries.
+
+### Non-Negotiable Invariants
+- The runtime is the single authority for sessions, memory coordination, provider routing, tool policy, traces, and persona/session state.
+- Maintained adapters stay thin: parse -> normalize -> runtime -> render.
+- Do not create a second authority for an existing concept.
+  - If a canonical type/module already exists, extend it there.
+  - Do not redefine runtime contracts, trace models, memory models, or adapter SDK types in adapter modules.
+- Do not move policy into adapters, web UI, or helper wrappers.
+- Do not reintroduce `services/*` authority into maintained runtime-first paths.
+- Preserve maintained behavior unless the task explicitly calls for behavior change.
+
+### Forbidden Patterns
+- Do not define duplicate dataclasses/enums/contracts for concepts already owned in `core/*`, `memory/*`, `tools/*`, or other canonical modules.
+- Do not change base-contract semantics in one implementation only.
+  - If a shared interface changes, update the canonical interface centrally and keep implementations consistent.
+- Do not hardcode defaults where the maintained path already uses config, environment, or runtime resolution.
+- Do not broaden a slice into unrelated refactors under the guise of cleanup.
+- Do not treat research docs as canonical product truth.
+
+### Required Self-Checks Before Completion
+- Run a duplicate-authority search for any core type you touched.
+  - Example:
+    - `rg -n "^class (RuntimeDecision|AdapterConfig|AdapterLifecycleContract|TraceSpan|TraceSummary)\\b" core adapters memory tools`
+- Verify public/helper signatures against real call sites.
+  - If you add or change a helper API, check every touched call site for exact argument compatibility.
+- Confirm at least one maintained-path integration test exercises the new behavior.
+  - Isolated unit tests for a helper module are not enough on their own.
+- Explicitly review whether the change preserved existing maintained behavior at the runtime boundary.
+
+### Required Output From Delegated Agents
+- What changed
+- Changed files
+- Tests run
+- Which canonical authority was extended
+- Which maintained behavior was preserved
+- Any remaining limitations or deferred follow-ups
+
+### Scope Discipline
+- Prefer the smallest change that centralizes authority and preserves maintained behavior.
+- For runtime-core work, avoid parallel slices that touch the same authority surfaces:
+  - `core/runtime.py`
+  - `core/interfaces.py`
+  - `core/schemas.py`
+  - `memory/manager.py`
+  - `tools/*`
+- If a task would require inventing a second abstraction stack to “make progress,” stop and extend the canonical authority instead.
 
 ## CI / Hook Ground Truth
 - `.github/workflows/test.yml` runs:

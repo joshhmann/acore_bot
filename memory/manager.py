@@ -2,13 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+from datetime import datetime
 from typing import Any
 
 from memory.base import MemoryNamespace, MemoryStore
 from memory.summary import DeterministicSummary
 from memory.episodes import EpisodicMemory, Episode
+from memory.types import ActionRecord, Fact, Preference, Procedure
 from personas.state import PersonaState
+
+MAX_TYPED_FACTS = 100
+MAX_TYPED_PREFERENCES = 100
+MAX_TYPED_PROCEDURES = 50
+MAX_TYPED_ACTIONS = 100
 
 
 @dataclass(slots=True)
@@ -31,6 +38,17 @@ class MemoryManager:
             persona_id=f"persona_state:{namespace.persona_id}",
             room_id=namespace.room_id,
         )
+
+    def _typed_state_namespace(self, namespace: MemoryNamespace) -> MemoryNamespace:
+        """Get namespace for typed state storage."""
+        return MemoryNamespace(
+            persona_id=f"typed_state:{namespace.persona_id}",
+            room_id=namespace.room_id,
+        )
+
+    def get_shared_namespace(self, room_id: str) -> MemoryNamespace:
+        """Get the canonical shared memory namespace for a room."""
+        return MemoryNamespace(persona_id="_shared_", room_id=room_id)
 
     async def load_context(
         self,
@@ -218,3 +236,174 @@ class MemoryManager:
             )
 
         await self.episodic_memory.initialize()
+
+    # Step 3A: Typed persistence methods
+
+    def _serialize_record(self, record: Any) -> dict[str, Any]:
+        """Serialize a dataclass record to a dictionary, handling datetime."""
+        data = asdict(record)
+
+        def convert_datetime(obj: Any) -> Any:
+            if isinstance(obj, datetime):
+                return obj.isoformat()
+            if isinstance(obj, dict):
+                return {k: convert_datetime(v) for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [convert_datetime(item) for item in obj]
+            return obj
+
+        return convert_datetime(data)
+
+    def _deserialize_datetime(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Deserialize ISO format strings back to datetime where applicable."""
+        datetime_fields = {"created_at", "updated_at", "timestamp"}
+
+        for field in datetime_fields:
+            if field in data and isinstance(data[field], str):
+                try:
+                    data[field] = datetime.fromisoformat(data[field])
+                except ValueError:
+                    pass  # Keep as string if parsing fails
+        return data
+
+    async def _load_typed_state(
+        self, namespace: MemoryNamespace
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Load the typed state container from storage."""
+        state_ns = self._typed_state_namespace(namespace)
+        payload = await self.store.get_state(state_ns)
+        return {
+            "facts": list(payload.get("facts") or []),
+            "preferences": list(payload.get("preferences") or []),
+            "procedures": list(payload.get("procedures") or []),
+            "actions": list(payload.get("actions") or []),
+        }
+
+    async def _save_typed_state(
+        self,
+        namespace: MemoryNamespace,
+        state: dict[str, list[dict[str, Any]]],
+    ) -> None:
+        """Save the typed state container to storage."""
+        state_ns = self._typed_state_namespace(namespace)
+        await self.store.set_state(state_ns, state)
+
+    # Fact Records
+
+    async def store_fact_record(
+        self,
+        namespace: MemoryNamespace,
+        fact: Fact,
+    ) -> None:
+        """Store a typed Fact record with full metadata."""
+        state = await self._load_typed_state(namespace)
+        state["facts"].append(self._serialize_record(fact))
+        state["facts"] = state["facts"][-MAX_TYPED_FACTS:]
+        await self._save_typed_state(namespace, state)
+
+    async def get_fact_records(
+        self,
+        namespace: MemoryNamespace,
+        scope: str | None = None,
+        limit: int = 100,
+    ) -> list[Fact]:
+        """Get typed Fact records, optionally filtered by scope."""
+        state = await self._load_typed_state(namespace)
+        facts_data = state["facts"][-limit:]
+
+        records = []
+        for data in facts_data:
+            data = self._deserialize_datetime(data)
+            if scope is None or data.get("scope") == scope:
+                records.append(Fact(**data))
+        return records
+
+    # Preference Records
+
+    async def store_preference_record(
+        self,
+        namespace: MemoryNamespace,
+        preference: Preference,
+    ) -> None:
+        """Store a typed Preference record with full metadata."""
+        state = await self._load_typed_state(namespace)
+        state["preferences"].append(self._serialize_record(preference))
+        state["preferences"] = state["preferences"][-MAX_TYPED_PREFERENCES:]
+        await self._save_typed_state(namespace, state)
+
+    async def get_preference_records(
+        self,
+        namespace: MemoryNamespace,
+        user_id: str | None = None,
+        scope: str | None = None,
+    ) -> list[Preference]:
+        """Get typed Preference records, optionally filtered by user_id and scope."""
+        state = await self._load_typed_state(namespace)
+        prefs_data = state["preferences"]
+
+        records = []
+        for data in prefs_data:
+            data = self._deserialize_datetime(data)
+            if user_id is not None and data.get("user_id") != user_id:
+                continue
+            if scope is not None and data.get("scope") != scope:
+                continue
+            records.append(Preference(**data))
+        return records
+
+    # Procedure Records
+
+    async def store_procedure_record(
+        self,
+        namespace: MemoryNamespace,
+        procedure: Procedure,
+    ) -> None:
+        """Store a typed Procedure record with full metadata."""
+        state = await self._load_typed_state(namespace)
+        state["procedures"].append(self._serialize_record(procedure))
+        state["procedures"] = state["procedures"][-MAX_TYPED_PROCEDURES:]
+        await self._save_typed_state(namespace, state)
+
+    async def get_procedure_records(
+        self,
+        namespace: MemoryNamespace,
+        scope: str | None = None,
+    ) -> list[Procedure]:
+        """Get typed Procedure records, optionally filtered by scope."""
+        state = await self._load_typed_state(namespace)
+        procs_data = state["procedures"]
+
+        records = []
+        for data in procs_data:
+            data = self._deserialize_datetime(data)
+            if scope is None or data.get("scope") == scope:
+                records.append(Procedure(**data))
+        return records
+
+    # Action Records
+
+    async def store_action_record(
+        self,
+        namespace: MemoryNamespace,
+        action: ActionRecord,
+    ) -> None:
+        """Store a typed ActionRecord with full metadata."""
+        state = await self._load_typed_state(namespace)
+        state["actions"].append(self._serialize_record(action))
+        state["actions"] = state["actions"][-MAX_TYPED_ACTIONS:]
+        await self._save_typed_state(namespace, state)
+
+    async def get_action_records(
+        self,
+        namespace: MemoryNamespace,
+        limit: int = 100,
+    ) -> list[ActionRecord]:
+        """Get typed ActionRecord entries."""
+        state = await self._load_typed_state(namespace)
+        actions_data = state["actions"][-limit:]
+
+        records = []
+        for data in actions_data:
+            data = self._deserialize_datetime(data)
+            records.append(ActionRecord(**data))
+        return records

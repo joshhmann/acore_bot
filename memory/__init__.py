@@ -15,6 +15,7 @@ from .recall_tuner import (
     create_permissive_tuner,
 )
 from .episodes import Episode, EpisodicMemory, EpisodicMemoryConfig, EmbeddingProvider
+from .coordinator import MemoryCoordinator, SharedMemoryTier
 
 __all__ = [
     "MemoryNamespace",
@@ -44,4 +45,7 @@ __all__ = [
     "EpisodicMemory",
     "EpisodicMemoryConfig",
     "EmbeddingProvider",
+    # Phase 3 Slice 3: Memory Coordinator
+    "MemoryCoordinator",
+    "SharedMemoryTier",
 ]
