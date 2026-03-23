@@ -77,6 +77,10 @@ class RuntimeSocialModeRequest(RuntimeContextRequest):
     social_mode: str = Field(..., description="Social mode override")
 
 
+class RuntimeApprovalRequest(RuntimeContextRequest):
+    approval_id: str = Field(..., description="Pending approval identifier")
+
+
 class RuntimeTraceRequest(BaseModel):
     session_id: str = Field(default="web:main", description="Runtime session id")
     limit: int = Field(default=10, description="Trace span limit")

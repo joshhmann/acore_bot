@@ -353,6 +353,15 @@ def test_runtime_snapshot_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     trace = client.post(
         "/api/runtime/trace", json={"session_id": "web:main", "limit": 3}
     )
+    approvals = client.post("/api/runtime/approvals", json=payload)
+    approval_apply = client.post(
+        "/api/runtime/approvals/apply",
+        json={**payload, "approval_id": "approval-1"},
+    )
+    approval_reject = client.post(
+        "/api/runtime/approvals/reject",
+        json={**payload, "approval_id": "approval-1"},
+    )
     presence = client.post("/api/runtime/presence", json=payload)
     social = client.post("/api/runtime/social", json=payload)
     social_mode = client.post(
@@ -373,6 +382,9 @@ def test_runtime_snapshot_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
     assert context.json()["snapshot"]["last_cache_reason"] == "stable_prefix_reused"
     assert context_reset.json()["snapshot"]["cleared"] == 1
     assert trace.json()["trace"]["spans"][0]["limit"] == 3
+    assert approvals.json()["outputs"][0]["text"] == "echo:/approvals"
+    assert approval_apply.json()["outputs"][0]["text"] == "echo:/apply approval-1"
+    assert approval_reject.json()["outputs"][0]["text"] == "echo:/reject approval-1"
     assert presence.json()["snapshot"]["avatar_format"] == "vrm"
     assert social.json()["snapshot"]["effective_mode"] == "default"
     assert social_mode.json()["snapshot"]["override"] == "logic"

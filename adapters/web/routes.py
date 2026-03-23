@@ -17,13 +17,14 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from core.schemas import EventKind
+from core.schemas import Event, EventKind
 
 from .api_schema import (
     ChatAsyncRequest,
     ChatRequest,
     ChatResponse,
     HealthResponse,
+    RuntimeApprovalRequest,
     PersonaInfo,
     RuntimeContextRequest,
     RuntimeEventRequest,
@@ -140,6 +141,58 @@ def create_router(
 
     def _default_persona_id() -> str:
         return str(getattr(runtime.router, "default_persona_id", "default") or "default")
+
+    async def _dispatch_runtime_command(
+        request: RuntimeContextRequest,
+        http_request: Request,
+        *,
+        text: str,
+    ) -> dict[str, Any]:
+        client_scope = extract_request_client_scope(http_request)
+        claimed_user_id = extract_request_user_id(http_request)
+        user_id = resolve_request_actor_id(
+            http_request,
+            auth=auth,
+            client_scope=client_scope,
+            platform=request.platform,
+        )
+        payload = _runtime_context_payload(
+            request,
+            client_scope=client_scope,
+            user_id=user_id,
+            auth_enabled=auth.is_enabled,
+            claimed_user_id=claimed_user_id,
+        )
+        event = RuntimeEventRequest(
+            **payload,
+            text=text,
+            kind=EventKind.COMMAND.value,
+        )
+        envelope = await runtime.handle_event_envelope(
+            Event(
+                type="command",
+                kind=EventKind.COMMAND.value,
+                text=event.text,
+                user_id=str(payload["flags"].get("user_id") or "web_user"),
+                room_id=event.room_id,
+                platform=event.platform,
+                session_id=event.session_id,
+                message_id=event.message_id,
+                metadata={
+                    "persona_id": event.persona_id,
+                    "mode": event.mode,
+                    "flags": dict(event.flags),
+                },
+            )
+        )
+        return {
+            "event_id": envelope.event_id,
+            "session_id": envelope.session_id,
+            "outputs": [_serialize_output(out) for out in envelope.outputs],
+            "mutations": [
+                _serialize_mutation(mutation) for mutation in envelope.mutations
+            ],
+        }
 
     @router.get("/health", response_model=HealthResponse)
     async def health_check() -> HealthResponse:
@@ -580,6 +633,48 @@ def create_router(
                 session_id=request.session_id, limit=max(1, int(request.limit))
             )
         }
+
+    @router.post("/api/runtime/approvals")
+    async def runtime_approvals(
+        request: RuntimeContextRequest, http_request: Request
+    ) -> dict[str, Any]:
+        """List pending runtime approvals via command surface."""
+        _require_auth(http_request)
+        return await _dispatch_runtime_command(
+            request,
+            http_request,
+            text="/approvals",
+        )
+
+    @router.post("/api/runtime/approvals/apply")
+    async def runtime_approvals_apply(
+        request: RuntimeApprovalRequest, http_request: Request
+    ) -> dict[str, Any]:
+        """Approve and execute a pending runtime approval."""
+        _require_auth(http_request)
+        approval_id = str(request.approval_id or "").strip()
+        if not approval_id:
+            raise HTTPException(status_code=400, detail="approval_id is required")
+        return await _dispatch_runtime_command(
+            request,
+            http_request,
+            text=f"/apply {approval_id}",
+        )
+
+    @router.post("/api/runtime/approvals/reject")
+    async def runtime_approvals_reject(
+        request: RuntimeApprovalRequest, http_request: Request
+    ) -> dict[str, Any]:
+        """Reject and clear a pending runtime approval."""
+        _require_auth(http_request)
+        approval_id = str(request.approval_id or "").strip()
+        if not approval_id:
+            raise HTTPException(status_code=400, detail="approval_id is required")
+        return await _dispatch_runtime_command(
+            request,
+            http_request,
+            text=f"/reject {approval_id}",
+        )
 
     @router.post("/api/runtime/presence")
     async def runtime_presence(

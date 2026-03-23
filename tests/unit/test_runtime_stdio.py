@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 import pytest
@@ -10,9 +11,16 @@ from gestalt.runtime_stdio import _dispatch, run_stdio_server
 pytestmark = pytest.mark.unit
 
 
+@dataclass(slots=True)
+class _FakeOutput:
+    text: str
+    persona_id: str = ""
+
+
 class _FakeRuntime:
     def __init__(self) -> None:
         self.closed = False
+        self.received_events: list[Any] = []
 
     def list_commands(self) -> list[dict[str, Any]]:
         return [
@@ -177,10 +185,16 @@ class _FakeRuntime:
         return self.get_social_state_snapshot(**kwargs)
 
     async def handle_event_envelope(self, event: Any):
+        self.received_events.append(event)
         class _Envelope:
             event_id = "evt-1"
             session_id = event.session_id
-            outputs = []
+            outputs = [
+                _FakeOutput(
+                    text=f"echo:{event.text}",
+                    persona_id=event.metadata.get("persona_id", "default"),
+                )
+            ]
             mutations = []
 
         return _Envelope()
@@ -315,6 +329,45 @@ async def test_runtime_stdio_context_snapshot_and_reset() -> None:
     assert snapshot["snapshot"]["entry_count"] == 1
     assert snapshot["snapshot"]["tokens_saved_estimate"] == 48
     assert reset["snapshot"]["cleared"] == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_stdio_approval_methods_dispatch_commands() -> None:
+    runtime = _FakeRuntime()
+
+    await _dispatch(
+        runtime,
+        {
+            "method": "get_approvals",
+            "params": {"session_id": "desktop:main", "persona_id": "tai"},
+        },
+    )
+    await _dispatch(
+        runtime,
+        {
+            "method": "apply_approval",
+            "params": {
+                "session_id": "desktop:main",
+                "persona_id": "tai",
+                "approval_id": "approval-1",
+            },
+        },
+    )
+    await _dispatch(
+        runtime,
+        {
+            "method": "reject_approval",
+            "params": {
+                "session_id": "desktop:main",
+                "persona_id": "tai",
+                "approval_id": "approval-1",
+            },
+        },
+    )
+
+    assert runtime.received_events[0].text == "/approvals"
+    assert runtime.received_events[1].text == "/apply approval-1"
+    assert runtime.received_events[2].text == "/reject approval-1"
 
 
 @pytest.mark.asyncio

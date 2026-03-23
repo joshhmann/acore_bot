@@ -65,6 +65,25 @@ async def _dispatch(runtime, payload: dict[str, Any]) -> dict[str, Any]:
     context = _request_context(args)
     session_id = context["session_id"]
     persona_id = context["persona_id"]
+
+    async def _dispatch_command(text: str) -> dict[str, Any]:
+        event = Event(
+            type="command",
+            kind=EventKind.COMMAND.value,
+            text=text,
+            user_id="stdio_user",
+            room_id=context["room_id"],
+            platform=context["platform"],
+            session_id=session_id,
+            metadata={
+                "persona_id": persona_id,
+                "mode": context["mode"],
+                "flags": dict(context["flags"]),
+            },
+        )
+        envelope = await runtime.handle_event_envelope(event)
+        return _serialize_envelope(envelope)
+
     if method == "get_status":
         snapshot = runtime.get_status_snapshot(**context)
         return {"snapshot": snapshot}
@@ -114,6 +133,18 @@ async def _dispatch(runtime, payload: dict[str, Any]) -> dict[str, Any]:
         }
     if method == "reset_social_state":
         return {"snapshot": runtime.reset_social_state(**context)}
+    if method == "get_approvals":
+        return await _dispatch_command("/approvals")
+    if method == "apply_approval":
+        approval_id = str(args.get("approval_id") or "").strip()
+        if not approval_id:
+            raise ValueError("approval_id is required")
+        return await _dispatch_command(f"/apply {approval_id}")
+    if method == "reject_approval":
+        approval_id = str(args.get("approval_id") or "").strip()
+        if not approval_id:
+            raise ValueError("approval_id is required")
+        return await _dispatch_command(f"/reject {approval_id}")
     if method == "help":
         command = str(args.get("command") or "").strip()
         text = f"/help {command}" if command else "/help"
@@ -138,22 +169,7 @@ async def _dispatch(runtime, payload: dict[str, Any]) -> dict[str, Any]:
     else:
         raise ValueError("Unknown method")
 
-    event = Event(
-        type="command",
-        kind=EventKind.COMMAND.value,
-        text=text,
-        user_id="stdio_user",
-        room_id=context["room_id"],
-        platform=context["platform"],
-        session_id=session_id,
-        metadata={
-            "persona_id": persona_id,
-            "mode": context["mode"],
-            "flags": dict(context["flags"]),
-        },
-    )
-    envelope = await runtime.handle_event_envelope(event)
-    return _serialize_envelope(envelope)
+    return await _dispatch_command(text)
 
 
 async def run_stdio_server(
