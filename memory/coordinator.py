@@ -642,6 +642,7 @@ class MemoryCoordinator:
         outcome: str,
         tool_name: str | None = None,
         session_id: str = "",
+        approval_state: str | None = None,
     ) -> ActionRecord:
         """Record an action taken by the system.
 
@@ -653,6 +654,7 @@ class MemoryCoordinator:
             outcome: Execution result ("success", "error", "pending")
             tool_name: Specific tool name if applicable
             session_id: Session in which action occurred
+            approval_state: Approval queue state, if applicable
 
         Returns:
             The created ActionRecord
@@ -667,6 +669,7 @@ class MemoryCoordinator:
             persona_id=namespace.persona_id,
             session_id=session_id,
             timestamp=datetime.now(timezone.utc),
+            approval_state=approval_state,
         )
 
         # Delegate to manager's typed storage

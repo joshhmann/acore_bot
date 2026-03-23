@@ -35,7 +35,7 @@ from memory.base import MemoryNamespace
 from memory.coordinator import MemoryCoordinator
 from memory.manager import MemoryContextBundle, MemoryManager
 from memory.rag import RAGStore
-from memory.types import Fact, ShortTermTurn, TypedMemoryContext
+from memory.types import ActionRecord, Fact, ShortTermTurn, TypedMemoryContext
 from memory.summary import DeterministicSummary
 from personas.loader import PersonaCatalog, PersonaDefinition
 from providers.base import ProviderMessage, ProviderRequestHints, ProviderUsage
@@ -66,6 +66,8 @@ class RuntimeSessionState:
     provider_override: str = ""
     model_override: str = ""
     pending_diffs: dict[str, dict[str, Any]] = field(default_factory=dict)
+    pending_tool_approvals: dict[str, dict[str, Any]] = field(default_factory=dict)
+    recent_action_records: list[ActionRecord] = field(default_factory=list)
     last_provider_at: datetime | None = None
     last_tool_at: datetime | None = None
     last_response_at: datetime | None = None
@@ -453,6 +455,155 @@ class GestaltRuntime:
             raise RuntimeError("Memory coordinator not initialized")
         return self.memory_coordinator.to_memory_context_bundle(typed_context)
 
+    @staticmethod
+    def _safe_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        return ToolRunner._safe_trace_args(name=tool_name, arguments=arguments)
+
+    async def _record_tool_action(
+        self,
+        *,
+        session: RuntimeSessionState,
+        room_id: str,
+        action_type: str,
+        tool_name: str | None,
+        inputs: dict[str, Any],
+        output: str,
+        outcome: str,
+        approval_state: str | None = None,
+    ) -> ActionRecord:
+        persona_id = session.persona_id or "default"
+        if self.memory_coordinator is not None:
+            record = await self.memory_coordinator.record_action(
+                namespace=MemoryNamespace(
+                    persona_id=persona_id,
+                    room_id=room_id or "default",
+                ),
+                action_type=action_type,
+                inputs=inputs,
+                output=output,
+                outcome=outcome,
+                tool_name=tool_name,
+                session_id=session.session_id,
+                approval_state=approval_state,
+            )
+        else:
+            record = ActionRecord(
+                action_id=str(uuid.uuid4()),
+                action_type=action_type,
+                tool_name=tool_name,
+                inputs=inputs,
+                output=output,
+                outcome=outcome,
+                persona_id=persona_id,
+                session_id=session.session_id,
+                timestamp=datetime.now(timezone.utc),
+                approval_state=approval_state,
+            )
+        session.recent_action_records.append(record)
+        session.recent_action_records = session.recent_action_records[-20:]
+        return record
+
+    async def _partition_tool_calls_for_approval(
+        self,
+        *,
+        event: Event,
+        session: RuntimeSessionState,
+        tool_calls: list[ToolCall],
+        parent_span_id: str | None = None,
+    ) -> tuple[list[ToolCall], list[ToolResult], list[dict[str, Any]], list[StructuredOutput]]:
+        executable_calls: list[ToolCall] = []
+        gated_results: list[ToolResult] = []
+        gated_traces: list[dict[str, Any]] = []
+        approval_outputs: list[StructuredOutput] = []
+
+        for call in tool_calls:
+            if not self.tool_policy.requires_approval(
+                call.name,
+                yolo_enabled=session.yolo_enabled,
+            ):
+                executable_calls.append(call)
+                continue
+
+            approval_id = str(uuid.uuid4())
+            risk_tier = self.tool_policy.risk_tier_for_tool(call.name)
+            safe_args = self._safe_tool_arguments(call.name, call.arguments)
+            approval_payload = {
+                "approval_id": approval_id,
+                "tool_name": call.name,
+                "risk_tier": risk_tier.value,
+                "arguments": safe_args,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "environment": event.platform,
+                "persona_id": session.persona_id,
+            }
+            session.pending_tool_approvals[approval_id] = dict(approval_payload)
+            self.trace_emitter.emit_approval_request(
+                session_id=session.session_id,
+                span_id=str(uuid.uuid4()),
+                request_type="tool_call",
+                request_id=approval_id,
+                data=approval_payload,
+                parent_span_id=parent_span_id,
+            )
+            gated_traces.append(
+                {
+                    "trace_type": "approval_request",
+                    "request_id": approval_id,
+                    "request_type": "tool_call",
+                    "tool_name": call.name,
+                    "risk_tier": risk_tier.value,
+                    "arguments": safe_args,
+                    "status": "pending",
+                }
+            )
+            await self._record_tool_action(
+                session=session,
+                room_id=event.room_id,
+                action_type="tool_approval",
+                tool_name=call.name,
+                inputs=safe_args,
+                output="Pending operator approval",
+                outcome="pending",
+                approval_state="pending",
+            )
+            gated_results.append(
+                ToolResult(
+                    name=call.name,
+                    error="Tool requires approval before execution",
+                    metadata={
+                        "approval_id": approval_id,
+                        "approval_state": "pending",
+                        "risk_tier": risk_tier.value,
+                    },
+                )
+            )
+            approval_outputs.append(
+                StructuredOutput(kind="approval_request", data=approval_payload)
+            )
+
+        return executable_calls, gated_results, gated_traces, approval_outputs
+
+    async def _record_tool_results(
+        self,
+        *,
+        event: Event,
+        session: RuntimeSessionState,
+        results: list[ToolResult],
+    ) -> None:
+        for result in results:
+            approval_state = str(result.metadata.get("approval_state") or "") or None
+            output_summary = str(result.error) if result.error else str(result.output)[:2000]
+            await self._record_tool_action(
+                session=session,
+                room_id=event.room_id,
+                action_type="tool_call",
+                tool_name=result.name,
+                inputs={},
+                output=output_summary,
+                outcome="error" if result.error else "success",
+                approval_state=approval_state,
+            )
+
     async def close(self) -> None:
         """Release runtime-owned transient state for adapter shutdown."""
         self.session_states.clear()
@@ -796,6 +947,7 @@ class GestaltRuntime:
         ]
         executed_results: list[ToolResult] = []
         tool_traces: list[TraceOutput] = []
+        approval_outputs: list[StructuredOutput] = []
 
         if tool_calls:
             # Emit tool call traces
@@ -808,11 +960,29 @@ class GestaltRuntime:
                     arguments=tc.arguments,
                     parent_span_id=root_span_id,
                 )
-            executed_results, trace_dicts = await self.tool_runner.execute_with_trace(
-                persona_id=persona.persona_id,
-                environment=event.platform,
-                tool_calls=tool_calls,
+            executable_calls, gated_results, gated_trace_dicts, approval_outputs = (
+                await self._partition_tool_calls_for_approval(
+                    event=event,
+                    session=session,
+                    tool_calls=tool_calls,
+                    parent_span_id=root_span_id,
+                )
             )
+            executed_results.extend(gated_results)
+            trace_dicts = list(gated_trace_dicts)
+            if executable_calls:
+                runner_results, runner_trace_dicts = await self.tool_runner.execute_with_trace(
+                    persona_id=persona.persona_id,
+                    environment=event.platform,
+                    tool_calls=executable_calls,
+                )
+                executed_results.extend(runner_results)
+                trace_dicts.extend(runner_trace_dicts)
+                await self._record_tool_results(
+                    event=event,
+                    session=session,
+                    results=runner_results,
+                )
             tool_traces = [
                 self._build_span_trace(
                     trace_type=str(item.get("trace_type") or "tool"),
@@ -950,6 +1120,7 @@ class GestaltRuntime:
                     }
                     for r in executed_results
                 ],
+                "pending_approvals": [dict(output.data) for output in approval_outputs],
             },
         )
         traces = (
@@ -1090,13 +1261,32 @@ class GestaltRuntime:
         tool_calls = [ToolCall(name=t.name, arguments=t.arguments) for t in provider_response.tool_calls]
         executed_results: list[ToolResult] = []
         tool_traces: list[TraceOutput] = []
+        approval_outputs: list[StructuredOutput] = []
         text = provider_response.content or content
         if tool_calls:
-            executed_results, trace_dicts = await self.tool_runner.execute_with_trace(
-                persona_id=persona.persona_id,
-                environment=event.platform,
-                tool_calls=tool_calls,
+            executable_calls, gated_results, gated_trace_dicts, approval_outputs = (
+                await self._partition_tool_calls_for_approval(
+                    event=event,
+                    session=session,
+                    tool_calls=tool_calls,
+                    parent_span_id=root_span_id,
+                )
             )
+            executed_results.extend(gated_results)
+            trace_dicts = list(gated_trace_dicts)
+            if executable_calls:
+                runner_results, runner_trace_dicts = await self.tool_runner.execute_with_trace(
+                    persona_id=persona.persona_id,
+                    environment=event.platform,
+                    tool_calls=executable_calls,
+                )
+                executed_results.extend(runner_results)
+                trace_dicts.extend(runner_trace_dicts)
+                await self._record_tool_results(
+                    event=event,
+                    session=session,
+                    results=runner_results,
+                )
             tool_traces = [
                 self._build_span_trace(
                     trace_type=str(item.get("trace_type") or "tool"),
@@ -1230,6 +1420,7 @@ class GestaltRuntime:
                     }
                     for r in executed_results
                 ],
+                "pending_approvals": [dict(output.data) for output in approval_outputs],
             },
         )
         traces = [provider_trace] + tool_traces + state_mutation_trace + [cache_trace]
@@ -2368,12 +2559,28 @@ class GestaltRuntime:
             "context_cache": self._context_cache_metrics_for_session(
                 session_id=session.session_id
             ),
+            "pending_approvals": {
+                "count": len(session.pending_tool_approvals),
+                "items": list(session.pending_tool_approvals.values())[:10],
+            },
+            "recent_actions": [
+                {
+                    "action_id": record.action_id,
+                    "action_type": record.action_type,
+                    "tool_name": record.tool_name,
+                    "outcome": record.outcome,
+                    "approval_state": record.approval_state,
+                    "timestamp": record.timestamp.isoformat(),
+                }
+                for record in session.recent_action_records[-10:]
+            ],
         }
 
         text = (
             f"persona={status_payload['persona']} mode={status_payload['mode']} "
             f"provider={provider_name}/{model} budget_remaining={status_payload['budget_remaining']} "
             f"cached_input_tokens={status_payload['context_cache']['provider_cached_input_tokens']} "
+            f"approvals_pending={status_payload['pending_approvals']['count']} "
             f"yolo={'on' if session.yolo_enabled else 'off'} "
             f"repo={'git' if project_context['is_git_repo'] else 'none'}"
         )
@@ -3024,19 +3231,37 @@ class GestaltRuntime:
                     hint="Usage: /shell --command 'ls -la'",
                 )
             ]
-        results, trace_dicts = await self.tool_runner.execute_with_trace(
-            persona_id=session.persona_id,
-            environment=event.platform,
-            tool_calls=[
-                ToolCall(
-                    name="shell_exec",
-                    arguments={
-                        "command": command,
-                        "allow_dangerous": bool(self.tool_policy.dangerous_enabled),
-                    },
-                )
-            ],
+        requested_calls = [
+            ToolCall(
+                name="shell_exec",
+                arguments={
+                    "command": command,
+                    "allow_dangerous": bool(self.tool_policy.dangerous_enabled),
+                },
+            )
+        ]
+        executable_calls, gated_results, gated_trace_dicts, approval_outputs = (
+            await self._partition_tool_calls_for_approval(
+                event=event,
+                session=session,
+                tool_calls=requested_calls,
+            )
         )
+        results = list(gated_results)
+        trace_dicts = list(gated_trace_dicts)
+        if executable_calls:
+            runner_results, runner_trace_dicts = await self.tool_runner.execute_with_trace(
+                persona_id=session.persona_id,
+                environment=event.platform,
+                tool_calls=executable_calls,
+            )
+            results.extend(runner_results)
+            trace_dicts.extend(runner_trace_dicts)
+            await self._record_tool_results(
+                event=event,
+                session=session,
+                results=runner_results,
+            )
         result = (
             results[0]
             if results
@@ -3058,6 +3283,7 @@ class GestaltRuntime:
                     message=result.error,
                     hint="Check tool policy and command safety.",
                 ),
+                *approval_outputs,
                 *trace_outputs,
             ]
 
