@@ -459,6 +459,15 @@ class GestaltRuntime:
     def _safe_tool_arguments(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return ToolRunner._safe_trace_args(name=tool_name, arguments=arguments)
 
+    def _approval_public_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        public = dict(payload)
+        if "arguments" in public:
+            public["arguments"] = self._safe_tool_arguments(
+                str(public.get("tool_name") or ""),
+                dict(public.get("arguments") or {}),
+            )
+        return public
+
     async def _record_tool_action(
         self,
         *,
@@ -531,7 +540,7 @@ class GestaltRuntime:
                 "approval_id": approval_id,
                 "tool_name": call.name,
                 "risk_tier": risk_tier.value,
-                "arguments": safe_args,
+                "arguments": dict(call.arguments),
                 "requested_at": datetime.now(timezone.utc).isoformat(),
                 "environment": event.platform,
                 "persona_id": session.persona_id,
@@ -578,7 +587,10 @@ class GestaltRuntime:
                 )
             )
             approval_outputs.append(
-                StructuredOutput(kind="approval_request", data=approval_payload)
+                StructuredOutput(
+                    kind="approval_request",
+                    data=self._approval_public_payload(approval_payload),
+                )
             )
 
         return executable_calls, gated_results, gated_traces, approval_outputs
@@ -1476,6 +1488,9 @@ class GestaltRuntime:
             limit = int(validated.args.get("limit") or 10)
             return self._command_trace(session=session, limit=limit), []
 
+        if validated.name == "approvals":
+            return self._command_approvals(session=session), []
+
         if validated.name == "recap":
             return await self._command_recap(event=event, session=session), []
 
@@ -1532,7 +1547,8 @@ class GestaltRuntime:
 
         if validated.name == "apply":
             confirmation_id = str(validated.args.get("id") or "")
-            outputs, mutations = self._command_apply_diff(
+            outputs, mutations = await self._command_apply_confirmation(
+                event=event,
                 session=session,
                 confirmation_id=confirmation_id,
             )
@@ -1540,7 +1556,8 @@ class GestaltRuntime:
 
         if validated.name == "reject":
             confirmation_id = str(validated.args.get("id") or "")
-            outputs, mutations = self._command_reject_diff(
+            outputs, mutations = await self._command_reject_confirmation(
+                event=event,
                 session=session,
                 confirmation_id=confirmation_id,
             )
@@ -1609,6 +1626,14 @@ class GestaltRuntime:
                     "properties": {"limit": {"type": "integer", "minimum": 1}},
                 },
                 examples=["/trace", "/trace --limit 20"],
+            ),
+        )
+        registry.register(
+            spec=self._command_spec(
+                name="approvals",
+                description="List pending runtime approvals for this session.",
+                arguments_schema={"type": "object", "properties": {}},
+                examples=["/approvals"],
             ),
         )
         registry.register(
@@ -2561,7 +2586,10 @@ class GestaltRuntime:
             ),
             "pending_approvals": {
                 "count": len(session.pending_tool_approvals),
-                "items": list(session.pending_tool_approvals.values())[:10],
+                "items": [
+                    self._approval_public_payload(item)
+                    for item in list(session.pending_tool_approvals.values())[:10]
+                ],
             },
             "recent_actions": [
                 {
@@ -2587,6 +2615,38 @@ class GestaltRuntime:
         return [
             TextOutput(text=text, persona_id="system"),
             StructuredOutput(kind="command_status", data=status_payload),
+        ]
+
+    def _command_approvals(
+        self,
+        *,
+        session: RuntimeSessionState,
+    ) -> list[TextOutput | StructuredOutput | TraceOutput | ErrorOutput]:
+        items = [
+            self._approval_public_payload(item)
+            for item in session.pending_tool_approvals.values()
+        ]
+        if not items:
+            return [
+                TextOutput(text="no pending approvals", persona_id="system"),
+                StructuredOutput(
+                    kind="command_approvals",
+                    data={"count": 0, "items": []},
+                ),
+            ]
+
+        summary = ", ".join(
+            f"{item['approval_id']}:{item['tool_name']}" for item in items[:5]
+        )
+        return [
+            TextOutput(
+                text=f"pending approvals={len(items)} [{summary}]",
+                persona_id="system",
+            ),
+            StructuredOutput(
+                kind="command_approvals",
+                data={"count": len(items), "items": items},
+            ),
         ]
 
     def _command_context(
@@ -3496,6 +3556,86 @@ class GestaltRuntime:
         ]
         return outputs, mutations
 
+    async def _command_apply_confirmation(
+        self,
+        *,
+        event: Event,
+        session: RuntimeSessionState,
+        confirmation_id: str,
+    ) -> tuple[
+        list[TextOutput | StructuredOutput | TraceOutput | ErrorOutput],
+        list[StateMutation],
+    ]:
+        key = confirmation_id.strip()
+        pending_tool = session.pending_tool_approvals.get(key)
+        if pending_tool is None:
+            return self._command_apply_diff(
+                session=session,
+                confirmation_id=confirmation_id,
+            )
+
+        session.pending_tool_approvals.pop(key, None)
+        tool_name = str(pending_tool.get("tool_name") or "")
+        arguments = dict(pending_tool.get("arguments") or {})
+        self.trace_emitter.emit_approval_decision(
+            session_id=session.session_id,
+            span_id=str(uuid.uuid4()),
+            request_id=key,
+            decision="approved",
+            data={"tool_name": tool_name},
+        )
+        results, trace_dicts = await self.tool_runner.execute_with_trace(
+            persona_id=session.persona_id,
+            environment=str(pending_tool.get("environment") or event.platform),
+            tool_calls=[ToolCall(name=tool_name, arguments=arguments)],
+        )
+        await self._record_tool_results(
+            event=event,
+            session=session,
+            results=results,
+        )
+        trace_outputs = [
+            self._build_span_trace(
+                trace_type=str(item.get("trace_type") or "tool"),
+                session_id=session.session_id,
+                data=item,
+            )
+            for item in trace_dicts
+        ]
+        result = (
+            results[0]
+            if results
+            else ToolResult(name=tool_name, error="No tool result available")
+        )
+        outputs: list[TextOutput | StructuredOutput | TraceOutput | ErrorOutput] = [
+            TextOutput(
+                text=f"approved {tool_name} ({key})",
+                persona_id="system",
+            ),
+            StructuredOutput(
+                kind="approval_applied",
+                data={
+                    "approval_id": key,
+                    "tool_name": tool_name,
+                    "result": {
+                        "name": result.name,
+                        "output": result.output,
+                        "error": result.error,
+                        "metadata": dict(result.metadata),
+                    },
+                },
+            ),
+            *trace_outputs,
+        ]
+        mutations = [
+            StateMutation(
+                path=f"session:{session.session_id}.pending_tool_approvals",
+                old={"queued": key},
+                new={"approved": key, "tool_name": tool_name},
+            )
+        ]
+        return outputs, mutations
+
     def _command_apply_diff(
         self,
         *,
@@ -3548,6 +3688,61 @@ class GestaltRuntime:
                 path=f"session:{session.session_id}.pending_diffs",
                 old={"queued": key},
                 new={"applied": key},
+            )
+        ]
+        return outputs, mutations
+
+    async def _command_reject_confirmation(
+        self,
+        *,
+        event: Event,
+        session: RuntimeSessionState,
+        confirmation_id: str,
+    ) -> tuple[
+        list[TextOutput | StructuredOutput | TraceOutput | ErrorOutput],
+        list[StateMutation],
+    ]:
+        key = confirmation_id.strip()
+        pending_tool = session.pending_tool_approvals.pop(key, None)
+        if pending_tool is None:
+            return self._command_reject_diff(
+                session=session,
+                confirmation_id=confirmation_id,
+            )
+
+        tool_name = str(pending_tool.get("tool_name") or "")
+        self.trace_emitter.emit_approval_decision(
+            session_id=session.session_id,
+            span_id=str(uuid.uuid4()),
+            request_id=key,
+            decision="rejected",
+            data={"tool_name": tool_name},
+        )
+        await self._record_tool_action(
+            session=session,
+            room_id=event.room_id,
+            action_type="tool_approval",
+            tool_name=tool_name,
+            inputs=self._safe_tool_arguments(
+                tool_name,
+                dict(pending_tool.get("arguments") or {}),
+            ),
+            output="Rejected by operator",
+            outcome="error",
+            approval_state="rejected",
+        )
+        outputs: list[TextOutput | StructuredOutput | TraceOutput | ErrorOutput] = [
+            TextOutput(text=f"rejected tool approval {key}", persona_id="system"),
+            StructuredOutput(
+                kind="approval_rejected",
+                data={"approval_id": key, "tool_name": tool_name},
+            ),
+        ]
+        mutations = [
+            StateMutation(
+                path=f"session:{session.session_id}.pending_tool_approvals",
+                old={"queued": key},
+                new={"rejected": key, "tool_name": tool_name},
             )
         ]
         return outputs, mutations

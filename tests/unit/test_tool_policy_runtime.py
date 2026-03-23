@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from core.runtime import GestaltRuntime, RuntimeSessionState
-from core.schemas import ErrorOutput, Event, StructuredOutput
+from core.schemas import ErrorOutput, Event, StructuredOutput, ToolResult
 from core.trace import TraceEmitter
 from memory.types import ActionRecord
 from tools.policy import ToolPolicy, ToolRiskTier
@@ -19,18 +19,34 @@ pytestmark = pytest.mark.unit
 class _FakeToolRunner:
     def __init__(self) -> None:
         self.called = False
+        self.last_kwargs = None
 
     async def execute_with_trace(self, **kwargs):
         self.called = True
-        del kwargs
-        return [], []
+        self.last_kwargs = kwargs
+        tool_calls = list(kwargs.get("tool_calls") or [])
+        if not tool_calls:
+            return [], []
+        call = tool_calls[0]
+        return [
+            ToolResult(
+                name=call.name,
+                output="approved execution",
+                metadata={"duration_ms": 1},
+            )
+        ], [{"trace_type": "tool", "name": call.name, "result_summary": "success"}]
 
 
 class _RuntimeHarness:
     _safe_tool_arguments = staticmethod(GestaltRuntime._safe_tool_arguments)
+    _approval_public_payload = GestaltRuntime._approval_public_payload
     _build_span_trace = GestaltRuntime._build_span_trace
     _record_tool_action = GestaltRuntime._record_tool_action
+    _record_tool_results = GestaltRuntime._record_tool_results
     _partition_tool_calls_for_approval = GestaltRuntime._partition_tool_calls_for_approval
+    _command_approvals = GestaltRuntime._command_approvals
+    _command_apply_confirmation = GestaltRuntime._command_apply_confirmation
+    _command_reject_confirmation = GestaltRuntime._command_reject_confirmation
     _command_shell = GestaltRuntime._command_shell
     _command_status = GestaltRuntime._command_status
 
@@ -183,3 +199,104 @@ def test_command_status_includes_pending_approvals_and_recent_actions() -> None:
     assert payload["pending_approvals"]["count"] == 1
     assert payload["pending_approvals"]["items"][0]["tool_name"] == "shell_exec"
     assert payload["recent_actions"][0]["approval_state"] == "pending"
+
+
+def test_command_approvals_lists_pending_requests() -> None:
+    runtime = _make_runtime()
+    session = _make_session()
+    session.pending_tool_approvals["approval-1"] = {
+        "approval_id": "approval-1",
+        "tool_name": "shell_exec",
+        "risk_tier": "dangerous",
+        "arguments": {"command": "rm -rf /tmp/test"},
+    }
+
+    outputs = runtime._command_approvals(session=session)
+    payload = next(
+        item.data
+        for item in outputs
+        if isinstance(item, StructuredOutput) and item.kind == "command_approvals"
+    )
+
+    assert payload["count"] == 1
+    assert payload["items"][0]["tool_name"] == "shell_exec"
+    assert payload["items"][0]["arguments"]["command"] == "<redacted>"
+
+
+@pytest.mark.asyncio
+async def test_apply_confirmation_executes_pending_tool_approval() -> None:
+    runtime = _make_runtime()
+    runtime.tool_policy = ToolPolicy(
+        dangerous_enabled=True,
+        tool_risk_tiers={"shell_exec": ToolRiskTier.DANGEROUS.value},
+    )
+    session = _make_session()
+    session.pending_tool_approvals["approval-1"] = {
+        "approval_id": "approval-1",
+        "tool_name": "shell_exec",
+        "risk_tier": "dangerous",
+        "arguments": {"command": "echo hi"},
+        "environment": "cli",
+        "persona_id": "tai",
+    }
+    event = Event(
+        type="command",
+        session_id=session.session_id,
+        kind="command",
+        text="/apply approval-1",
+        user_id="user-1",
+        room_id="room-1",
+        platform="cli",
+    )
+
+    outputs, mutations = await runtime._command_apply_confirmation(
+        event=event,
+        session=session,
+        confirmation_id="approval-1",
+    )
+
+    assert runtime.tool_runner.called is True
+    assert "approval-1" not in session.pending_tool_approvals
+    assert any(
+        isinstance(item, StructuredOutput) and item.kind == "approval_applied"
+        for item in outputs
+    )
+    assert mutations[0].new["approved"] == "approval-1"
+
+
+@pytest.mark.asyncio
+async def test_reject_confirmation_clears_pending_tool_approval_without_execution() -> None:
+    runtime = _make_runtime()
+    runtime.tool_policy = ToolPolicy()
+    session = _make_session()
+    session.pending_tool_approvals["approval-1"] = {
+        "approval_id": "approval-1",
+        "tool_name": "shell_exec",
+        "risk_tier": "dangerous",
+        "arguments": {"command": "echo hi"},
+        "environment": "cli",
+        "persona_id": "tai",
+    }
+    event = Event(
+        type="command",
+        session_id=session.session_id,
+        kind="command",
+        text="/reject approval-1",
+        user_id="user-1",
+        room_id="room-1",
+        platform="cli",
+    )
+
+    outputs, mutations = await runtime._command_reject_confirmation(
+        event=event,
+        session=session,
+        confirmation_id="approval-1",
+    )
+
+    assert runtime.tool_runner.called is False
+    assert "approval-1" not in session.pending_tool_approvals
+    assert any(
+        isinstance(item, StructuredOutput) and item.kind == "approval_rejected"
+        for item in outputs
+    )
+    assert mutations[0].new["rejected"] == "approval-1"

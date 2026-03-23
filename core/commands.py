@@ -136,6 +136,7 @@ class CommandRegistry:
         if command.name in {
             "help",
             "status",
+            "approvals",
             "context",
             "tools",
             "recap",
