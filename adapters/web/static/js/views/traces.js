@@ -75,7 +75,7 @@ class TracesView {
             `;
 
             const data = await api.getTrace(this.limit);
-            this.traces = data.trace || [];
+            this.traces = (data.trace && Array.isArray(data.trace.spans)) ? data.trace.spans : [];
             this.renderTraces();
         } catch (error) {
             this.container.innerHTML = `
@@ -115,9 +115,9 @@ class TracesView {
     }
 
     renderTraceItem(trace) {
-        const type = trace.type || 'unknown';
-        const timestamp = trace.timestamp 
-            ? new Date(trace.timestamp).toLocaleTimeString()
+        const type = trace.trace_type || 'unknown';
+        const timestamp = trace.start_ts
+            ? new Date(trace.start_ts).toLocaleTimeString()
             : '-';
         
         let badgeClass = 'badge-info';
@@ -125,7 +125,7 @@ class TracesView {
         else if (type.includes('tool')) badgeClass = 'badge-warning';
         else if (type.includes('chat')) badgeClass = 'badge-success';
 
-        const details = JSON.stringify(trace, null, 2);
+        const details = JSON.stringify(trace.data || trace, null, 2);
 
         return `
             <div style="border-bottom: 1px solid var(--border-color); padding: 16px;">
@@ -134,6 +134,7 @@ class TracesView {
                         <span class="badge ${badgeClass}">${type}</span>
                         <span style="font-size: 12px; color: var(--text-muted);">${timestamp}</span>
                     </div>
+                    <code style="font-size: 11px; color: var(--text-muted);">${this.escapeHtml(trace.span_id || '')}</code>
                 </div>
                 <div class="code-block" style="font-size: 12px; max-height: 200px; overflow: auto;">
                     ${this.escapeHtml(details)}

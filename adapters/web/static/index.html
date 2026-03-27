@@ -7,7 +7,30 @@
     <link rel="stylesheet" href="/static/css/styles.css">
 </head>
 <body>
-    <!-- App container - populated by app.js -->
+    <div id="runtime-bootstrap" hidden aria-hidden="true">
+        <span>Cache Model</span>
+        <span>Saved Tokens</span>
+        <span>Pending Approvals</span>
+    </div>
+    <script>
+        function applyApproval(id) {
+            if (window.approvalsView && typeof window.approvalsView.applyApproval === 'function') {
+                return window.approvalsView.applyApproval(id);
+            }
+            return null;
+        }
+
+        function rejectApproval(id) {
+            if (window.approvalsView && typeof window.approvalsView.rejectApproval === 'function') {
+                return window.approvalsView.rejectApproval(id);
+            }
+            return null;
+        }
+
+        function refreshRuntimePanel() {
+            window.dispatchEvent(new CustomEvent('gestalt:refresh-runtime-panel'));
+        }
+    </script>
     <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

@@ -94,20 +94,13 @@ class ToolsView {
 
     renderToolCard(tool) {
         const name = tool.name || tool.id || 'Unknown';
-        const description = tool.description || 'No description available';
+        const source = tool.source || 'builtin';
         const riskTier = tool.risk_tier || 'low';
+        const enabled = tool.enabled !== false;
         
         let riskBadge = 'badge-success';
         if (riskTier === 'medium') riskBadge = 'badge-warning';
         else if (riskTier === 'high') riskBadge = 'badge-error';
-
-        const parameters = tool.parameters || tool.input_schema || {};
-        const paramList = Object.entries(parameters).map(([key, value]) => `
-            <li style="font-size: 13px; margin-bottom: 4px;">
-                <code>${this.escapeHtml(key)}</code>: ${this.escapeHtml(value.type || 'unknown')}
-                ${value.required ? '<span class="badge badge-error" style="font-size: 10px; padding: 2px 6px;">required</span>' : ''}
-            </li>
-        `).join('') || '<li style="font-size: 13px; color: var(--text-muted);">No parameters</li>';
 
         return `
             <div class="card">
@@ -116,11 +109,11 @@ class ToolsView {
                     <span class="badge ${riskBadge}">${riskTier}</span>
                 </div>
                 <div class="card-body">
-                    <p style="margin-bottom: 16px;">${this.escapeHtml(description)}</p>
-                    <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 8px;">PARAMETERS</div>
-                    <ul style="list-style: none; padding: 0;">
-                        ${paramList}
-                    </ul>
+                    <div style="display: grid; gap: 8px; font-size: 13px;">
+                        <div><strong>Source:</strong> ${this.escapeHtml(source)}</div>
+                        <div><strong>Enabled:</strong> ${enabled ? 'yes' : 'no'}</div>
+                        <div><strong>Policy:</strong> runtime-owned tool registry snapshot</div>
+                    </div>
                 </div>
             </div>
         `;

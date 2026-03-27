@@ -85,9 +85,10 @@ class SessionsView {
                                 <th>Session ID</th>
                                 <th>Persona</th>
                                 <th>Platform</th>
+                                <th>Room</th>
                                 <th>Mode</th>
                                 <th>Provider</th>
-                                <th>Last Activity</th>
+                                <th>YOLO</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -100,18 +101,15 @@ class SessionsView {
     }
 
     renderSessionRow(session) {
-        const lastActivity = session.last_response_at 
-            ? new Date(session.last_response_at).toLocaleString()
-            : 'Never';
-        
         return `
             <tr>
                 <td><code>${this.escapeHtml(session.session_id)}</code></td>
                 <td>${this.escapeHtml(session.persona_id)}</td>
                 <td><span class="badge badge-info">${this.escapeHtml(session.platform)}</span></td>
+                <td>${this.escapeHtml(session.room_id || '-')}</td>
                 <td>${session.mode ? this.escapeHtml(session.mode) : '-'}</td>
                 <td>${this.escapeHtml(session.provider || 'default')}</td>
-                <td>${lastActivity}</td>
+                <td>${session.yolo ? 'on' : 'off'}</td>
             </tr>
         `;
     }

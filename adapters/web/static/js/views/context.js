@@ -141,7 +141,7 @@ class ContextView {
                 <div style="font-size: 13px; color: var(--text-secondary);">
                     <div>Persona: ${this.escapeHtml(entry.persona_id || '-')}</div>
                     <div>Mode: ${this.escapeHtml(entry.mode || '-')}</div>
-                    <div>Provider: ${this.escapeHtml(entry.provider_name || '-')}</div>
+                    <div>Provider: ${this.escapeHtml(entry.provider || '-')}</div>
                     <div>Tokens: ~${entry.context_tokens_estimate || 0}</div>
                 </div>
             </div>

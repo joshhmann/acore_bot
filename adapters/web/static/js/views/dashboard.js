@@ -129,36 +129,23 @@ class DashboardView {
 
     async loadDashboard() {
         try {
-            // Load multiple endpoints in parallel
-            const [statusData, commandsData, personasData, approvalsData] = await Promise.all([
+            const [statusData, commandsData, personasData] = await Promise.all([
                 api.getStatus(),
                 api.getCommands(),
-                api.listPersonas(),
-                api.getApprovals().catch(() => ({ outputs: [] }))
+                api.listPersonas()
             ]);
 
             const snapshot = statusData.snapshot || {};
-            const providerUsage = snapshot.provider_usage || {};
+            const contextCache = snapshot.context_cache || {};
+            const pendingApprovals = snapshot.pending_approvals || {};
 
-            // Update cards
-            this.runtimeModel.textContent = snapshot.cache_model || 'stable_prefix';
-            this.runtimeCache.textContent = this.formatCacheHit(snapshot.last_cache_hit);
-            this.runtimeTokens.textContent = String(snapshot.tokens_saved_estimate || 0);
+            this.runtimeModel.textContent = contextCache.cache_model || 'stable_prefix';
+            this.runtimeCache.textContent = this.formatCacheHit(contextCache.last_cache_hit);
+            this.runtimeTokens.textContent = String(contextCache.tokens_saved_estimate || 0);
             this.runtimeProvider.textContent = `${snapshot.provider || 'default'} · ${snapshot.model || 'default'}`;
-            
             this.personaCount.textContent = String((personasData.personas || []).length);
             this.commandCount.textContent = String((commandsData.commands || []).length);
-
-            // Extract approval count
-            let approvalCount = 0;
-            for (const output of approvalsData.outputs || []) {
-                if (output.type === 'StructuredOutput' && output.data) {
-                    approvalCount = output.data.count || 0;
-                    break;
-                }
-            }
-            this.approvalCount.textContent = String(approvalCount);
-
+            this.approvalCount.textContent = String(pendingApprovals.count || 0);
         } catch (error) {
             console.error('Dashboard load error:', error);
         }
